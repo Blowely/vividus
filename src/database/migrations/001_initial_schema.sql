@@ -99,5 +99,5 @@ CREATE TABLE IF NOT EXISTS campaign_stats (
 );
 
 -- Create trigger for campaign_stats
-CREATE TRIGGER update_campaign_stats_updated_at BEFORE UPDATE ON campaign_stats
+CREATE TRIGGER IF NOT EXISTS update_campaign_stats_updated_at BEFORE UPDATE ON campaign_stats
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
