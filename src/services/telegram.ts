@@ -35,6 +35,19 @@ export class TelegramService {
   }
 
   private setupHandlers() {
+    // Auto-welcome for new users (only for non-command messages)
+    this.bot.use(async (ctx, next) => {
+      if (ctx.from && ctx.message && 'text' in ctx.message && !ctx.message.text.startsWith('/')) {
+        const user = await this.userService.getUserByTelegramId(ctx.from.id);
+        if (!user) {
+          // New user - show welcome message
+          await this.handleStart(ctx);
+          return;
+        }
+      }
+      return next();
+    });
+    
     // Start command
     this.bot.start(this.handleStart.bind(this));
     
@@ -49,19 +62,6 @@ export class TelegramService {
     
     // Analytics command (admin only)
     this.bot.command('stats', this.showAnalytics.bind(this));
-    
-    // Auto-welcome for new users (only for non-command messages)
-    this.bot.use(async (ctx, next) => {
-      if (ctx.from && ctx.message && 'text' in ctx.message && !ctx.message.text.startsWith('/')) {
-        const user = await this.userService.getUserByTelegramId(ctx.from.id);
-        if (!user) {
-          // New user - show welcome message
-          await this.handleStart(ctx);
-          return;
-        }
-      }
-      return next();
-    });
     
     // Photo handler
     this.bot.on('photo', this.handlePhoto.bind(this));
@@ -107,14 +107,22 @@ export class TelegramService {
 
 Для начала просто отправьте фото!`;
     
+      // Создаем клавиатуру
+      const keyboard = [
+        [Markup.button.callback('📋 Мои заказы', 'my_orders')],
+        [Markup.button.callback('❓ Помощь', 'help')],
+        [Markup.button.callback('🎭 Тест оплаты', 'mock_payment')],
+        [Markup.button.callback('🎬 Получить результат', 'get_result')]
+      ];
+
+      // Добавляем кнопку статистики для админов
+      if (this.isAdmin(ctx.from!.id)) {
+        keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
+      }
+
       await ctx.reply(welcomeMessage, {
         reply_markup: {
-          inline_keyboard: [
-            [Markup.button.callback('📋 Мои заказы', 'my_orders')],
-            [Markup.button.callback('❓ Помощь', 'help')],
-            [Markup.button.callback('🎭 Тест оплаты', 'mock_payment')],
-            [Markup.button.callback('🎬 Получить результат', 'get_result')]
-          ]
+          inline_keyboard: keyboard
         }
       });
   }
@@ -279,9 +287,12 @@ export class TelegramService {
       case 'help':
         await this.handleHelp(ctx);
         break;
-        case 'mock_payment':
-          await this.handleMockPayment(ctx);
-          break;
+      case 'show_stats':
+        await this.showAnalytics(ctx);
+        break;
+      case 'mock_payment':
+        await this.handleMockPayment(ctx);
+        break;
         case 'get_result':
           await this.handleGetResult(ctx);
           break;
@@ -352,11 +363,13 @@ export class TelegramService {
     });
   }
 
-  private async showAnalytics(ctx: Context) {
-    // Проверяем права администратора (можно настроить список admin IDs)
+  private isAdmin(userId: number): boolean {
     const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
-    
-    if (!adminIds.includes(ctx.from!.id)) {
+    return adminIds.includes(userId);
+  }
+
+  private async showAnalytics(ctx: Context) {
+    if (!this.isAdmin(ctx.from!.id)) {
       await ctx.reply('❌ У вас нет прав для просмотра статистики');
       return;
     }
