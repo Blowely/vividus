@@ -94,7 +94,11 @@ export class TelegramService {
       await this.analyticsService.updateCampaignStats(startParam);
     }
     
-    const user = await this.userService.getOrCreateUser(ctx.from!, startParam);
+    const user = await this.userService.getOrCreateUser(ctx.from!, startParam || undefined);
+    
+    // Логируем права админа
+    const isAdminUser = this.isAdmin(ctx.from!.id);
+    console.log(`User ${ctx.from?.id} (${ctx.from?.username || 'no username'}) is admin: ${isAdminUser}`);
     
     const welcomeMessage = `
 🎬 Добро пожаловать в Vividus Bot!
