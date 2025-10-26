@@ -4,6 +4,7 @@ export interface User {
   username?: string;
   first_name?: string;
   last_name?: string;
+  start_param?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -64,4 +65,30 @@ export enum DidJobStatus {
   PROCESSING = 'processing',
   COMPLETED = 'completed',
   FAILED = 'failed'
+}
+
+export interface Campaign {
+  id: number;
+  name: string;
+  description?: string;
+  created_at: Date;
+}
+
+export interface CampaignStats {
+  id: number;
+  campaign_id: number;
+  date: Date;
+  users_count: number;
+  total_payments_rub: number;
+  total_payments_stars: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CampaignAnalytics {
+  campaign_name: string;
+  total_users: number;
+  total_payments_rub: number;
+  total_payments_stars: number;
+  conversion_rate: number;
 }

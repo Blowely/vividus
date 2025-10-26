@@ -65,5 +65,33 @@ export class PaymentService {
 
   async handlePaymentWebhook(paymentId: string, status: PaymentStatus): Promise<void> {
     await this.updatePaymentStatus(paymentId, status);
+    
+    // Если платеж успешный, обновляем статистику кампании
+    if (status === PaymentStatus.SUCCESS) {
+      try {
+        const { AnalyticsService } = await import('./analytics');
+        const analyticsService = new AnalyticsService();
+        
+        // Получаем информацию о пользователе через платеж и заказ
+        const client = await pool.connect();
+        try {
+          const result = await client.query(`
+            SELECT u.start_param 
+            FROM payments p
+            JOIN orders o ON p.order_id = o.id
+            JOIN users u ON o.user_id = u.id
+            WHERE p.id = $1
+          `, [paymentId]);
+          
+          if (result.rows[0]?.start_param) {
+            await analyticsService.updateCampaignStats(result.rows[0].start_param);
+          }
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Error updating campaign stats:', error);
+      }
+    }
   }
 }

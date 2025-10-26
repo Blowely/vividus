@@ -6,6 +6,7 @@ import { PaymentService } from './payment';
 import { RunwayService } from './runway';
 import { FileService } from './file';
 import { MockService } from './mock';
+import { AnalyticsService } from './analytics';
 
 config();
 
@@ -17,6 +18,7 @@ export class TelegramService {
   private runwayService: RunwayService;
   private fileService: FileService;
   private mockService: MockService;
+  private analyticsService: AnalyticsService;
   private pendingPrompts: Map<number, string> = new Map(); // userId -> filePath
 
   constructor() {
@@ -27,6 +29,7 @@ export class TelegramService {
     this.runwayService = new RunwayService();
     this.fileService = new FileService();
     this.mockService = new MockService();
+    this.analyticsService = new AnalyticsService();
     
     this.setupHandlers();
   }
@@ -43,6 +46,22 @@ export class TelegramService {
     
     // Orders command
     this.bot.command('orders', this.showUserOrders.bind(this));
+    
+    // Analytics command (admin only)
+    this.bot.command('stats', this.showAnalytics.bind(this));
+    
+    // Auto-welcome for new users
+    this.bot.use(async (ctx, next) => {
+      if (ctx.from && !ctx.message?.text?.startsWith('/')) {
+        const user = await this.userService.getUserByTelegramId(ctx.from.id);
+        if (!user) {
+          // New user - show welcome message
+          await this.handleStart(ctx);
+          return;
+        }
+      }
+      return next();
+    });
     
     // Photo handler
     this.bot.on('photo', this.handlePhoto.bind(this));
@@ -64,7 +83,18 @@ export class TelegramService {
   }
 
   private async handleStart(ctx: Context) {
-    const user = await this.userService.getOrCreateUser(ctx.from!);
+    // Получаем параметр из команды /start
+    const startParam = ctx.message && 'text' in ctx.message ? 
+      ctx.message.text.split(' ')[1] : null;
+    
+    // Логируем источник перехода
+    if (startParam) {
+      console.log(`User ${ctx.from?.id} started bot with parameter: ${startParam}`);
+      // Обновляем статистику кампании
+      await this.analyticsService.updateCampaignStats(startParam);
+    }
+    
+    const user = await this.userService.getOrCreateUser(ctx.from!, startParam);
     
     const welcomeMessage = `
 🎬 Добро пожаловать в Vividus Bot!
@@ -320,6 +350,40 @@ export class TelegramService {
         inline_keyboard: keyboard
       } : undefined
     });
+  }
+
+  private async showAnalytics(ctx: Context) {
+    // Проверяем права администратора (можно настроить список admin IDs)
+    const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
+    
+    if (!adminIds.includes(ctx.from!.id)) {
+      await ctx.reply('❌ У вас нет прав для просмотра статистики');
+      return;
+    }
+
+    try {
+      const analytics = await this.analyticsService.getCampaignAnalytics();
+      
+      if (analytics.length === 0) {
+        await ctx.reply('📊 Статистика пока пуста');
+        return;
+      }
+
+      let message = '📊 Статистика по кампаниям:\n\n';
+      
+      for (const stat of analytics) {
+        message += `🏷️ **${stat.campaign_name}**\n`;
+        message += `👥 Пользователи: ${stat.total_users}\n`;
+        message += `💰 Сумма оплат: ${stat.total_payments_rub} руб\n`;
+        message += `⭐ Сумма в stars: ${stat.total_payments_stars}\n`;
+        message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
+      }
+
+      await ctx.reply(message, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Error showing analytics:', error);
+      await ctx.reply('❌ Ошибка при получении статистики');
+    }
   }
 
   private async handlePayOrder(ctx: Context, orderId?: string) {

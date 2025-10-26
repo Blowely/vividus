@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(255),
     first_name VARCHAR(255),
     last_name VARCHAR(255),
+    start_param VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -75,4 +76,28 @@ CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_did_jobs_updated_at BEFORE UPDATE ON did_jobs
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create analytics tables for tracking campaign performance
+CREATE TABLE IF NOT EXISTS campaigns (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaign_stats (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    users_count INTEGER DEFAULT 0,
+    total_payments_rub DECIMAL(12,2) DEFAULT 0.00,
+    total_payments_stars INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(campaign_id, date)
+);
+
+-- Create trigger for campaign_stats
+CREATE TRIGGER update_campaign_stats_updated_at BEFORE UPDATE ON campaign_stats
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
