@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS orders (
     did_job_id VARCHAR(255),
     payment_id UUID,
     price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    custom_prompt TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
