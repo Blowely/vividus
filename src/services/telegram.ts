@@ -50,9 +50,9 @@ export class TelegramService {
     // Analytics command (admin only)
     this.bot.command('stats', this.showAnalytics.bind(this));
     
-    // Auto-welcome for new users
+    // Auto-welcome for new users (only for non-command messages)
     this.bot.use(async (ctx, next) => {
-      if (ctx.from && !ctx.message?.text?.startsWith('/')) {
+      if (ctx.from && ctx.message && 'text' in ctx.message && !ctx.message.text.startsWith('/')) {
         const user = await this.userService.getUserByTelegramId(ctx.from.id);
         if (!user) {
           // New user - show welcome message
