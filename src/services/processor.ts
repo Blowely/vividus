@@ -4,6 +4,7 @@ import { FileService } from './file';
 import { UserService } from './user';
 import { Telegraf } from 'telegraf';
 import { config } from 'dotenv';
+import pool from '../config/database';
 
 config();
 
@@ -133,6 +134,31 @@ export class ProcessorService {
 
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+
+      // Update campaign statistics
+      try {
+        const { AnalyticsService } = await import('./analytics');
+        const analyticsService = new AnalyticsService();
+        
+        // Get user's start_param to update campaign stats
+        const client = await pool.connect();
+        try {
+          const result = await client.query(`
+            SELECT u.start_param 
+            FROM orders o
+            JOIN users u ON o.user_id = u.id
+            WHERE o.id = $1 AND u.start_param IS NOT NULL
+          `, [orderId]);
+          
+          if (result.rows[0]?.start_param) {
+            await analyticsService.updateCampaignStats(result.rows[0].start_param);
+          }
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Error updating campaign stats:', error);
+      }
 
       // Notify user
       await this.notifyUser(telegramId, '✅ Ваше видео готово! Отправляю...');
