@@ -393,6 +393,7 @@ export class TelegramService {
         message += `👥 Пользователи: ${stat.total_users}\n`;
         message += `💰 Сумма оплат: ${stat.total_payments_rub} руб\n`;
         message += `⭐ Сумма в stars: ${stat.total_payments_stars}\n`;
+        message += `🎬 Успешных генераций: ${stat.completed_orders}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
       }
 

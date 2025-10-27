@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS campaign_stats (
     users_count INTEGER DEFAULT 0,
     total_payments_rub DECIMAL(12,2) DEFAULT 0.00,
     total_payments_stars INTEGER DEFAULT 0,
+    completed_orders INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(campaign_id, date)

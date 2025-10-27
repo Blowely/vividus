@@ -51,26 +51,28 @@ export class AnalyticsService {
         SELECT 
           COUNT(DISTINCT u.id) as users_count,
           COALESCE(SUM(p.amount), 0) as total_payments_rub,
-          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount * 7 ELSE 0 END), 0) as total_payments_stars
+          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount * 7 ELSE 0 END), 0) as total_payments_stars,
+          COUNT(CASE WHEN o.status = 'completed' THEN 1 END) as completed_orders
         FROM users u
         LEFT JOIN orders o ON u.id = o.user_id
         LEFT JOIN payments p ON o.id = p.order_id
         WHERE u.start_param = $1
       `, [campaignName]);
 
-      const { users_count, total_payments_rub, total_payments_stars } = stats.rows[0];
+      const { users_count, total_payments_rub, total_payments_stars, completed_orders } = stats.rows[0];
 
       // Обновляем или создаем статистику за сегодня
       await client.query(`
-        INSERT INTO campaign_stats (campaign_id, date, users_count, total_payments_rub, total_payments_stars)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO campaign_stats (campaign_id, date, users_count, total_payments_rub, total_payments_stars, completed_orders)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (campaign_id, date) 
         DO UPDATE SET 
           users_count = EXCLUDED.users_count,
           total_payments_rub = EXCLUDED.total_payments_rub,
           total_payments_stars = EXCLUDED.total_payments_stars,
+          completed_orders = EXCLUDED.completed_orders,
           updated_at = CURRENT_TIMESTAMP
-      `, [campaign.id, today, users_count, total_payments_rub, total_payments_stars]);
+      `, [campaign.id, today, users_count, total_payments_rub, total_payments_stars, completed_orders]);
 
     } finally {
       client.release();
@@ -87,9 +89,10 @@ export class AnalyticsService {
           SUM(cs.users_count) as total_users,
           SUM(cs.total_payments_rub) as total_payments_rub,
           SUM(cs.total_payments_stars) as total_payments_stars,
+          SUM(cs.completed_orders) as completed_orders,
           CASE 
             WHEN SUM(cs.users_count) > 0 
-            THEN ROUND((SUM(cs.total_payments_rub) / SUM(cs.users_count)) * 100, 2)
+            THEN ROUND((SUM(cs.completed_orders) / SUM(cs.users_count)) * 100, 2)
             ELSE 0 
           END as conversion_rate
         FROM campaigns c
@@ -112,6 +115,7 @@ export class AnalyticsService {
         total_users: parseInt(row.total_users) || 0,
         total_payments_rub: parseFloat(row.total_payments_rub) || 0,
         total_payments_stars: parseInt(row.total_payments_stars) || 0,
+        completed_orders: parseInt(row.completed_orders) || 0,
         conversion_rate: parseFloat(row.conversion_rate) || 0
       }));
     } finally {

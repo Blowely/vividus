@@ -81,6 +81,7 @@ export interface CampaignStats {
   users_count: number;
   total_payments_rub: number;
   total_payments_stars: number;
+  completed_orders: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -90,5 +91,6 @@ export interface CampaignAnalytics {
   total_users: number;
   total_payments_rub: number;
   total_payments_stars: number;
+  completed_orders: number;
   conversion_rate: number;
 }
