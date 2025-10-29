@@ -7,8 +7,9 @@ services:
       POSTGRES_DB: vividus
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
+    # Порт доступен только на localhost (для SSH туннеля через DBeaver)
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./src/database/migrations:/docker-entrypoint-initdb.d
