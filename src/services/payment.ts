@@ -22,11 +22,10 @@ export class PaymentService {
   async createTestPayment(amount: number = 109): Promise<any> {
     const client = await pool.connect();
     try {
-      // Создаем тестовый платеж с фиктивным order_id
-      const testOrderId = `test_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      // Создаем тестовый платеж без order_id (NULL) для тестирования интеграции
       const result = await client.query(
         'INSERT INTO payments (order_id, amount, status, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-        [testOrderId, amount, PaymentStatus.PENDING]
+        [null, amount, PaymentStatus.PENDING]
       );
       return result.rows[0];
     } finally {
