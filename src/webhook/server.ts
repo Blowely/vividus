@@ -19,9 +19,12 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Webhook server running on port ${PORT}`);
-});
+// Функция для запуска сервера
+export function startWebhookServer(): void {
+  const port = typeof PORT === 'string' ? parseInt(PORT, 10) : PORT;
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Webhook server running on port ${port}`);
+  });
+}
 
 export default app;

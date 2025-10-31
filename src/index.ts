@@ -4,7 +4,7 @@ import { ProcessorService } from './services/processor';
 import { PaymentService } from './services/payment';
 import pool from './config/database';
 import redisClient from './config/redis';
-import webhookServer from './webhook/server';
+import { startWebhookServer } from './webhook/server';
 
 config();
 
@@ -32,8 +32,9 @@ class App {
       // Start Telegram bot
       await this.telegramService.start();
 
-      // Start webhook server (already listening from server.ts)
-      console.log('Webhook server is ready');
+      // Start webhook server
+      startWebhookServer();
+      console.log('Webhook server started on port', process.env.PORT || 3000);
 
       // Start background processors
       this.startBackgroundProcessors();
