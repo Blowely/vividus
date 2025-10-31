@@ -23,34 +23,28 @@ export class PaymentService {
     try {
       console.log('Generating payment URL for:', paymentId, amount);
       
-      // Проверяем, есть ли доступ к YooMoney Checkout API
-      const accessToken = process.env.YOOMONEY_ACCESS_TOKEN;
-      const shopId = process.env.YOOMONEY_SHOP_ID || process.env.YOOMONEY_RECEIVER_ID;
+      // Проверяем наличие настроек для ЮKassa API
+      const shopId = process.env.YOOMONEY_SHOP_ID;
+      const secretKey = process.env.YOOMONEY_SECRET_KEY;
       
-      if (accessToken && shopId) {
-        // Используем YooMoney Checkout API
-        return await this.createCheckoutPayment(paymentId, amount, accessToken, shopId);
+      if (shopId && secretKey) {
+        // Используем ЮKassa API с Basic Auth
+        return await this.createCheckoutPayment(paymentId, amount, shopId, secretKey);
       } else {
-        // Используем старый способ - простая ссылка на перевод
-        const receiverId = process.env.YOOMONEY_RECEIVER_ID!;
-        
-        if (receiverId && receiverId.startsWith('4100')) {
-          const url = `https://yoomoney.ru/to/${receiverId}?sum=${amount}&label=${paymentId}`;
-          console.log('Generated transfer URL:', url);
-          return url;
-        } else {
-          throw new Error('Не настроен YOOMONEY_RECEIVER_ID или YOOMONEY_ACCESS_TOKEN');
-        }
+        throw new Error('Не настроены YOOMONEY_SHOP_ID и YOOMONEY_SECRET_KEY. Для работы с ЮKassa необходимо указать оба параметра.');
       }
     } catch (error) {
       console.error('Error generating payment URL:', error);
-      throw new Error('Failed to generate payment URL');
+      throw error;
     }
   }
 
-  private async createCheckoutPayment(paymentId: string, amount: number, accessToken: string, shopId: string): Promise<string> {
+  private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string): Promise<string> {
     try {
-      // Создаем платеж через YooMoney Checkout API
+      // Создаем платеж через ЮKassa API с Basic Auth
+      // Формируем Basic Auth: base64(shopId:secretKey)
+      const authString = Buffer.from(`${shopId}:${secretKey}`).toString('base64');
+      
       const response = await axios.post(
         'https://api.yookassa.ru/v3/payments',
         {
@@ -64,56 +58,47 @@ export class PaymentService {
           },
           description: `Оплата заказа ${paymentId}`,
           metadata: {
-            payment_id: paymentId
+            payment_id: paymentId,
+            order_id: paymentId
           },
-          capture: true,
-          merchant_customer_id: shopId
+          capture: true
         },
         {
           headers: {
-            'Authorization': `Bearer ${accessToken}`,
+            'Authorization': `Basic ${authString}`,
             'Content-Type': 'application/json',
             'Idempotence-Key': paymentId
           }
         }
       );
 
-      const yoomoneyOrderId = response.data.id;
+      const yookassaPaymentId = response.data.id;
+      const confirmationUrl = response.data.confirmation?.confirmation_url;
       
-      // Сохраняем orderId от YooMoney в базу данных
+      if (!confirmationUrl) {
+        throw new Error('ЮKassa не вернул confirmation_url в ответе');
+      }
+      
+      // Сохраняем payment_id от ЮKassa в базу данных
       const client = await pool.connect();
       try {
         await client.query(
           'UPDATE payments SET yoomoney_payment_id = $1 WHERE id = $2',
-          [yoomoneyOrderId, paymentId]
+          [yookassaPaymentId, paymentId]
         );
       } finally {
         client.release();
       }
 
-      // Формируем ссылку на оплату
-      // YooMoney API возвращает confirmation_url в формате для Checkout
-      let paymentUrl = response.data.confirmation?.confirmation_url;
-      
-      // Если нет confirmation_url, формируем ссылку вручную
-      if (!paymentUrl) {
-        paymentUrl = `https://yoomoney.ru/checkout/payments/v2/contract?orderId=${yoomoneyOrderId}`;
-      }
-      
-      console.log('Generated Checkout API URL:', paymentUrl);
-      return paymentUrl;
+      console.log('Generated ЮKassa payment URL:', confirmationUrl);
+      return confirmationUrl;
       
     } catch (error: any) {
-      console.error('Error creating Checkout payment:', error.response?.data || error.message);
-      
-      // Если Checkout API недоступен, используем резервный способ
-      const receiverId = process.env.YOOMONEY_RECEIVER_ID;
-      if (receiverId && receiverId.startsWith('4100')) {
-        console.log('Fallback to transfer URL');
-        return `https://yoomoney.ru/to/${receiverId}?sum=${amount}&label=${paymentId}`;
+      console.error('Error creating ЮKassa payment:', error.response?.data || error.message);
+      if (error.response?.data) {
+        console.error('ЮKassa API error details:', JSON.stringify(error.response.data, null, 2));
       }
-      
-      throw new Error('Failed to create Checkout payment');
+      throw new Error(`Ошибка создания платежа в ЮKassa: ${error.response?.data?.description || error.message}`);
     }
   }
 
