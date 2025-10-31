@@ -127,34 +127,80 @@ export class PaymentService {
     }
   }
 
-  async handlePaymentWebhook(paymentId: string, status: PaymentStatus): Promise<void> {
-    await this.updatePaymentStatus(paymentId, status);
+  async getPaymentByYooMoneyId(yoomoneyPaymentId: string): Promise<any | null> {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(
+        'SELECT * FROM payments WHERE yoomoney_payment_id = $1',
+        [yoomoneyPaymentId]
+      );
+      return result.rows[0] || null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getPaymentByMetadata(metadataPaymentId: string): Promise<any | null> {
+    const client = await pool.connect();
+    try {
+      // Ищем по id платежа (который мы передаем в metadata.payment_id)
+      const result = await client.query(
+        'SELECT * FROM payments WHERE id = $1',
+        [metadataPaymentId]
+      );
+      return result.rows[0] || null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async handlePaymentWebhook(paymentId: string, status: PaymentStatus, yoomoneyId?: string): Promise<void> {
+    await this.updatePaymentStatus(paymentId, status, yoomoneyId);
     
-    // Если платеж успешный, обновляем статистику кампании
+    // Если платеж успешный, запускаем обработку заказа и обновляем статистику
     if (status === PaymentStatus.SUCCESS) {
       try {
-        const { AnalyticsService } = await import('./analytics');
-        const analyticsService = new AnalyticsService();
-        
-        // Получаем информацию о пользователе через платеж и заказ
+        // Получаем информацию о заказе
         const client = await pool.connect();
         try {
-          const result = await client.query(`
-            SELECT u.start_param 
-            FROM payments p
-            JOIN orders o ON p.order_id = o.id
-            JOIN users u ON o.user_id = u.id
-            WHERE p.id = $1
-          `, [paymentId]);
+          const paymentResult = await client.query(
+            'SELECT order_id FROM payments WHERE id = $1',
+            [paymentId]
+          );
           
-          if (result.rows[0]?.start_param) {
-            await analyticsService.updateCampaignStats(result.rows[0].start_param);
+          if (paymentResult.rows[0]) {
+            const orderId = paymentResult.rows[0].order_id;
+            
+            // Обновляем статус заказа на processing для запуска обработки
+            const { OrderService } = await import('./order');
+            const orderService = new OrderService();
+            await orderService.updateOrderStatus(orderId, 'processing' as any);
+            
+            // Запускаем обработку заказа
+            const { ProcessorService } = await import('./processor');
+            const processorService = new ProcessorService();
+            await processorService.processOrder(orderId);
+            
+            // Обновляем статистику кампании
+            const result = await client.query(`
+              SELECT u.start_param 
+              FROM payments p
+              JOIN orders o ON p.order_id = o.id
+              JOIN users u ON o.user_id = u.id
+              WHERE p.id = $1
+            `, [paymentId]);
+            
+            if (result.rows[0]?.start_param) {
+              const { AnalyticsService } = await import('./analytics');
+              const analyticsService = new AnalyticsService();
+              await analyticsService.updateCampaignStats(result.rows[0].start_param);
+            }
           }
         } finally {
           client.release();
         }
       } catch (error) {
-        console.error('Error updating campaign stats:', error);
+        console.error('Error handling payment webhook:', error);
       }
     }
   }
