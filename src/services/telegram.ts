@@ -84,17 +84,27 @@ export class TelegramService {
 
   private async handleStart(ctx: Context) {
     // Получаем параметр из команды /start
-    const startParam = ctx.message && 'text' in ctx.message ? 
-      ctx.message.text.split(' ')[1] : null;
-    
-    // Логируем источник перехода
-    if (startParam) {
-      console.log(`User ${ctx.from?.id} started bot with parameter: ${startParam}`);
-      // Обновляем статистику кампании
-      await this.analyticsService.updateCampaignStats(startParam);
+    // Поддерживаем как /start param, так и deep links через ctx.startParam
+    let startParam = null;
+    if (ctx.message && 'text' in ctx.message) {
+      const textParts = ctx.message.text.split(' ');
+      if (textParts.length > 1) {
+        startParam = textParts[1];
+      }
+    }
+    // Также проверяем deep link параметр
+    if (!startParam && (ctx as any).startParam) {
+      startParam = (ctx as any).startParam;
     }
     
+    // Сначала создаем пользователя с startParam, чтобы он был учтен в статистике
     const user = await this.userService.getOrCreateUser(ctx.from!, startParam || undefined);
+    
+    // После создания пользователя обновляем статистику кампании
+    if (startParam) {
+      console.log(`User ${ctx.from?.id} started bot with parameter: ${startParam}`);
+      await this.analyticsService.updateCampaignStats(startParam);
+    }
     
     // Логируем права админа
     const isAdminUser = this.isAdmin(ctx.from!.id);
