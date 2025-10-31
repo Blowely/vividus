@@ -648,12 +648,13 @@ export class TelegramService {
 
   private async handleTestPayment(ctx: Context) {
     try {
-      // Создаем тестовый платеж
+      // Создаем тестовый платеж с telegram_id пользователя
       const testAmount = 109;
-      const payment = await this.paymentService.createTestPayment(testAmount);
+      const telegramId = ctx.from!.id;
+      const payment = await this.paymentService.createTestPayment(testAmount, telegramId);
       
-      // Генерируем ссылку на оплату
-      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, testAmount);
+      // Генерируем ссылку на оплату с telegram_id
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, testAmount, telegramId);
       
       const testMessage = `
 🧪 Тестовая ссылка на оплату

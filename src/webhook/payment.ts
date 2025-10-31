@@ -74,7 +74,8 @@ router.post('/yookassa', async (req, res) => {
     }
 
     // Обновляем статус платежа и обрабатываем webhook
-    await paymentService.handlePaymentWebhook(payment.id, ourStatus, yookassaPaymentId);
+    // Передаем metadata для обработки тестовых платежей
+    await paymentService.handlePaymentWebhook(payment.id, ourStatus, yookassaPaymentId, metadata);
 
     // Возвращаем успешный ответ ЮKassa
     res.status(200).json({ status: 'success' });

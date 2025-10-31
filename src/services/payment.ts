@@ -25,7 +25,7 @@ export class PaymentService {
     }
   }
 
-  async createTestPayment(amount: number = 109): Promise<any> {
+  async createTestPayment(amount: number = 109, telegramId?: number): Promise<any> {
     const client = await pool.connect();
     try {
       // Создаем тестовый платеж без order_id (NULL) для тестирования интеграции
@@ -33,13 +33,20 @@ export class PaymentService {
         'INSERT INTO payments (order_id, amount, status, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
         [null, amount, PaymentStatus.PENDING]
       );
-      return result.rows[0];
+      
+      // Сохраняем telegram_id в metadata платежа (будет передан в ЮKassa)
+      if (telegramId) {
+        // Сохраняем telegram_id для последующего использования в webhook
+        // Это будет в metadata платежа
+      }
+      
+      return { ...result.rows[0], telegram_id: telegramId };
     } finally {
       client.release();
     }
   }
 
-  async generatePaymentUrl(paymentId: string, amount: number): Promise<string> {
+  async generatePaymentUrl(paymentId: string, amount: number, telegramId?: number): Promise<string> {
     try {
       console.log('Generating payment URL for:', paymentId, amount);
       
@@ -49,7 +56,7 @@ export class PaymentService {
       
       if (shopId && secretKey) {
         // Используем ЮKassa API с Basic Auth
-        return await this.createCheckoutPayment(paymentId, amount, shopId, secretKey);
+        return await this.createCheckoutPayment(paymentId, amount, shopId, secretKey, telegramId);
       } else {
         throw new Error('Не настроены YOOMONEY_SHOP_ID и YOOMONEY_SECRET_KEY. Для работы с ЮKassa необходимо указать оба параметра.');
       }
@@ -59,7 +66,7 @@ export class PaymentService {
     }
   }
 
-  private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string): Promise<string> {
+  private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string, telegramId?: number): Promise<string> {
     try {
       // Преобразуем amount в число (может быть строкой или Decimal из БД)
       const numericAmount = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
@@ -86,7 +93,8 @@ export class PaymentService {
           description: `Оплата заказа ${paymentId}`,
           metadata: {
             payment_id: paymentId,
-            order_id: paymentId
+            order_id: paymentId,
+            ...(telegramId ? { telegram_id: telegramId.toString() } : {})
           },
           capture: true
         },
@@ -190,7 +198,7 @@ export class PaymentService {
     }
   }
 
-  async handlePaymentWebhook(paymentId: string, status: PaymentStatus, yoomoneyId?: string): Promise<void> {
+  async handlePaymentWebhook(paymentId: string, status: PaymentStatus, yoomoneyId?: string, metadata?: any): Promise<void> {
     await this.updatePaymentStatus(paymentId, status, yoomoneyId);
     
     // Если платеж успешный, запускаем обработку заказа и обновляем статистику
@@ -207,11 +215,28 @@ export class PaymentService {
           if (paymentResult.rows[0]) {
             const orderId = paymentResult.rows[0].order_id;
             
-            // Для тестовых платежей (без order_id) просто логируем успех
-            if (!orderId) {
-              console.log(`✅ Test payment ${paymentId} succeeded (no order_id)`);
-              return;
+          // Для тестовых платежей (без order_id) отправляем уведомление если есть telegram_id в metadata
+          if (!orderId) {
+            console.log(`✅ Test payment ${paymentId} succeeded (no order_id)`);
+            
+            // Получаем telegram_id из metadata для отправки уведомления
+            const telegramId = metadata?.telegram_id;
+            if (telegramId) {
+              try {
+                const telegramIdNum = parseInt(telegramId, 10);
+                await this.bot.telegram.sendMessage(
+                  telegramIdNum,
+                  '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
+                );
+                console.log(`✅ Notification sent to test payment user ${telegramIdNum}`);
+              } catch (error) {
+                console.error(`Error sending test payment notification to user ${telegramId}:`, error);
+              }
+            } else {
+              console.log(`⚠️ Test payment ${paymentId} succeeded but no telegram_id in metadata (old payment?)`);
             }
+            return;
+          }
             
             // Получаем информацию о пользователе для отправки уведомления
             const userResult = await client.query(`
