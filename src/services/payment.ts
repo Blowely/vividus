@@ -2,10 +2,16 @@ import pool from '../config/database';
 import { PaymentStatus } from '../types';
 import { config } from 'dotenv';
 import axios from 'axios';
+import { Telegraf } from 'telegraf';
 
 config();
 
 export class PaymentService {
+  private bot: Telegraf;
+  
+  constructor() {
+    this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
+  }
   async createPayment(orderId: string, amount: number): Promise<any> {
     const client = await pool.connect();
     try {
@@ -192,29 +198,44 @@ export class PaymentService {
           if (paymentResult.rows[0]) {
             const orderId = paymentResult.rows[0].order_id;
             
-            // Обновляем статус заказа на processing для запуска обработки
-            const { OrderService } = await import('./order');
-            const orderService = new OrderService();
-            await orderService.updateOrderStatus(orderId, 'processing' as any);
-            
-            // Запускаем обработку заказа
-            const { ProcessorService } = await import('./processor');
-            const processorService = new ProcessorService();
-            await processorService.processOrder(orderId);
-            
-            // Обновляем статистику кампании
-            const result = await client.query(`
-              SELECT u.start_param 
+            // Получаем информацию о пользователе для отправки уведомления
+            const userResult = await client.query(`
+              SELECT u.telegram_id, u.start_param 
               FROM payments p
               JOIN orders o ON p.order_id = o.id
               JOIN users u ON o.user_id = u.id
               WHERE p.id = $1
             `, [paymentId]);
             
-            if (result.rows[0]?.start_param) {
-              const { AnalyticsService } = await import('./analytics');
-              const analyticsService = new AnalyticsService();
-              await analyticsService.updateCampaignStats(result.rows[0].start_param);
+            const user = userResult.rows[0];
+            
+            if (user) {
+              // Отправляем уведомление об успешной оплате
+              try {
+                await this.bot.telegram.sendMessage(
+                  user.telegram_id,
+                  '✅ Оплата успешно получена!\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.'
+                );
+              } catch (error) {
+                console.error(`Error sending payment success notification to user ${user.telegram_id}:`, error);
+              }
+              
+              // Обновляем статус заказа на processing для запуска обработки
+              const { OrderService } = await import('./order');
+              const orderService = new OrderService();
+              await orderService.updateOrderStatus(orderId, 'processing' as any);
+              
+              // Запускаем обработку заказа
+              const { ProcessorService } = await import('./processor');
+              const processorService = new ProcessorService();
+              await processorService.processOrder(orderId);
+              
+              // Обновляем статистику кампании
+              if (user.start_param) {
+                const { AnalyticsService } = await import('./analytics');
+                const analyticsService = new AnalyticsService();
+                await analyticsService.updateCampaignStats(user.start_param);
+              }
             }
           }
         } finally {
