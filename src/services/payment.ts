@@ -28,19 +28,25 @@ export class PaymentService {
   async createTestPayment(amount: number = 109, telegramId?: number): Promise<any> {
     const client = await pool.connect();
     try {
-      // Создаем тестовый платеж без order_id (NULL) для тестирования интеграции
-      const result = await client.query(
-        'INSERT INTO payments (order_id, amount, status, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-        [null, amount, PaymentStatus.PENDING]
-      );
-      
-      // Сохраняем telegram_id в metadata платежа (будет передан в ЮKassa)
+      // Получаем user_id по telegram_id если передан
+      let userId = null;
       if (telegramId) {
-        // Сохраняем telegram_id для последующего использования в webhook
-        // Это будет в metadata платежа
+        const userResult = await client.query(
+          'SELECT id FROM users WHERE telegram_id = $1',
+          [telegramId]
+        );
+        if (userResult.rows[0]) {
+          userId = userResult.rows[0].id;
+        }
       }
       
-      return { ...result.rows[0], telegram_id: telegramId };
+      // Создаем тестовый платеж без order_id (NULL), но с user_id для связи с пользователем
+      const result = await client.query(
+        'INSERT INTO payments (order_id, user_id, amount, status, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+        [null, userId, amount, PaymentStatus.PENDING]
+      );
+      
+      return result.rows[0];
     } finally {
       client.release();
     }
@@ -93,8 +99,7 @@ export class PaymentService {
           description: `Оплата заказа ${paymentId}`,
           metadata: {
             payment_id: paymentId,
-            order_id: paymentId,
-            ...(telegramId ? { telegram_id: telegramId.toString() } : {})
+            order_id: paymentId
           },
           capture: true
         },
@@ -215,25 +220,47 @@ export class PaymentService {
           if (paymentResult.rows[0]) {
             const orderId = paymentResult.rows[0].order_id;
             
-          // Для тестовых платежей (без order_id) отправляем уведомление если есть telegram_id в metadata
+          // Для тестовых платежей (без order_id) находим пользователя через user_id в платеже
           if (!orderId) {
             console.log(`✅ Test payment ${paymentId} succeeded (no order_id)`);
             
-            // Получаем telegram_id из metadata для отправки уведомления
-            const telegramId = metadata?.telegram_id;
-            if (telegramId) {
+            // Получаем user_id из платежа и находим telegram_id
+            const paymentWithUser = await client.query(`
+              SELECT p.user_id, u.telegram_id 
+              FROM payments p
+              LEFT JOIN users u ON p.user_id = u.id
+              WHERE p.id = $1
+            `, [paymentId]);
+            
+            const userData = paymentWithUser.rows[0];
+            
+            if (userData?.telegram_id) {
               try {
-                const telegramIdNum = parseInt(telegramId, 10);
                 await this.bot.telegram.sendMessage(
-                  telegramIdNum,
+                  userData.telegram_id,
                   '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
                 );
-                console.log(`✅ Notification sent to test payment user ${telegramIdNum}`);
+                console.log(`✅ Notification sent to test payment user ${userData.telegram_id}`);
               } catch (error) {
-                console.error(`Error sending test payment notification to user ${telegramId}:`, error);
+                console.error(`Error sending test payment notification to user ${userData.telegram_id}:`, error);
               }
             } else {
-              console.log(`⚠️ Test payment ${paymentId} succeeded but no telegram_id in metadata (old payment?)`);
+              // Fallback: пытаемся получить telegram_id из metadata (для старых платежей)
+              const telegramId = metadata?.telegram_id;
+              if (telegramId) {
+                try {
+                  const telegramIdNum = parseInt(telegramId, 10);
+                  await this.bot.telegram.sendMessage(
+                    telegramIdNum,
+                    '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
+                  );
+                  console.log(`✅ Notification sent to test payment user ${telegramIdNum} (from metadata)`);
+                } catch (error) {
+                  console.error(`Error sending test payment notification:`, error);
+                }
+              } else {
+                console.log(`⚠️ Test payment ${paymentId} succeeded but no user_id or telegram_id found`);
+              }
             }
             return;
           }
