@@ -210,13 +210,13 @@ export class TelegramService {
     const keyboard = [
       [Markup.button.callback('📋 Мои заказы', 'my_orders')],
       [Markup.button.callback('❓ Помощь', 'help')],
-      [Markup.button.callback('🎬 Получить результат', 'get_result')]
+      [Markup.button.callback('🎬 Получить результат', 'get_result')],
+      [Markup.button.callback('🧪 Тестовая оплата', 'test_payment')]
     ];
 
     // Добавляем кнопки для админов
     if (this.isAdmin(ctx.from!.id)) {
       keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
-      keyboard.push([Markup.button.callback('🧪 Тестовая оплата', 'test_payment')]);
     }
 
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
