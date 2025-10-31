@@ -55,6 +55,13 @@ export class PaymentService {
 
   private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string): Promise<string> {
     try {
+      // Преобразуем amount в число (может быть строкой или Decimal из БД)
+      const numericAmount = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+      
+      if (isNaN(numericAmount)) {
+        throw new Error(`Неверное значение суммы: ${amount}`);
+      }
+      
       // Создаем платеж через ЮKassa API с Basic Auth
       // Формируем Basic Auth: base64(shopId:secretKey)
       const authString = Buffer.from(`${shopId}:${secretKey}`).toString('base64');
@@ -63,7 +70,7 @@ export class PaymentService {
         'https://api.yookassa.ru/v3/payments',
         {
           amount: {
-            value: amount.toFixed(2),
+            value: numericAmount.toFixed(2),
             currency: 'RUB'
           },
           confirmation: {
