@@ -177,7 +177,17 @@ export class TelegramService {
     const isAdminUser = this.isAdmin(ctx.from!.id);
     console.log(`User ${ctx.from?.id} (${ctx.from?.username || 'no username'}) is admin: ${isAdminUser}`);
     
-      await this.showMainMenu(ctx);
+    await this.showMainMenu(ctx);
+    
+    // Удаляем сообщение /start пользователя
+    if (ctx.message && 'message_id' in ctx.message && ctx.chat) {
+      try {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+      } catch (error) {
+        // Игнорируем ошибки при удалении (сообщение может быть уже удалено или права недостаточны)
+        console.error('Error deleting /start message:', error);
+      }
+    }
   }
 
   private async showMainMenu(ctx: Context) {
@@ -341,11 +351,35 @@ export class TelegramService {
       // Create order with custom prompt and S3 URL
       const order = await this.orderService.createOrder(user.id, s3Url, 109, processedPrompt);
       
-      // Обновляем сообщение о создании заказа
+      // Создаем платеж сразу после создания заказа
+      const payment = await this.paymentService.createPayment(order.id, order.price);
+      
+      // Генерируем ссылку на оплату
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
+      
+      // Обновляем сообщение о создании заказа и сразу показываем оплату
       await this.deleteUserMessage(ctx);
       
-      // Send payment request
-      await this.sendPaymentRequest(ctx, order, originalPrompt);
+      // Показываем окно оплаты с прямой ссылкой
+      const paymentMessage = `
+💳 Оплата заказа
+
+📸 Фото: готово к обработке
+🎬 Промпт: ${originalPrompt ? `"${originalPrompt}"` : 'стандартная анимация'}
+💰 Стоимость: ${order.price} рублей
+
+Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
+      
+      await this.editOrSendMessage(ctx, paymentMessage, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            [Markup.button.callback('❌ Отменить', 'cancel')],
+            this.getBackButton()
+          ]
+        }
+      });
       
     } catch (error) {
       console.error('Error processing prompt:', error);
@@ -592,12 +626,18 @@ export class TelegramService {
 🆔 Заказ: ${order.id.slice(0, 8)}...
 💰 Сумма: ${order.price} рублей
 
-Для оплаты перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
+Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
 
 После оплаты бот автоматически получит уведомление и начнет обработку.`;
       
       await this.editOrSendMessage(ctx, paymentMessage, {
-        parse_mode: 'HTML'
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            this.getBackButton()
+          ]
+        }
       });
       
     } catch (error) {
@@ -700,9 +740,9 @@ export class TelegramService {
           parse_mode: 'HTML'
         });
         
-        // Сообщение о возможности отправить следующее фото
+        // Сообщение о возможности отправить следующее фото (отправляем новое сообщение, не редактируем)
         setTimeout(async () => {
-          await this.editOrSendMessage(ctx, '📸 Вы можете сразу отправить следующее фото для создания нового видео!');
+          await ctx.reply('📸 Вы можете сразу отправить следующее фото для создания нового видео!');
         }, 2000);
       } else {
         await this.editOrSendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);

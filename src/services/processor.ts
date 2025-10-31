@@ -78,6 +78,7 @@ export class ProcessorService {
   private async monitorJob(generationId: string, telegramId: number, orderId: string): Promise<void> {
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     let attempts = 0;
+    let progressMessageId: number | null = null; // Сохраняем ID сообщения для редактирования
 
     const checkStatus = async () => {
       try {
@@ -86,20 +87,68 @@ export class ProcessorService {
         const jobStatus = await this.runwayService.checkJobStatus(generationId);
         
         if (jobStatus.status === 'SUCCEEDED') {
+          // Удаляем сообщение о прогрессе, если оно есть
+          if (progressMessageId) {
+            try {
+              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
+            } catch (error) {
+              // Игнорируем ошибки удаления
+            }
+          }
           // Job completed successfully
           await this.handleJobSuccess(generationId, telegramId, orderId, jobStatus.output[0]);
         } else if (jobStatus.status === 'FAILED') {
+          // Удаляем сообщение о прогрессе, если оно есть
+          if (progressMessageId) {
+            try {
+              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
+            } catch (error) {
+              // Игнорируем ошибки удаления
+            }
+          }
           // Job failed
           await this.handleJobFailure(generationId, telegramId, orderId, jobStatus.error);
         } else if (attempts >= maxAttempts) {
+          // Удаляем сообщение о прогрессе, если оно есть
+          if (progressMessageId) {
+            try {
+              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
+            } catch (error) {
+              // Игнорируем ошибки удаления
+            }
+          }
           // Timeout
           await this.handleJobTimeout(generationId, telegramId, orderId);
         } else {
-          // Still processing, send progress update
+          // Still processing, update progress message
           if (jobStatus.progress !== undefined) {
             const progressPercent = Math.round(jobStatus.progress * 100);
             const progressBar = this.createProgressBar(progressPercent);
-            await this.notifyUser(telegramId, `🔄 Обработка видео...\n\n${progressBar} ${progressPercent}%`);
+            const progressMessage = `🔄 Обработка видео...\n\n${progressBar} ${progressPercent}%`;
+            
+            if (progressMessageId) {
+              // Редактируем существующее сообщение
+              try {
+                await this.bot.telegram.editMessageText(
+                  telegramId,
+                  progressMessageId,
+                  undefined,
+                  progressMessage
+                );
+              } catch (error) {
+                // Если не можем отредактировать (например, сообщение удалено), создаем новое
+                const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+                if (message && 'message_id' in message) {
+                  progressMessageId = (message as any).message_id;
+                }
+              }
+            } else {
+              // Создаем первое сообщение о прогрессе
+              const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+              if (message && 'message_id' in message) {
+                progressMessageId = (message as any).message_id;
+              }
+            }
           }
           
           // Check again in 5 seconds
@@ -109,6 +158,14 @@ export class ProcessorService {
         console.error(`Error monitoring job ${generationId}:`, error);
         
         if (attempts >= maxAttempts) {
+          // Удаляем сообщение о прогрессе, если оно есть
+          if (progressMessageId) {
+            try {
+              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
+            } catch (error) {
+              // Игнорируем ошибки удаления
+            }
+          }
           await this.handleJobTimeout(generationId, telegramId, orderId);
         } else {
           setTimeout(checkStatus, 5000);
