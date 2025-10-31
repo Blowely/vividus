@@ -15,9 +15,22 @@ export class PaymentService {
   async createPayment(orderId: string, amount: number): Promise<any> {
     const client = await pool.connect();
     try {
+      // Получаем user_id из заказа
+      const orderResult = await client.query(
+        'SELECT user_id FROM orders WHERE id = $1',
+        [orderId]
+      );
+      
+      if (!orderResult.rows[0]) {
+        throw new Error(`Order ${orderId} not found`);
+      }
+      
+      const userId = orderResult.rows[0].user_id;
+      
+      // Сохраняем платеж с user_id для прямой связи с пользователем
       const result = await client.query(
-        'INSERT INTO payments (order_id, amount, status, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-        [orderId, amount, PaymentStatus.PENDING]
+        'INSERT INTO payments (order_id, user_id, amount, status, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+        [orderId, userId, amount, PaymentStatus.PENDING]
       );
       return result.rows[0];
     } finally {
@@ -266,11 +279,11 @@ export class PaymentService {
           }
             
             // Получаем информацию о пользователе для отправки уведомления
+            // Используем user_id напрямую из payments (идеальная архитектура)
             const userResult = await client.query(`
               SELECT u.telegram_id, u.start_param 
               FROM payments p
-              JOIN orders o ON p.order_id = o.id
-              JOIN users u ON o.user_id = u.id
+              JOIN users u ON p.user_id = u.id
               WHERE p.id = $1
             `, [paymentId]);
             
