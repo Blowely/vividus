@@ -214,10 +214,11 @@ export class ProcessorService {
 
   private async sendVideoToUser(telegramId: number, videoUrl: string): Promise<void> {
     try {
-      // Send video URL directly instead of downloading
+      // Send video URL directly instead of downloading, wrap link in HTML
       await this.bot.telegram.sendMessage(
         telegramId,
-        `🎬 Ваше видео готово!\n\n📹 Результат: ${videoUrl}\n\nСпасибо за использование Vividus Bot!`
+        `🎬 Ваше видео готово!\n\n📹 Результат: <a href="${videoUrl}">Ссылка</a>\n\nСпасибо за использование Vividus Bot!`,
+        { parse_mode: 'HTML' }
       );
 
     } catch (error) {

@@ -19,7 +19,8 @@ export class TelegramService {
   private fileService: FileService;
   private mockService: MockService;
   private analyticsService: AnalyticsService;
-  private pendingPrompts: Map<number, string> = new Map(); // userId -> filePath
+  private pendingPrompts: Map<number, string> = new Map(); // userId -> fileId
+  private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
 
   constructor() {
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
@@ -32,6 +33,66 @@ export class TelegramService {
     this.analyticsService = new AnalyticsService();
     
     this.setupHandlers();
+  }
+
+  private async editOrSendMessage(ctx: Context, text: string, extra?: any): Promise<void> {
+    const userId = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const userMessage = this.userMessages.get(userId);
+
+    try {
+      if (userMessage && userMessage.chatId === chatId) {
+        // Редактируем существующее сообщение
+        await ctx.telegram.editMessageText(
+          chatId,
+          userMessage.messageId,
+          undefined,
+          text,
+          extra
+        );
+      } else {
+        // Отправляем новое сообщение
+        const message = await ctx.reply(text, extra);
+        if (message && 'message_id' in message) {
+          this.userMessages.set(userId, {
+            messageId: (message as any).message_id,
+            chatId: chatId
+          });
+        }
+      }
+    } catch (error: any) {
+      // Если не можем отредактировать (сообщение не найдено или слишком старое), отправляем новое
+      if (error.code === 400 || error.description?.includes('message') || error.description?.includes('not found')) {
+        const message = await ctx.reply(text, extra);
+        if (message && 'message_id' in message) {
+          this.userMessages.set(userId, {
+            messageId: (message as any).message_id,
+            chatId: chatId
+          });
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  private async deleteUserMessage(ctx: Context): Promise<void> {
+    const userId = ctx.from!.id;
+    const userMessage = this.userMessages.get(userId);
+
+    if (userMessage) {
+      try {
+        await ctx.telegram.deleteMessage(userMessage.chatId, userMessage.messageId);
+        this.userMessages.delete(userId);
+      } catch (error) {
+        // Игнорируем ошибки при удалении (сообщение может быть уже удалено)
+        console.error('Error deleting message:', error);
+      }
+    }
+  }
+
+  private formatLink(url: string, text: string = 'Ссылка'): string {
+    return `<a href="${url}">${text}</a>`;
   }
 
   private setupHandlers() {
@@ -115,11 +176,15 @@ export class TelegramService {
 
 Я помогу оживить ваши фотографии с помощью нейросети.
 
-📸 Отправьте мне фото, и я создам анимированное видео!
+📸 Как это работает:
+1️⃣ Отправьте фото прямо сейчас (можно с подписью-промптом)
+2️⃣ Опишите анимацию или нажмите "Пропустить"
+3️⃣ Оплатите 299 рублей
+4️⃣ Получите готовое видео через 2-5 минут!
 
 💰 Стоимость: 299 рублей за обработку
 
-Для начала просто отправьте фото!`;
+👉 Начните с отправки фото:`;
     
       // Создаем клавиатуру
       const keyboard = [
@@ -134,11 +199,19 @@ export class TelegramService {
         keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
       }
 
-      await ctx.reply(welcomeMessage, {
+      // Для приветствия всегда отправляем новое сообщение (не редактируем)
+      const message = await ctx.reply(welcomeMessage, {
         reply_markup: {
           inline_keyboard: keyboard
         }
       });
+      // Сохраняем message_id для последующих сообщений
+      if (message && 'message_id' in message) {
+        this.userMessages.set(ctx.from!.id, {
+          messageId: (message as any).message_id,
+          chatId: ctx.chat!.id
+        });
+      }
   }
 
   private async handleHelp(ctx: Context) {
@@ -169,14 +242,35 @@ export class TelegramService {
       // Get the highest quality photo
       const fileId = photo[photo.length - 1].file_id;
       
-      await ctx.reply('📸 Фото получено! Теперь опишите, как вы хотите анимировать изображение.\n\nНапример: "машет рукой", "улыбается", "моргает", "дышит" и т.д.\n\nИли отправьте "пропустить" для стандартной анимации.');
+      // Проверяем наличие caption (текста, прикрепленного к фото)
+      const caption = (ctx.message as any)['caption'];
       
-      // Store file ID for later processing (we'll upload to S3 when user provides prompt)
-      this.pendingPrompts.set(user.telegram_id, fileId);
+      // Удаляем предыдущее сообщение, если есть
+      await this.deleteUserMessage(ctx);
+      
+      if (caption) {
+        // Если есть caption, сразу обрабатываем его как промпт
+        this.pendingPrompts.set(user.telegram_id, fileId);
+        await this.processPrompt(ctx, user, caption);
+      } else {
+        // Если нет caption, просим ввести промпт
+        const promptMessage = '📸 Фото получено!\n\n✍️ Опишите, как вы хотите анимировать изображение.\n\nНапример: "машет рукой", "улыбается", "моргает", "дышит" и т.д.';
+        
+        await this.editOrSendMessage(ctx, promptMessage, {
+          reply_markup: {
+            inline_keyboard: [
+              [Markup.button.callback('⏭️ Пропустить промпт', 'skip_prompt')]
+            ]
+          }
+        });
+        
+        // Store file ID for later processing
+        this.pendingPrompts.set(user.telegram_id, fileId);
+      }
       
     } catch (error) {
       console.error('Error handling photo:', error);
-      await ctx.reply('Произошла ошибка при обработке фото. Попробуйте позже.');
+      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке фото. Попробуйте позже.');
     }
   }
 
@@ -187,7 +281,55 @@ export class TelegramService {
     if (mimeType && mimeType.startsWith('image/')) {
       await this.handlePhoto(ctx);
     } else {
-      await ctx.reply('Пожалуйста, отправьте изображение в формате JPG или PNG.');
+      await this.editOrSendMessage(ctx, '❌ Пожалуйста, отправьте изображение в формате JPG или PNG.');
+    }
+  }
+
+  private async processPrompt(ctx: Context, user: any, promptText: string): Promise<void> {
+    try {
+      const fileId = this.pendingPrompts.get(user.telegram_id);
+      if (!fileId) {
+        await this.editOrSendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
+        return;
+      }
+      
+      // Remove from pending prompts
+      this.pendingPrompts.delete(user.telegram_id);
+      
+      // Обновляем сообщение о загрузке
+      await this.editOrSendMessage(ctx, '📤 Загружаю фото в облако...');
+      
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      
+      // Process the prompt
+      let processedPrompt = promptText.toLowerCase();
+      const originalPrompt = promptText;
+      
+      if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
+        processedPrompt = 'animate this image with subtle movements and breathing effect';
+      } else {
+        // Translate Russian prompts to English for better AI understanding
+        const translatedPrompt = this.translatePrompt(processedPrompt);
+        processedPrompt = `animate this image with ${translatedPrompt}`;
+      }
+      
+      // Удаляем сообщение и создаем новое
+      await this.deleteUserMessage(ctx);
+      
+      await this.editOrSendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
+      
+      // Create order with custom prompt and S3 URL
+      const order = await this.orderService.createOrder(user.id, s3Url, 299, processedPrompt);
+      
+      // Обновляем сообщение о создании заказа
+      await this.deleteUserMessage(ctx);
+      
+      // Send payment request
+      await this.sendPaymentRequest(ctx, order, originalPrompt);
+      
+    } catch (error) {
+      console.error('Error processing prompt:', error);
+      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
     }
   }
 
@@ -200,42 +342,16 @@ export class TelegramService {
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
         // User doesn't have pending photo, treat as regular message
-        await ctx.reply('Отправьте фото для создания анимации!');
+        await this.editOrSendMessage(ctx, '📸 Отправьте фото для создания анимации!');
         return;
       }
       
-      // Remove from pending prompts
-      this.pendingPrompts.delete(user.telegram_id);
-      
-      // Upload photo directly to S3
-      await ctx.reply('📤 Загружаю фото в облако...');
-      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
-      
-      // Process the prompt
-      let promptText = text.toLowerCase();
-      
-      if (promptText === 'пропустить' || promptText === 'skip') {
-        promptText = 'animate this image with subtle movements and breathing effect';
-      } else {
-        // Translate Russian prompts to English for better AI understanding
-        const translatedPrompt = this.translatePrompt(promptText);
-        promptText = `animate this image with ${translatedPrompt}`;
-      }
-      
-      await ctx.reply(`🎬 Отлично! Промпт: "${text}"\n\nСоздаю заказ...`);
-      
-      // Create order with custom prompt and S3 URL
-      const order = await this.orderService.createOrder(user.id, s3Url, 299, promptText);
-      
-      // Store custom prompt in order metadata (we'll need to add this field)
-      // For now, we'll pass it through the RunwayService
-      
-      // Send payment request
-      await this.sendPaymentRequest(ctx, order, promptText);
+      // Обрабатываем промпт
+      await this.processPrompt(ctx, user, text);
       
     } catch (error) {
       console.error('Error handling text:', error);
-      await ctx.reply('Произошла ошибка при обработке промпта. Попробуйте позже.');
+      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
     }
   }
 
@@ -307,12 +423,16 @@ export class TelegramService {
       case 'mock_payment':
         await this.handleMockPayment(ctx);
         break;
-        case 'get_result':
-          await this.handleGetResult(ctx);
-          break;
-        case 'pay_order':
-          await this.handlePayOrder(ctx);
-          break;
+      case 'get_result':
+        await this.handleGetResult(ctx);
+        break;
+      case 'pay_order':
+        await this.handlePayOrder(ctx);
+        break;
+      case 'skip_prompt':
+        const user = await this.userService.getOrCreateUser(ctx.from!);
+        await this.processPrompt(ctx, user, 'пропустить');
+        break;
       default:
         if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
@@ -334,7 +454,7 @@ export class TelegramService {
 
 Для оплаты нажмите кнопку ниже:`;
     
-    await ctx.reply(paymentMessage, {
+    await this.editOrSendMessage(ctx, paymentMessage, {
       reply_markup: {
         inline_keyboard: [
           [Markup.button.callback('💳 Оплатить', `pay_${order.id}`)],
@@ -416,14 +536,14 @@ export class TelegramService {
 
   private async handlePayOrder(ctx: Context, orderId?: string) {
     if (!orderId) {
-      await ctx.reply('Ошибка: не указан ID заказа');
+      await this.editOrSendMessage(ctx, '❌ Ошибка: не указан ID заказа');
       return;
     }
     
     try {
       const order = await this.orderService.getOrder(orderId);
       if (!order) {
-        await ctx.reply('Заказ не найден');
+        await this.editOrSendMessage(ctx, '❌ Заказ не найден');
         return;
       }
       
@@ -439,16 +559,17 @@ export class TelegramService {
 🆔 Заказ: ${order.id.slice(0, 8)}...
 💰 Сумма: ${order.price} рублей
 
-Для оплаты перейдите по ссылке:
-${paymentUrl}
+Для оплаты перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
 
 После оплаты бот автоматически получит уведомление и начнет обработку.`;
       
-      await ctx.reply(paymentMessage);
+      await this.editOrSendMessage(ctx, paymentMessage, {
+        parse_mode: 'HTML'
+      });
       
     } catch (error) {
       console.error('Error creating payment:', error);
-      await ctx.reply('Ошибка при создании платежа. Попробуйте позже.');
+      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
     }
   }
 
@@ -490,7 +611,7 @@ ${paymentUrl}
       const completedOrders = orders.filter(order => order.status === 'completed');
       
       if (completedOrders.length === 0) {
-        await ctx.reply('❌ У вас пока нет готовых видео. Сначала отправьте фото для обработки!');
+        await this.editOrSendMessage(ctx, '❌ У вас пока нет готовых видео. Сначала отправьте фото для обработки!');
         return;
       }
       
@@ -498,7 +619,7 @@ ${paymentUrl}
       const latestOrder = completedOrders[0];
       
       if (!latestOrder.did_job_id) {
-        await ctx.reply('❌ Информация о видео не найдена. Попробуйте позже.');
+        await this.editOrSendMessage(ctx, '❌ Информация о видео не найдена. Попробуйте позже.');
         return;
       }
       
@@ -509,14 +630,16 @@ ${paymentUrl}
       if (status.status === 'SUCCEEDED' && status.output && status.output.length > 0) {
         const videoUrl = status.output[0];
         
-        await ctx.reply(`🎬 Ваше последнее видео готово!\n\n📹 Результат: ${videoUrl}\n\nСпасибо за использование Vividus Bot!`);
+        await this.editOrSendMessage(ctx, `🎬 Ваше последнее видео готово!\n\n📹 Результат: ${this.formatLink(videoUrl, 'Ссылка')}\n\nСпасибо за использование Vividus Bot!`, {
+          parse_mode: 'HTML'
+        });
       } else {
-        await ctx.reply(`⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
+        await this.editOrSendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
       }
       
     } catch (error) {
       console.error('Error getting result:', error);
-      await ctx.reply('❌ Ошибка при получении результата');
+      await this.editOrSendMessage(ctx, '❌ Ошибка при получении результата');
     }
   }
 
