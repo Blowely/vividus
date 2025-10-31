@@ -302,14 +302,19 @@ export class TelegramService {
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
       // Process the prompt
-      let processedPrompt = promptText.toLowerCase();
+      let processedPrompt = promptText.toLowerCase().trim();
       const originalPrompt = promptText;
       
       if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
         processedPrompt = 'animate this image with subtle movements and breathing effect';
       } else {
         // Translate Russian prompts to English for better AI understanding
-        const translatedPrompt = this.translatePrompt(processedPrompt);
+        let translatedPrompt = this.translatePrompt(processedPrompt);
+        
+        // Убираем "animate this image with" если пользователь уже его указал
+        translatedPrompt = translatedPrompt.replace(/^animate this image with\s*/i, '');
+        
+        // Всегда добавляем базовую часть "animate this image with"
         processedPrompt = `animate this image with ${translatedPrompt}`;
       }
       
