@@ -29,12 +29,15 @@ class App {
       // Connect to Redis
       await this.initRedis();
 
-      // Start Telegram bot
-      await this.telegramService.start();
-
-      // Start webhook server
+      // Start webhook server first (before Telegram bot)
+      console.log('Starting webhook server...');
       startWebhookServer();
       console.log('Webhook server started on port', process.env.PORT || 3000);
+
+      // Start Telegram bot
+      console.log('Starting Telegram bot...');
+      await this.telegramService.start();
+      console.log('Telegram bot started successfully');
 
       // Start background processors
       this.startBackgroundProcessors();
