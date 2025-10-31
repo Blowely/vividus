@@ -203,9 +203,10 @@ export class TelegramService {
       [Markup.button.callback('🎬 Получить результат', 'get_result')]
     ];
 
-    // Добавляем кнопку статистики для админов
+    // Добавляем кнопки для админов
     if (this.isAdmin(ctx.from!.id)) {
       keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
+      keyboard.push([Markup.button.callback('🧪 Тестовая оплата', 'test_payment')]);
     }
 
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
@@ -455,6 +456,9 @@ export class TelegramService {
       case 'back_to_menu':
         await this.showMainMenu(ctx);
         break;
+      case 'test_payment':
+        await this.handleTestPayment(ctx);
+        break;
       default:
         if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
@@ -599,6 +603,39 @@ export class TelegramService {
     } catch (error) {
       console.error('Error creating payment:', error);
       await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+    }
+  }
+
+  private async handleTestPayment(ctx: Context) {
+    try {
+      // Создаем тестовый платеж
+      const testAmount = 109;
+      const payment = await this.paymentService.createTestPayment(testAmount);
+      
+      // Генерируем ссылку на оплату
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, testAmount);
+      
+      const testMessage = `
+🧪 Тестовая ссылка на оплату
+
+💰 Сумма: ${testAmount} рублей
+🆔 ID платежа: ${payment.id.slice(0, 8)}...
+
+Для оплаты перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
+
+⚠️ Внимание: Это тестовый платеж для проверки интеграции с ЮKassa.
+Используйте тестовую карту для оплаты.`;
+
+      await this.editOrSendMessage(ctx, testMessage, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [this.getBackButton()]
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error creating test payment:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при создании тестового платежа. Попробуйте позже.');
     }
   }
 
