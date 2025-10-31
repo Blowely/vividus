@@ -132,10 +132,19 @@ export class PaymentService {
   async updatePaymentStatus(paymentId: string, status: PaymentStatus, yoomoneyId?: string): Promise<void> {
     const client = await pool.connect();
     try {
-      await client.query(
-        'UPDATE payments SET status = $1, yoomoney_id = $2, updated_at = NOW() WHERE id = $3',
-        [status, yoomoneyId, paymentId]
-      );
+      if (yoomoneyId) {
+        // Обновляем и статус, и yoomoney_payment_id
+        await client.query(
+          'UPDATE payments SET status = $1, yoomoney_payment_id = $2, updated_at = NOW() WHERE id = $3',
+          [status, yoomoneyId, paymentId]
+        );
+      } else {
+        // Обновляем только статус
+        await client.query(
+          'UPDATE payments SET status = $1, updated_at = NOW() WHERE id = $2',
+          [status, paymentId]
+        );
+      }
     } finally {
       client.release();
     }
@@ -197,6 +206,12 @@ export class PaymentService {
           
           if (paymentResult.rows[0]) {
             const orderId = paymentResult.rows[0].order_id;
+            
+            // Для тестовых платежей (без order_id) просто логируем успех
+            if (!orderId) {
+              console.log(`✅ Test payment ${paymentId} succeeded (no order_id)`);
+              return;
+            }
             
             // Получаем информацию о пользователе для отправки уведомления
             const userResult = await client.query(`

@@ -36,7 +36,9 @@ router.post('/yookassa', async (req, res) => {
     const metadata = object.metadata || {};
     const paymentIdFromMetadata = metadata.payment_id || metadata.order_id;
 
-    console.log(`ЮKassa webhook: event=${event}, status=${paymentStatus}, yookassa_id=${yookassaPaymentId}, metadata_payment_id=${paymentIdFromMetadata}`);
+    console.log(`📥 ЮKassa webhook received: event=${event}, status=${paymentStatus}`);
+    console.log(`   yookassa_id=${yookassaPaymentId}, metadata_payment_id=${paymentIdFromMetadata}`);
+    console.log(`   Full metadata:`, JSON.stringify(metadata, null, 2));
 
     // Ищем платеж по yoomoney_payment_id или по metadata.payment_id
     let payment = null;
