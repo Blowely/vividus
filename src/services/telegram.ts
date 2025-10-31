@@ -95,6 +95,10 @@ export class TelegramService {
     return `<a href="${url}">${text}</a>`;
   }
 
+  private getBackButton(): any[] {
+    return [Markup.button.callback('◀️ Вернуться', 'back_to_menu')];
+  }
+
   private setupHandlers() {
     // Auto-welcome for new users (only for non-command messages)
     this.bot.use(async (ctx, next) => {
@@ -137,9 +141,11 @@ export class TelegramService {
     this.bot.on('callback_query', this.handleCallbackQuery.bind(this));
     
     // Error handler
-    this.bot.catch((err, ctx) => {
+    this.bot.catch(async (err, ctx) => {
       console.error('Bot error:', err);
-      ctx.reply('Произошла ошибка. Попробуйте позже.');
+      if (ctx.from && ctx.chat) {
+        await this.editOrSendMessage(ctx, 'Произошла ошибка. Попробуйте позже.');
+      }
     });
   }
 
@@ -171,6 +177,10 @@ export class TelegramService {
     const isAdminUser = this.isAdmin(ctx.from!.id);
     console.log(`User ${ctx.from?.id} (${ctx.from?.username || 'no username'}) is admin: ${isAdminUser}`);
     
+      await this.showMainMenu(ctx);
+  }
+
+  private async showMainMenu(ctx: Context) {
     const welcomeMessage = `
 🎬 Добро пожаловать в Vividus Bot!
 
@@ -186,31 +196,31 @@ export class TelegramService {
 
 👉 Начните с отправки фото:`;
     
-      // Создаем клавиатуру
-      const keyboard = [
-        [Markup.button.callback('📋 Мои заказы', 'my_orders')],
-        [Markup.button.callback('❓ Помощь', 'help')],
-        [Markup.button.callback('🎬 Получить результат', 'get_result')]
-      ];
+    // Создаем клавиатуру
+    const keyboard = [
+      [Markup.button.callback('📋 Мои заказы', 'my_orders')],
+      [Markup.button.callback('❓ Помощь', 'help')],
+      [Markup.button.callback('🎬 Получить результат', 'get_result')]
+    ];
 
-      // Добавляем кнопку статистики для админов
-      if (this.isAdmin(ctx.from!.id)) {
-        keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
+    // Добавляем кнопку статистики для админов
+    if (this.isAdmin(ctx.from!.id)) {
+      keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
+    }
+
+    // Для приветствия всегда отправляем новое сообщение (не редактируем)
+    const message = await ctx.reply(welcomeMessage, {
+      reply_markup: {
+        inline_keyboard: keyboard
       }
-
-      // Для приветствия всегда отправляем новое сообщение (не редактируем)
-      const message = await ctx.reply(welcomeMessage, {
-        reply_markup: {
-          inline_keyboard: keyboard
-        }
+    });
+    // Сохраняем message_id для последующих сообщений
+    if (message && 'message_id' in message) {
+      this.userMessages.set(ctx.from!.id, {
+        messageId: (message as any).message_id,
+        chatId: ctx.chat!.id
       });
-      // Сохраняем message_id для последующих сообщений
-      if (message && 'message_id' in message) {
-        this.userMessages.set(ctx.from!.id, {
-          messageId: (message as any).message_id,
-          chatId: ctx.chat!.id
-        });
-      }
+    }
   }
 
   private async handleHelp(ctx: Context) {
@@ -230,7 +240,11 @@ export class TelegramService {
 
 Для начала отправьте фото!`;
     
-    await ctx.reply(helpMessage);
+        await this.editOrSendMessage(ctx, helpMessage, {
+          reply_markup: {
+            inline_keyboard: [this.getBackButton()]
+          }
+        });
   }
 
   private async handlePhoto(ctx: Context) {
@@ -258,7 +272,8 @@ export class TelegramService {
         await this.editOrSendMessage(ctx, promptMessage, {
           reply_markup: {
             inline_keyboard: [
-              [Markup.button.callback('⏭️ Пропустить промпт', 'skip_prompt')]
+              [Markup.button.callback('⏭️ Пропустить промпт', 'skip_prompt')],
+              this.getBackButton()
             ]
           }
         });
@@ -437,6 +452,9 @@ export class TelegramService {
         const user = await this.userService.getOrCreateUser(ctx.from!);
         await this.processPrompt(ctx, user, 'пропустить');
         break;
+      case 'back_to_menu':
+        await this.showMainMenu(ctx);
+        break;
       default:
         if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
@@ -462,7 +480,8 @@ export class TelegramService {
       reply_markup: {
         inline_keyboard: [
           [Markup.button.callback('💳 Оплатить', `pay_${order.id}`)],
-          [Markup.button.callback('❌ Отменить', 'cancel')]
+          [Markup.button.callback('❌ Отменить', 'cancel')],
+          this.getBackButton()
         ]
       }
     });
@@ -473,7 +492,7 @@ export class TelegramService {
     const orders = await this.orderService.getUserOrders(user.id);
     
     if (orders.length === 0) {
-      await ctx.reply('📋 У вас пока нет заказов. Отправьте фото для создания первого заказа!');
+      await this.editOrSendMessage(ctx, '📋 У вас пока нет заказов. Отправьте фото для создания первого заказа!');
       return;
     }
     
@@ -493,11 +512,12 @@ export class TelegramService {
     if (completedOrders.length > 0) {
       keyboard.push([Markup.button.callback('🎬 Получить последний результат', 'get_result')]);
     }
+    keyboard.push(this.getBackButton());
     
-    await ctx.reply(message, {
-      reply_markup: keyboard.length > 0 ? {
+    await this.editOrSendMessage(ctx, message, {
+      reply_markup: {
         inline_keyboard: keyboard
-      } : undefined
+      }
     });
   }
 
@@ -508,7 +528,7 @@ export class TelegramService {
 
   private async showAnalytics(ctx: Context) {
     if (!this.isAdmin(ctx.from!.id)) {
-      await ctx.reply('❌ У вас нет прав для просмотра статистики');
+      await this.editOrSendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
       return;
     }
 
@@ -516,7 +536,7 @@ export class TelegramService {
       const analytics = await this.analyticsService.getCampaignAnalytics();
       
       if (analytics.length === 0) {
-        await ctx.reply('📊 Статистика пока пуста');
+        await this.editOrSendMessage(ctx, '📊 Статистика пока пуста');
         return;
       }
 
@@ -531,10 +551,15 @@ export class TelegramService {
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
       }
 
-      await ctx.reply(message, { parse_mode: 'Markdown' });
+      await this.editOrSendMessage(ctx, message, { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [this.getBackButton()]
+        }
+      });
     } catch (error) {
       console.error('Error showing analytics:', error);
-      await ctx.reply('❌ Ошибка при получении статистики');
+      await this.editOrSendMessage(ctx, '❌ Ошибка при получении статистики');
     }
   }
 
@@ -584,25 +609,25 @@ export class TelegramService {
       // Получаем последний заказ пользователя
       const orders = await this.orderService.getUserOrders(user.id);
       if (orders.length === 0) {
-        await ctx.reply('У вас нет заказов для тестирования. Сначала отправьте фото!');
+        await this.editOrSendMessage(ctx, 'У вас нет заказов для тестирования. Сначала отправьте фото!');
         return;
       }
       
       const lastOrder = orders[0];
       
       if (lastOrder.status !== 'payment_required') {
-        await ctx.reply(`Заказ уже в статусе: ${this.getOrderStatusText(lastOrder.status)}`);
+        await this.editOrSendMessage(ctx, `Заказ уже в статусе: ${this.getOrderStatusText(lastOrder.status)}`);
         return;
       }
       
       // Мокаем успешную оплату
       await this.mockService.mockSuccessfulPayment(lastOrder.id);
       
-      await ctx.reply('🎭 Мок-платеж успешен! Заказ переведен в обработку.');
+      await this.editOrSendMessage(ctx, '🎭 Мок-платеж успешен! Заказ переведен в обработку.');
       
     } catch (error) {
       console.error('Error in mock payment:', error);
-      await ctx.reply('Ошибка при мок-платеже. Попробуйте позже.');
+      await this.editOrSendMessage(ctx, 'Ошибка при мок-платеже. Попробуйте позже.');
     }
   }
 
@@ -637,6 +662,11 @@ export class TelegramService {
         await this.editOrSendMessage(ctx, `🎬 Ваше последнее видео готово!\n\n📹 Результат: ${this.formatLink(videoUrl, 'Ссылка')}\n\nСпасибо за использование Vividus Bot!`, {
           parse_mode: 'HTML'
         });
+        
+        // Сообщение о возможности отправить следующее фото
+        setTimeout(async () => {
+          await this.editOrSendMessage(ctx, '📸 Вы можете сразу отправить следующее фото для создания нового видео!');
+        }, 2000);
       } else {
         await this.editOrSendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
       }

@@ -221,6 +221,18 @@ export class ProcessorService {
         { parse_mode: 'HTML' }
       );
 
+      // Сообщение о возможности отправить следующее фото (через 2 секунды)
+      setTimeout(async () => {
+        try {
+          await this.bot.telegram.sendMessage(
+            telegramId,
+            '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
+          );
+        } catch (error) {
+          console.error(`Error sending next photo message to user ${telegramId}:`, error);
+        }
+      }, 2000);
+
     } catch (error) {
       console.error(`Error sending video to user ${telegramId}:`, error);
       await this.notifyUser(telegramId, '❌ Ошибка при отправке видео. Попробуйте позже.');
