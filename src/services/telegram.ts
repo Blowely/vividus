@@ -490,11 +490,9 @@ export class TelegramService {
         ];
         
         const keyboard = packages.map(pkg => {
-          // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
+          // Используем цену со скидкой 33% как новую базовую цену (оригинальная * 0.67)
           const discountedPrice = Math.round(pkg.originalPrice * 0.67);
-          // Пробуем Markdown форматирование ~текст~ (в кнопках обычно не работает, но попробуем)
-          const originalPriceStr = `${pkg.originalPrice}₽`;
-          const buttonText = `~${originalPriceStr}~ ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
             Markup.button.callback(
               buttonText,
@@ -1086,8 +1084,25 @@ export class TelegramService {
         { count: 10, originalPrice: 950 }
       ];
       
+      // Формируем список пакетов с зачеркиванием и скидкой в тексте сообщения
+      let packageListText = '';
+      packages.forEach(pkg => {
+        if (pkg.isTest) {
+          packageListText += `🧪 ${pkg.count} ${this.getGenerationWord(pkg.count)}: ${pkg.price} ₽ (тест)\n`;
+        } else {
+          const originalPrice = pkg.originalPrice as number;
+          const discountedPrice = Math.round(originalPrice * 0.67);
+          const discountPercent = Math.round((1 - discountedPrice / originalPrice) * 100);
+          // Используем combining strikethrough для зачеркивания в тексте сообщения
+          const originalPriceStr = `${originalPrice}₽`;
+          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
+          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: -${discountPercent}% ${strikethroughPrice} ${discountedPrice}₽\n`;
+        }
+      });
+      
       const message = `💼 У вас осталось генераций: ${currentGenerations}
 
+${packageListText}
 Выберите пакет 👇`;
       
       const keyboard = packages.map(pkg => {
@@ -1098,12 +1113,9 @@ export class TelegramService {
           actualPrice = pkg.price;
           buttonText = `🧪 ${actualPrice} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} (тест)`;
         } else {
-          // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
+          // Используем цену со скидкой 33% как финальную цену (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
-          const originalPrice = pkg.originalPrice as number;
-          // Используем Markdown форматирование ~текст~ для зачеркивания
-          const originalPriceStr = `${originalPrice}₽`;
-          buttonText = `~${originalPriceStr}~ ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          buttonText = `${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
         }
         return [
           Markup.button.callback(
