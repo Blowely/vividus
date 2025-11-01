@@ -160,7 +160,8 @@ export class PaymentService {
               currency: 'RUB'
             },
             vat_code: vatCode,
-            payment_subject: 'service' // Предмет расчета: услуга (обязательно для продакшена)
+            payment_subject: 'service', // Предмет расчета: услуга (обязательно для продакшена)
+            payment_mode: 'full_prepayment' // Способ расчета: полная предоплата (обязательно для продакшена)
           }
         ],
         tax_system_code: taxSystemCode
