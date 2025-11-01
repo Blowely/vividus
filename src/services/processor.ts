@@ -42,9 +42,6 @@ export class ProcessorService {
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
-      // Notify user that processing started with animation
-      await this.notifyUser(user.telegram_id, '🎬 Начинаю обработку вашего фото...\n\n⏳ Пожалуйста, подождите...');
-
       // Create video using RunwayML
       const generationId = await this.runwayService.createVideoFromImage(
         order.original_file_path,
