@@ -1095,9 +1095,10 @@ export class TelegramService {
           const discountPercent = Math.round((1 - discountedPrice / originalPrice) * 100);
           // Используем combining strikethrough для зачеркивания в тексте сообщения
           // Финальная цена только в кнопках, в тексте только зачеркнутая оригинальная
+          // Делаем процент скидки и зачеркнутую цену жирными
           const originalPriceStr = `${originalPrice}₽`;
           const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
-          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: -${discountPercent}% ${strikethroughPrice}\n`;
+          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: <b>-${discountPercent}%</b> ${strikethroughPrice}\n`;
         }
       });
       
@@ -1115,8 +1116,10 @@ ${packageListText}
           buttonText = `🧪 ${pkg.count} ${this.getGenerationWord(pkg.count)} → ${actualPrice} ₽ (тест)`;
         } else {
           // Используем цену со скидкой 33% как финальную цену (оригинальная * 0.67)
+          // В кнопках форматирование недоступно, но можно визуально выделить цену
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
-          buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → ${actualPrice}₽`;
+          // Используем эмодзи или символы для визуального выделения цены
+          buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → 💰 ${actualPrice}₽`;
         }
         return [
           Markup.button.callback(
@@ -1132,6 +1135,7 @@ ${packageListText}
       
       // Отправляем новое сообщение вместо редактирования
       await ctx.reply(message, {
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: keyboard
         }
