@@ -17,6 +17,38 @@ export class RunwayService {
     this.s3Service = new S3Service();
   }
 
+  private translateRunwayError(errorMessage: string): string {
+    const errorLower = errorMessage.toLowerCase();
+    
+    // Соотношение сторон
+    if (errorLower.includes('invalid asset aspect ratio') || errorLower.includes('aspect ratio')) {
+      return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.5 до 2.';
+    }
+    
+    // Модерация контента
+    if (errorLower.includes('content moderation') || errorLower.includes('moderation') || errorLower.includes('not passed moderation')) {
+      return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
+    }
+    
+    // Неподдерживаемый формат
+    if (errorLower.includes('invalid format') || errorLower.includes('unsupported format')) {
+      return 'Неподдерживаемый формат изображения. Пожалуйста, отправьте фото в формате JPG или PNG.';
+    }
+    
+    // Размер файла
+    if (errorLower.includes('file size') || errorLower.includes('too large') || errorLower.includes('too small')) {
+      return 'Неподходящий размер изображения. Пожалуйста, отправьте фото другого размера.';
+    }
+    
+    // Общая ошибка валидации
+    if (errorLower.includes('validation') || errorLower.includes('invalid')) {
+      return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
+    }
+    
+    // Возвращаем оригинальное сообщение, если не нашли соответствие
+    return `Ошибка обработки: ${errorMessage}`;
+  }
+
   async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string> {
     try {
       console.log('🎬 Creating video with RunwayML API...');
@@ -60,7 +92,15 @@ export class RunwayService {
     } catch (error: any) {
       console.error('Error creating video:', error);
       console.error('Error details:', error.response?.data);
-      throw new Error('Failed to create video');
+      
+      // Извлекаем сообщение об ошибке из ответа API
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to create video';
+      const translatedError = this.translateRunwayError(errorMessage);
+      
+      // Создаем ошибку с переведённым сообщением
+      const translatedErrorObj = new Error(translatedError);
+      (translatedErrorObj as any).originalError = errorMessage;
+      throw translatedErrorObj;
     }
   }
 

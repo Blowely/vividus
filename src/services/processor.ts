@@ -58,18 +58,20 @@ export class ProcessorService {
       // Start monitoring the job
       this.monitorJob(generationId, user.telegram_id, orderId);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Error processing order ${orderId}:`, error);
       
       // Update order status to failed
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
       
-      // Notify user about error
+      // Notify user about error with translated message
       const order = await this.orderService.getOrder(orderId);
       if (order) {
         const user = await this.userService.getUserById(order.user_id);
         if (user) {
-          await this.notifyUser(user.telegram_id, '❌ Произошла ошибка при обработке. Попробуйте позже.');
+          // Используем переведённое сообщение об ошибке, если оно есть
+          const errorMessage = error?.message || 'Произошла ошибка при обработке. Попробуйте позже.';
+          await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
         }
       }
     }
@@ -237,12 +239,47 @@ export class ProcessorService {
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, error);
 
-      // Notify user
-      await this.notifyUser(telegramId, '❌ Ошибка при обработке видео. Попробуйте позже.');
+      // Translate error message for user
+      const translatedError = this.translateRunwayError(error);
+      
+      // Notify user with translated error
+      await this.notifyUser(telegramId, `❌ ${translatedError}`);
 
     } catch (error) {
       console.error(`Error handling job failure ${generationId}:`, error);
     }
+  }
+
+  private translateRunwayError(errorMessage: string): string {
+    const errorLower = errorMessage.toLowerCase();
+    
+    // Соотношение сторон
+    if (errorLower.includes('invalid asset aspect ratio') || errorLower.includes('aspect ratio')) {
+      return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.5 до 2.';
+    }
+    
+    // Модерация контента
+    if (errorLower.includes('content moderation') || errorLower.includes('moderation') || errorLower.includes('not passed moderation')) {
+      return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
+    }
+    
+    // Неподдерживаемый формат
+    if (errorLower.includes('invalid format') || errorLower.includes('unsupported format')) {
+      return 'Неподдерживаемый формат изображения. Пожалуйста, отправьте фото в формате JPG или PNG.';
+    }
+    
+    // Размер файла
+    if (errorLower.includes('file size') || errorLower.includes('too large') || errorLower.includes('too small')) {
+      return 'Неподходящий размер изображения. Пожалуйста, отправьте фото другого размера.';
+    }
+    
+    // Общая ошибка валидации
+    if (errorLower.includes('validation') || errorLower.includes('invalid')) {
+      return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
+    }
+    
+    // Возвращаем общее сообщение, если не нашли соответствие
+    return 'Ошибка при обработке видео. Попробуйте позже.';
   }
 
   private async handleJobTimeout(generationId: string, telegramId: number, orderId: string): Promise<void> {
