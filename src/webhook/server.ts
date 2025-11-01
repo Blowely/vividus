@@ -14,6 +14,11 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/webhook', paymentRouter);
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
