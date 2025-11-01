@@ -100,6 +100,31 @@ export class TelegramService {
     return [Markup.button.callback('◀️ Вернуться', 'back_to_menu')];
   }
 
+  private getMainReplyKeyboard(userId: number): any {
+    const keyboard = [
+      [Markup.button.text('🎬 Оживить фото')],
+      [Markup.button.text('📋 Мои заказы')],
+      [
+        Markup.button.text('⚙️ Настройки'),
+        Markup.button.text('❓ Поддержка')
+      ],
+      [
+        Markup.button.text('🎬 Получить результат'),
+        Markup.button.text('🧪 Тестовая оплата')
+      ]
+    ];
+
+    // Добавляем кнопки для админов
+    if (this.isAdmin(userId)) {
+      keyboard.push([Markup.button.text('📊 Статистика')]);
+    }
+
+    return {
+      keyboard: keyboard,
+      resize_keyboard: true
+    };
+  }
+
   private setupHandlers() {
     // Auto-welcome for new users (only for non-command messages)
     this.bot.use(async (ctx, next) => {
@@ -207,24 +232,30 @@ export class TelegramService {
 
 👉 Начните с отправки фото:`;
     
-    // Создаем клавиатуру
+    // Создаем reply клавиатуру (кнопки под полем ввода)
     const keyboard = [
-      [Markup.button.callback('📋 Мои заказы', 'my_orders')],
-      [Markup.button.callback('⚙️ Настройки', 'settings')],
-      [Markup.button.callback('❓ Помощь', 'help')],
-      [Markup.button.callback('🎬 Получить результат', 'get_result')],
-      [Markup.button.callback('🧪 Тестовая оплата', 'test_payment')]
+      [Markup.button.text('🎬 Оживить фото')],
+      [Markup.button.text('📋 Мои заказы')],
+      [
+        Markup.button.text('⚙️ Настройки'),
+        Markup.button.text('❓ Поддержка')
+      ],
+      [
+        Markup.button.text('🎬 Получить результат'),
+        Markup.button.text('🧪 Тестовая оплата')
+      ]
     ];
 
     // Добавляем кнопки для админов
     if (this.isAdmin(ctx.from!.id)) {
-      keyboard.push([Markup.button.callback('📊 Статистика', 'show_stats')]);
+      keyboard.push([Markup.button.text('📊 Статистика')]);
     }
 
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
     const message = await ctx.reply(welcomeMessage, {
       reply_markup: {
-        inline_keyboard: keyboard
+        keyboard: keyboard,
+        resize_keyboard: true
       }
     });
     // Сохраняем message_id для последующих сообщений
@@ -400,6 +431,42 @@ export class TelegramService {
         return;
       }
       
+      // Обрабатываем команды от reply кнопок
+      if (text === '🎬 Оживить фото') {
+        await this.editOrSendMessage(ctx, '📸 Отправьте фото для создания анимации!');
+        return;
+      }
+      
+      if (text === '📋 Мои заказы') {
+        await this.showUserOrders(ctx);
+        return;
+      }
+      
+      if (text === '⚙️ Настройки') {
+        await this.handleSettings(ctx);
+        return;
+      }
+      
+      if (text === '❓ Поддержка') {
+        await this.handleHelp(ctx);
+        return;
+      }
+      
+      if (text === '🎬 Получить результат') {
+        await this.handleGetResult(ctx);
+        return;
+      }
+      
+      if (text === '🧪 Тестовая оплата') {
+        await this.handleTestPayment(ctx);
+        return;
+      }
+      
+      if (text === '📊 Статистика' && this.isAdmin(ctx.from!.id)) {
+        await this.showAnalytics(ctx);
+        return;
+      }
+      
       // Check if user has pending photo
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
@@ -496,6 +563,16 @@ export class TelegramService {
         await this.processPrompt(ctx, user, 'пропустить');
         break;
       case 'back_to_menu':
+        // Удаляем inline клавиатуру и показываем главное меню с reply клавиатурой
+        try {
+          await ctx.reply('◀️ Возвращаюсь в главное меню...', {
+            reply_markup: {
+              remove_keyboard: true
+            }
+          });
+        } catch (e) {
+          // Игнорируем ошибки
+        }
         await this.showMainMenu(ctx);
         break;
       case 'test_payment':
