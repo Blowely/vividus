@@ -354,138 +354,99 @@ export class PaymentService {
     // Если платеж успешный, запускаем обработку заказа и обновляем статистику
     if (status === PaymentStatus.SUCCESS) {
       try {
-        // Получаем информацию о заказе
+        // Получаем информацию о платеже
         const client = await pool.connect();
         try {
           const paymentResult = await client.query(
-            'SELECT order_id FROM payments WHERE id = $1',
+            'SELECT order_id, user_id FROM payments WHERE id = $1',
             [paymentId]
           );
           
-          if (paymentResult.rows[0]) {
-            const orderId = paymentResult.rows[0].order_id;
+          if (!paymentResult.rows[0]) {
+            console.error(`Payment ${paymentId} not found`);
+            return;
+          }
+          
+          const orderId = paymentResult.rows[0].order_id;
+          const userId = paymentResult.rows[0].user_id;
+          
+          // Получаем информацию о пользователе
+          const userResult = await client.query(`
+            SELECT u.telegram_id, u.start_param 
+            FROM users u
+            WHERE u.id = $1
+          `, [userId]);
+          
+          const user = userResult.rows[0];
+          
+          if (!user) {
+            console.error(`User not found for payment ${paymentId}`);
+            return;
+          }
+          
+          // Проверяем, является ли это покупкой генераций (проверяем metadata и отсутствие order_id)
+          console.log('📦 Checking if payment is generation purchase...');
+          console.log('   Metadata:', JSON.stringify(metadata, null, 2));
+          console.log('   Payment order_id:', orderId);
+          
+          const hasGenerationMetadata = metadata?.generations_count || metadata?.purchase_type === 'generations';
+          const isGenerationPurchase = !orderId && hasGenerationMetadata;
+          
+          if (isGenerationPurchase) {
+            console.log('✅ This is a generation purchase!');
+            const generationsCount = parseInt(metadata?.generations_count || '0', 10);
             
-          // Для тестовых платежей (без order_id) находим пользователя через user_id в платеже
-          if (!orderId) {
-            console.log(`✅ Test payment ${paymentId} succeeded (no order_id)`);
-            
-            // Получаем user_id из платежа и находим telegram_id
-            const paymentWithUser = await client.query(`
-              SELECT p.user_id, u.telegram_id 
-              FROM payments p
-              LEFT JOIN users u ON p.user_id = u.id
-              WHERE p.id = $1
-            `, [paymentId]);
-            
-            const userData = paymentWithUser.rows[0];
-            
-            if (userData?.telegram_id) {
-              try {
-                await this.bot.telegram.sendMessage(
-                  userData.telegram_id,
-                  '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
-                );
-                console.log(`✅ Notification sent to test payment user ${userData.telegram_id}`);
-              } catch (error) {
-                console.error(`Error sending test payment notification to user ${userData.telegram_id}:`, error);
-              }
+            if (generationsCount > 0) {
+              const { UserService } = await import('./user');
+              const userService = new UserService();
+              
+              console.log(`➕ Adding ${generationsCount} generations to user ${user.telegram_id}`);
+              await userService.addGenerations(user.telegram_id, generationsCount);
+              
+              const newBalance = await userService.getUserGenerations(user.telegram_id);
+              console.log(`✅ New balance: ${newBalance} generations`);
+              
+              await this.bot.telegram.sendMessage(
+                user.telegram_id,
+                `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
+              );
             } else {
-              // Fallback: пытаемся получить telegram_id из metadata (для старых платежей)
-              const telegramId = metadata?.telegram_id;
-              if (telegramId) {
-                try {
-                  const telegramIdNum = parseInt(telegramId, 10);
-                  await this.bot.telegram.sendMessage(
-                    telegramIdNum,
-                    '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
-                  );
-                  console.log(`✅ Notification sent to test payment user ${telegramIdNum} (from metadata)`);
-                } catch (error) {
-                  console.error(`Error sending test payment notification:`, error);
-                }
-              } else {
-                console.log(`⚠️ Test payment ${paymentId} succeeded but no user_id or telegram_id found`);
-              }
+              console.log('⚠️ Generations count is 0 or not found in metadata');
+              await this.bot.telegram.sendMessage(
+                user.telegram_id,
+                '✅ Тестовая оплата успешно получена!\n\n🎉 Интеграция с ЮKassa работает корректно.'
+              );
             }
             return;
           }
-            
-            // Получаем информацию о пользователе для отправки уведомления
-            // Используем user_id напрямую из payments (идеальная архитектура)
-            const userResult = await client.query(`
-              SELECT u.telegram_id, u.start_param 
-              FROM payments p
-              JOIN users u ON p.user_id = u.id
-              WHERE p.id = $1
-            `, [paymentId]);
-            
-            const user = userResult.rows[0];
-            
-            if (user) {
-              // Отправляем уведомление об успешной оплате
-              try {
-                await this.bot.telegram.sendMessage(
-                  user.telegram_id,
-                  '✅ Оплата успешно получена!\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.'
-                );
-              } catch (error) {
-                console.error(`Error sending payment success notification to user ${user.telegram_id}:`, error);
-              }
-              
-              // Проверяем, является ли это покупкой генераций (проверяем metadata)
-            console.log('📦 Checking if payment is generation purchase...');
-            console.log('   Metadata:', JSON.stringify(metadata, null, 2));
-            console.log('   Payment order_id:', paymentResult.rows[0]?.order_id);
-            
-            const isGenerationPurchase = metadata?.generations_count || metadata?.purchase_type === 'generations' || !paymentResult.rows[0]?.order_id;
-            
-            // Если нет order_id и есть metadata с generations, это покупка генераций
-            if (!paymentResult.rows[0]?.order_id && (metadata?.generations_count || metadata?.purchase_type === 'generations')) {
-              console.log('✅ This is a generation purchase!');
-              const generationsCount = parseInt(metadata?.generations_count || '0', 10);
-              
-              if (generationsCount > 0) {
-                const { UserService } = await import('./user');
-                const userService = new UserService();
-                
-                console.log(`➕ Adding ${generationsCount} generations to user ${user.telegram_id}`);
-                await userService.addGenerations(user.telegram_id, generationsCount);
-                
-                const newBalance = await userService.getUserGenerations(user.telegram_id);
-                console.log(`✅ New balance: ${newBalance} generations`);
-                
-                await this.bot.telegram.sendMessage(
-                  user.telegram_id,
-                  `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
-                );
-                
-                // Проверяем, нужно ли автоматически обработать фото после покупки
-                // Ищем pending photo для пользователя (если было сохранено)
-                const { TelegramService } = await import('./telegram');
-                // Это сложно сделать напрямую, поэтому используем проверку через обработчик
-                // Можно добавить флаг в metadata или использовать другой механизм
-              } else {
-                console.log('⚠️ Generations count is 0 or not found in metadata');
-              }
-              return;
+          
+          // Если есть order_id, это обычный платеж за заказ
+          if (orderId) {
+            // Отправляем уведомление об успешной оплате
+            try {
+              await this.bot.telegram.sendMessage(
+                user.telegram_id,
+                '✅ Оплата успешно получена!\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.'
+              );
+            } catch (error) {
+              console.error(`Error sending payment success notification to user ${user.telegram_id}:`, error);
             }
             
             // Обновляем статус заказа на processing для запуска обработки
-              const { OrderService } = await import('./order');
-              const orderService = new OrderService();
-              await orderService.updateOrderStatus(orderId, 'processing' as any);
-              
-              // Запускаем обработку заказа
-              const { ProcessorService } = await import('./processor');
-              const processorService = new ProcessorService();
-              await processorService.processOrder(orderId);
-              
-              // Обновляем статистику кампании
-              if (user.start_param) {
-                const { AnalyticsService } = await import('./analytics');
-                const analyticsService = new AnalyticsService();
-                await analyticsService.updateCampaignStats(user.start_param);
-              }
+            const { OrderService } = await import('./order');
+            const orderService = new OrderService();
+            await orderService.updateOrderStatus(orderId, 'processing' as any);
+            
+            // Запускаем обработку заказа
+            const { ProcessorService } = await import('./processor');
+            const processorService = new ProcessorService();
+            await processorService.processOrder(orderId);
+            
+            // Обновляем статистику кампании
+            if (user.start_param) {
+              const { AnalyticsService } = await import('./analytics');
+              const analyticsService = new AnalyticsService();
+              await analyticsService.updateCampaignStats(user.start_param);
             }
           }
         } finally {
