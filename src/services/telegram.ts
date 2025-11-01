@@ -429,7 +429,9 @@ export class TelegramService {
         const keyboard = packages.map(pkg => {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           const discountedPrice = Math.round(pkg.originalPrice * 0.67);
-          const buttonText = `~~${pkg.originalPrice}₽~~ ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} -33%`;
+          // Используем combining strikethrough (U+0336) для визуального зачеркивания
+          const strikethroughOriginal = `${pkg.originalPrice}₽`.split('').join('\u0336') + '\u0336';
+          const buttonText = `${strikethroughOriginal} ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
             Markup.button.callback(
               buttonText,
@@ -1036,8 +1038,9 @@ export class TelegramService {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
           const originalPrice = pkg.originalPrice as number;
-          // Используем простой формат с зачеркнутой ценой
-          buttonText = `~~${originalPrice}₽~~ ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} -33%`;
+          // Используем combining strikethrough (U+0336) для визуального зачеркивания
+          const strikethroughOriginal = `${originalPrice}₽`.split('').join('\u0336') + '\u0336';
+          buttonText = `${strikethroughOriginal} ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
         }
         return [
           Markup.button.callback(
