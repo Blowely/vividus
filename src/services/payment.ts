@@ -153,13 +153,14 @@ export class PaymentService {
       const receipt: any = {
         items: [
           {
-            description: `Оплата заказа ${paymentId}`,
+            description: `Обработка фото и создание анимации`,
             quantity: '1.00',
             amount: {
               value: numericAmount.toFixed(2),
               currency: 'RUB'
             },
-            vat_code: vatCode
+            vat_code: vatCode,
+            payment_subject: 'service' // Предмет расчета: услуга (обязательно для продакшена)
           }
         ],
         tax_system_code: taxSystemCode
