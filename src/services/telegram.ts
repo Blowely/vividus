@@ -403,7 +403,7 @@ export class TelegramService {
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
       } else {
-        // У пользователя нет генераций - предлагаем купить генерации или оплатить разово
+        // У пользователя нет генераций - предлагаем купить генерации
         await this.deleteUserMessage(ctx);
         
         // Сохраняем fileId для повторной обработки после покупки генераций
@@ -420,21 +420,24 @@ export class TelegramService {
         
         // Пакеты генераций
         const packages = [
-          { count: 1, price: 105 },
-          { count: 3, price: 315 },
-          { count: 5, price: 525 },
-          { count: 10, price: 950 }
+          { count: 1, originalPrice: 105 },
+          { count: 3, originalPrice: 315 },
+          { count: 5, originalPrice: 525 },
+          { count: 10, originalPrice: 950 }
         ];
         
-        const keyboard = packages.map(pkg => [
-          Markup.button.callback(
-            `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`,
-            `buy_and_process_${pkg.count}_${pkg.price}`
-          )
-        ]);
+        const keyboard = packages.map(pkg => {
+          // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
+          const discountedPrice = Math.round(pkg.originalPrice * 0.67);
+          const buttonText = `~~${pkg.originalPrice}₽~~ ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} -33%`;
+          return [
+            Markup.button.callback(
+              buttonText,
+              `buy_and_process_${pkg.count}_${discountedPrice}`
+            )
+          ];
+        });
         
-        // Добавляем кнопку для разовой оплаты заказа
-        keyboard.push([Markup.button.callback('💳 Оплатить разово (1 ₽)', 'pay_single_order')]);
         keyboard.push(this.getBackButton());
         
         await this.editOrSendMessage(ctx, noGenerationsMessage, {
@@ -1009,12 +1012,13 @@ export class TelegramService {
       const currentGenerations = await this.userService.getUserGenerations(ctx.from!.id);
       
       // Пакеты генераций со скидкой 33%
+      // Текущие цены - это оригинальные, вычисляем цены со скидкой
       const packages = [
         { count: 7, price: 1, isTest: true }, // Тестовый пакет
-        { count: 1, price: 105 },
-        { count: 3, price: 315 },
-        { count: 5, price: 525 },
-        { count: 10, price: 950 }
+        { count: 1, originalPrice: 105 },
+        { count: 3, originalPrice: 315 },
+        { count: 5, originalPrice: 525 },
+        { count: 10, originalPrice: 950 }
       ];
       
       const message = `💼 У вас осталось генераций: ${currentGenerations}
@@ -1022,13 +1026,23 @@ export class TelegramService {
 Выберите пакет 👇`;
       
       const keyboard = packages.map(pkg => {
-        const buttonText = pkg.isTest 
-          ? `🧪 ${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} (тест)`
-          : `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+        let buttonText: string;
+        let actualPrice: number;
+        
+        if (pkg.isTest) {
+          actualPrice = pkg.price;
+          buttonText = `🧪 ${actualPrice} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} (тест)`;
+        } else {
+          // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
+          actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
+          const originalPrice = pkg.originalPrice as number;
+          // Используем простой формат с зачеркнутой ценой
+          buttonText = `~~${originalPrice}₽~~ ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} -33%`;
+        }
         return [
           Markup.button.callback(
             buttonText,
-            `buy_generations_${pkg.count}_${pkg.price}`
+            `buy_generations_${pkg.count}_${actualPrice}`
           )
         ];
       });
