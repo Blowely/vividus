@@ -203,7 +203,7 @@ export class TelegramService {
 3️⃣ Оплатите заказ
 4️⃣ Получите готовое видео через 2-5 минут!
 
-💰 Стоимость: 10 рублей за обработку
+💰 Стоимость: 1 рубль за обработку
 
 👉 Начните с отправки фото:`;
     
@@ -351,7 +351,7 @@ export class TelegramService {
       await this.editOrSendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
       
       // Create order with custom prompt and S3 URL
-      const order = await this.orderService.createOrder(user.id, s3Url, 10, processedPrompt);
+      const order = await this.orderService.createOrder(user.id, s3Url, 1, processedPrompt);
       
       // Создаем платеж сразу после создания заказа
       const payment = await this.paymentService.createPayment(order.id, order.price);
@@ -670,7 +670,7 @@ export class TelegramService {
   private async handleTestPayment(ctx: Context) {
     try {
       // Создаем тестовый платеж с telegram_id пользователя
-      const testAmount = 10;
+      const testAmount = 1;
       const telegramId = ctx.from!.id;
       const payment = await this.paymentService.createTestPayment(testAmount, telegramId);
       
