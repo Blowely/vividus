@@ -1046,7 +1046,8 @@ export class TelegramService {
       keyboard.push([Markup.button.callback('⭐ Оплатить звёздами', 'buy_generations_stars')]);
       keyboard.push(this.getBackButton());
       
-      await this.editOrSendMessage(ctx, message, {
+      // Отправляем новое сообщение вместо редактирования
+      await ctx.reply(message, {
         reply_markup: {
           inline_keyboard: keyboard
         }
