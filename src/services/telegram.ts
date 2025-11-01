@@ -635,10 +635,29 @@ export class TelegramService {
         this.waitingForEmail.delete(ctx.from!.id);
         await this.handleSettings(ctx);
         break;
+      case 'buy_generations_stars':
+        await ctx.answerCbQuery('Оплата звёздами пока не доступна');
+        break;
       default:
         if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
           await this.handlePayOrder(ctx, orderId);
+        } else if (callbackData.startsWith('buy_generations_')) {
+          // Формат: buy_generations_{count}_{price}
+          const parts = callbackData.replace('buy_generations_', '').split('_');
+          if (parts.length === 2) {
+            const count = parseInt(parts[0], 10);
+            const price = parseInt(parts[1], 10);
+            if (!isNaN(count) && !isNaN(price)) {
+              await this.handlePurchaseGenerations(ctx, count, price);
+            } else {
+              console.error(`Invalid buy_generations callback: ${callbackData}`);
+              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            }
+          } else {
+            console.error(`Invalid buy_generations callback format: ${callbackData}`);
+            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+          }
         }
         break;
     }
