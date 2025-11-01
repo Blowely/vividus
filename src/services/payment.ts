@@ -65,7 +65,34 @@ export class PaymentService {
     }
   }
 
-  async generatePaymentUrl(paymentId: string, amount: number, telegramId?: number): Promise<string> {
+  async createGenerationPurchase(telegramId: number, generationsCount: number, amount: number): Promise<any> {
+    const client = await pool.connect();
+    try {
+      // Получаем user_id по telegram_id
+      const userResult = await client.query(
+        'SELECT id FROM users WHERE telegram_id = $1',
+        [telegramId]
+      );
+      
+      if (!userResult.rows[0]) {
+        throw new Error(`User with telegram_id ${telegramId} not found`);
+      }
+      
+      const userId = userResult.rows[0].id;
+      
+      // Создаем платеж для покупки генераций (без order_id)
+      const result = await client.query(
+        'INSERT INTO payments (order_id, user_id, amount, status, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+        [null, userId, amount, PaymentStatus.PENDING]
+      );
+      
+      return result.rows[0];
+    } finally {
+      client.release();
+    }
+  }
+
+  async generatePaymentUrl(paymentId: string, amount: number, telegramId?: number, metadata?: any): Promise<string> {
     try {
       console.log('Generating payment URL for:', paymentId, amount);
       
@@ -75,7 +102,7 @@ export class PaymentService {
       
       if (shopId && secretKey) {
         // Используем ЮKassa API с Basic Auth
-        return await this.createCheckoutPayment(paymentId, amount, shopId, secretKey, telegramId);
+        return await this.createCheckoutPayment(paymentId, amount, shopId, secretKey, telegramId, metadata);
       } else {
         throw new Error('Не настроены YOOMONEY_SHOP_ID и YOOMONEY_SECRET_KEY. Для работы с ЮKassa необходимо указать оба параметра.');
       }
@@ -85,7 +112,25 @@ export class PaymentService {
     }
   }
 
-  private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string, telegramId?: number): Promise<string> {
+  async generateGenerationPurchaseUrl(paymentId: string, amount: number, generationsCount: number, telegramId: number): Promise<string> {
+    const metadata = {
+      purchase_type: 'generations',
+      generations_count: generationsCount.toString()
+    };
+    return await this.generatePaymentUrl(paymentId, amount, telegramId, metadata);
+  }
+
+  private getGenerationWord(count: number): string {
+    if (count % 10 === 1 && count % 100 !== 11) {
+      return 'генерации';
+    } else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
+      return 'генерации';
+    } else {
+      return 'генераций';
+    }
+  }
+
+  private async createCheckoutPayment(paymentId: string, amount: number, shopId: string, secretKey: string, telegramId?: number, metadata?: any): Promise<string> {
     try {
       // Преобразуем amount в число (может быть строкой или Decimal из БД)
       const numericAmount = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
@@ -150,10 +195,17 @@ export class PaymentService {
       const taxSystemCode = parseInt(process.env.YOOKASSA_TAX_SYSTEM_CODE || '1', 10);
       const vatCode = parseInt(process.env.YOOKASSA_VAT_CODE || '1', 10);
       
+      // Определяем описание для чека в зависимости от типа покупки
+      let receiptDescription = `Обработка фото и создание анимации`;
+      if (metadata?.purchase_type === 'generations') {
+        const generationsCount = metadata?.generations_count || '0';
+        receiptDescription = `Покупка ${generationsCount} ${this.getGenerationWord(parseInt(generationsCount))}`;
+      }
+      
       const receipt: any = {
         items: [
           {
-            description: `Обработка фото и создание анимации`,
+            description: receiptDescription,
             quantity: '1.00',
             amount: {
               value: numericAmount.toFixed(2),
@@ -185,11 +237,14 @@ export class PaymentService {
             type: 'redirect',
             return_url: process.env.YOOMONEY_SUCCESS_URL || `https://t.me/${process.env.TELEGRAM_BOT_TOKEN?.split(':')[0]}`
           },
-          description: `Оплата заказа ${paymentId}`,
+          description: metadata?.purchase_type === 'generations' 
+            ? `Покупка генераций ${metadata?.generations_count || ''} шт`
+            : `Оплата заказа ${paymentId}`,
           receipt: receipt,
           metadata: {
             payment_id: paymentId,
-            order_id: paymentId
+            order_id: paymentId,
+            ...(metadata || {})
           },
           capture: true
         },
@@ -377,7 +432,26 @@ export class PaymentService {
                 console.error(`Error sending payment success notification to user ${user.telegram_id}:`, error);
               }
               
-              // Обновляем статус заказа на processing для запуска обработки
+              // Проверяем, является ли это покупкой генераций (проверяем metadata)
+            const isGenerationPurchase = metadata?.generations_count || metadata?.purchase_type === 'generations';
+            if (isGenerationPurchase) {
+              // Это покупка генераций
+              const generationsCount = parseInt(metadata?.generations_count || '0', 10);
+              if (generationsCount > 0) {
+                const { UserService } = await import('./user');
+                const userService = new UserService();
+                await userService.addGenerations(user.telegram_id, generationsCount);
+                
+                const newBalance = await userService.getUserGenerations(user.telegram_id);
+                await this.bot.telegram.sendMessage(
+                  user.telegram_id,
+                  `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} генераций\n💼 Ваш баланс: ${newBalance} генераций`
+                );
+              }
+              return;
+            }
+            
+            // Обновляем статус заказа на processing для запуска обработки
               const { OrderService } = await import('./order');
               const orderService = new OrderService();
               await orderService.updateOrderStatus(orderId, 'processing' as any);

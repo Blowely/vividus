@@ -232,9 +232,14 @@ export class TelegramService {
 
 👉 Начните с отправки фото:`;
     
+    // Получаем баланс генераций
+    const user = await this.userService.getOrCreateUser(ctx.from!);
+    const generations = await this.userService.getUserGenerations(ctx.from!.id);
+    
     // Создаем reply клавиатуру (кнопки под полем ввода)
     const keyboard = [
       [Markup.button.text('🎬 Оживить фото')],
+      [Markup.button.text('✨ Купить генерации')],
       [Markup.button.text('📋 Мои заказы')],
       [
         Markup.button.text('⚙️ Настройки'),
@@ -280,7 +285,7 @@ export class TelegramService {
 
 ⏱️ Время обработки: 2-5 минут
 
-📞 Поддержка: @support_username
+📞 Поддержка: @in_a_state_of_flux
 
 Для начала отправьте фото!`;
     
@@ -381,38 +386,65 @@ export class TelegramService {
       
       await this.editOrSendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
       
-      // Create order with custom prompt and S3 URL
-      const order = await this.orderService.createOrder(user.id, s3Url, 1, processedPrompt);
+      // Проверяем баланс генераций пользователя
+      const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
-      // Создаем платеж сразу после создания заказа
-      const payment = await this.paymentService.createPayment(order.id, order.price);
-      
-      // Генерируем ссылку на оплату
-      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
-      
-      // Обновляем сообщение о создании заказа и сразу показываем оплату
-      await this.deleteUserMessage(ctx);
-      
-      // Показываем окно оплаты с прямой ссылкой
-      const paymentMessage = `
+      if (userGenerations >= 1) {
+        // У пользователя есть генерации - списываем их и создаем заказ без оплаты
+        const deducted = await this.userService.deductGenerations(user.telegram_id, 1);
+        
+        if (!deducted) {
+          await this.editOrSendMessage(ctx, '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.');
+          return;
+        }
+        
+        // Создаем заказ со статусом processing (без оплаты)
+        const order = await this.orderService.createOrder(user.id, s3Url, 0, processedPrompt);
+        await this.orderService.updateOrderStatus(order.id, 'processing' as any);
+        
+        const remainingGenerations = await this.userService.getUserGenerations(user.telegram_id);
+        
+        await this.deleteUserMessage(ctx);
+        await this.editOrSendMessage(ctx, `✅ Генерация использована! Осталось: ${remainingGenerations}\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
+        
+        // Запускаем обработку заказа
+        const { ProcessorService } = await import('./processor');
+        const processorService = new ProcessorService();
+        await processorService.processOrder(order.id);
+      } else {
+        // У пользователя нет генераций - создаем заказ с оплатой
+        const order = await this.orderService.createOrder(user.id, s3Url, 1, processedPrompt);
+        
+        // Создаем платеж сразу после создания заказа
+        const payment = await this.paymentService.createPayment(order.id, order.price);
+        
+        // Генерируем ссылку на оплату
+        const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
+        
+        // Обновляем сообщение о создании заказа и сразу показываем оплату
+        await this.deleteUserMessage(ctx);
+        
+        // Показываем окно оплаты с прямой ссылкой
+        const paymentMessage = `
 💳 Оплата заказа
 
 📸 Фото: готово к обработке
 🎬 Промпт: ${originalPrompt ? `"${originalPrompt}"` : 'стандартная анимация'}
 💰 Стоимость: ${order.price} рублей
 
-Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
-      
-      await this.editOrSendMessage(ctx, paymentMessage, {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [
-            [Markup.button.url('💳 Оплатить', paymentUrl)],
-            [Markup.button.callback('❌ Отменить', 'cancel')],
-            this.getBackButton()
-          ]
-        }
-      });
+💡 <b>Совет:</b> Купите генерации заранее и обрабатывайте фото без ожидания оплаты!`;
+        
+        await this.editOrSendMessage(ctx, paymentMessage, {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [Markup.button.url('💳 Оплатить', paymentUrl)],
+              [Markup.button.callback('❌ Отменить', 'cancel')],
+              this.getBackButton()
+            ]
+          }
+        });
+      }
       
     } catch (error) {
       console.error('Error processing prompt:', error);
@@ -434,6 +466,11 @@ export class TelegramService {
       // Обрабатываем команды от reply кнопок
       if (text === '🎬 Оживить фото') {
         await this.editOrSendMessage(ctx, '📸 Отправьте фото для создания анимации!');
+        return;
+      }
+      
+      if (text === '✨ Купить генерации') {
+        await this.handleBuyGenerations(ctx);
         return;
       }
       
@@ -946,6 +983,91 @@ export class TelegramService {
       console.error('Error processing email:', error);
       this.waitingForEmail.delete(ctx.from!.id);
       await this.editOrSendMessage(ctx, '❌ Ошибка при сохранении email. Попробуйте позже.');
+    }
+  }
+
+  private async handleBuyGenerations(ctx: Context) {
+    try {
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const currentGenerations = await this.userService.getUserGenerations(ctx.from!.id);
+      
+      // Пакеты генераций со скидкой 33%
+      const packages = [
+        { count: 1, price: 105 },
+        { count: 3, price: 315 },
+        { count: 5, price: 525 },
+        { count: 10, price: 950 }
+      ];
+      
+      const message = `💼 У вас осталось генераций: ${currentGenerations}
+
+Выберите пакет 👇`;
+      
+      const keyboard = packages.map(pkg => [
+        Markup.button.callback(
+          `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`,
+          `buy_generations_${pkg.count}_${pkg.price}`
+        )
+      ]);
+      
+      // Добавляем кнопку оплаты звёздами (пока заглушка)
+      keyboard.push([Markup.button.callback('⭐ Оплатить звёздами', 'buy_generations_stars')]);
+      keyboard.push(this.getBackButton());
+      
+      await this.editOrSendMessage(ctx, message, {
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    } catch (error) {
+      console.error('Error showing buy generations menu:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при загрузке меню покупки генераций');
+    }
+  }
+
+  private async handlePurchaseGenerations(ctx: Context, generationsCount: number, price: number) {
+    try {
+      await ctx.answerCbQuery();
+      
+      const payment = await this.paymentService.createGenerationPurchase(ctx.from!.id, generationsCount, price);
+      const paymentUrl = await this.paymentService.generateGenerationPurchaseUrl(
+        payment.id,
+        price,
+        generationsCount,
+        ctx.from!.id
+      );
+      
+      const message = `💳 Покупка генераций
+
+📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
+💰 Сумма: ${price} ₽
+
+Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
+
+После оплаты генерации будут автоматически добавлены на ваш баланс.`;
+      
+      await this.editOrSendMessage(ctx, message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            this.getBackButton()
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error creating generation purchase:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+    }
+  }
+
+  private getGenerationWord(count: number): string {
+    if (count % 10 === 1 && count % 100 !== 11) {
+      return 'генерация';
+    } else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
+      return 'генерации';
+    } else {
+      return 'генераций';
     }
   }
 

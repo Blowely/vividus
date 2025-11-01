@@ -79,4 +79,63 @@ export class UserService {
       client.release();
     }
   }
+
+  async getUserGenerations(telegramId: number): Promise<number> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        'SELECT generations FROM users WHERE telegram_id = $1',
+        [telegramId]
+      );
+      return result.rows[0]?.generations || 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async addGenerations(telegramId: number, amount: number): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        'UPDATE users SET generations = generations + $1, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = $2',
+        [amount, telegramId]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async deductGenerations(telegramId: number, amount: number): Promise<boolean> {
+    const client = await pool.connect();
+    
+    try {
+      // Проверяем баланс и списываем атомарно
+      const result = await client.query(
+        `UPDATE users 
+         SET generations = generations - $1, updated_at = CURRENT_TIMESTAMP 
+         WHERE telegram_id = $2 AND generations >= $1
+         RETURNING generations`,
+        [amount, telegramId]
+      );
+      
+      return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async returnGenerations(telegramId: number, amount: number): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        'UPDATE users SET generations = generations + $1, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = $2',
+        [amount, telegramId]
+      );
+    } finally {
+      client.release();
+    }
+  }
 }

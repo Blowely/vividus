@@ -66,6 +66,13 @@ export class ProcessorService {
       if (order) {
         const user = await this.userService.getUserById(order.user_id);
         if (user) {
+          // Проверяем, был ли заказ оплачен генерациями - возвращаем их
+          if (order.price === 0) {
+            await this.userService.returnGenerations(user.telegram_id, 1);
+            const newBalance = await this.userService.getUserGenerations(user.telegram_id);
+            await this.notifyUser(user.telegram_id, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+          }
+          
           // Используем переведённое сообщение об ошибке, если оно есть
           const errorMessage = error?.message || 'Произошла ошибка при обработке. Попробуйте позже.';
           await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
@@ -236,6 +243,15 @@ export class ProcessorService {
 
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, error);
+
+      // Проверяем, был ли заказ оплачен генерациями (price = 0 означает оплату генерациями)
+      const order = await this.orderService.getOrder(orderId);
+      if (order && order.price === 0) {
+        // Заказ был оплачен генерациями - возвращаем их
+        await this.userService.returnGenerations(telegramId, 1);
+        const newBalance = await this.userService.getUserGenerations(telegramId);
+        await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+      }
 
       // Translate error message for user
       const translatedError = this.translateRunwayError(error);
