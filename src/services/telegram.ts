@@ -1101,9 +1101,9 @@ export class TelegramService {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
           const originalPrice = pkg.originalPrice as number;
-          // Пробуем HTML форматирование <strike> (в кнопках обычно не работает, но попробуем)
+          // Используем Markdown форматирование ~текст~ для зачеркивания
           const originalPriceStr = `${originalPrice}₽`;
-          buttonText = `<strike>${originalPriceStr}</strike> ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          buttonText = `~${originalPriceStr}~ ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
         }
         return [
           Markup.button.callback(
@@ -1124,11 +1124,11 @@ export class TelegramService {
         }
       });
       
-      // Отправляем отдельное сообщение с reply-клавиатурой, чтобы она всегда была видна
+      // Отправляем невидимое сообщение с reply-клавиатурой, чтобы она всегда была видна
       // (после inline-сообщений reply-клавиатура может пропасть)
       setTimeout(async () => {
         try {
-          await ctx.reply('💡 Используйте кнопки ниже для навигации', {
+          await ctx.reply('\u200B', {
             reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
           });
         } catch (e) {
