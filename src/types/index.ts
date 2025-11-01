@@ -5,6 +5,7 @@ export interface User {
   first_name?: string;
   last_name?: string;
   start_param?: string;
+  email?: string;
   created_at: Date;
   updated_at: Date;
 }

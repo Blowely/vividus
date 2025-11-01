@@ -98,13 +98,59 @@ export class PaymentService {
       // Формируем Basic Auth: base64(shopId:secretKey)
       const authString = Buffer.from(`${shopId}:${secretKey}`).toString('base64');
       
+      // Получаем данные пользователя для чека
+      // ЮKassa требует email или телефон покупателя для чека
+      let customerEmail: string | undefined;
+      const dbClient = await pool.connect();
+      
+      try {
+        // Получаем user_id из платежа
+        const paymentResult = await dbClient.query(
+          'SELECT user_id FROM payments WHERE id = $1',
+          [paymentId]
+        );
+        
+        if (paymentResult.rows[0]?.user_id) {
+          // Получаем email пользователя (если указан) или telegram_id для fallback
+          const userResult = await dbClient.query(
+            'SELECT email, telegram_id FROM users WHERE id = $1',
+            [paymentResult.rows[0].user_id]
+          );
+          
+          if (userResult.rows[0]) {
+            // Используем реальный email если он есть, иначе создаем сгенерированный
+            if (userResult.rows[0].email) {
+              customerEmail = userResult.rows[0].email;
+            } else if (userResult.rows[0].telegram_id) {
+              // Fallback: создаем email на основе telegram_id
+              customerEmail = `user_${userResult.rows[0].telegram_id}@telegram.local`;
+            }
+          }
+        } else if (telegramId) {
+          // Fallback для тестовых платежей: получаем email пользователя по telegram_id
+          const userResult = await dbClient.query(
+            'SELECT email FROM users WHERE telegram_id = $1',
+            [telegramId]
+          );
+          
+          if (userResult.rows[0]?.email) {
+            customerEmail = userResult.rows[0].email;
+          } else {
+            // Используем сгенерированный email
+            customerEmail = `user_${telegramId}@telegram.local`;
+          }
+        }
+      } finally {
+        dbClient.release();
+      }
+
       // Формируем чек для продакшена (требование 54-ФЗ)
       // tax_system_code: 1 - УСН "доходы", 2 - УСН "доходы-расходы", 3 - ОСН, 4 - ЕНВД, 5 - ПСН, 6 - НПД
-      // vat_code: 1 - НДС 20%, 2 - НДС 10%, 3 - НДС расч. 20/120, 4 - НДС расч. 10/110, 5 - НДС 0%, 6 - без НДС
+      // vat_code: 1 - без НДС, 2 - НДС 0%, 3 - НДС 10%, 4 - НДС 20%, 5 - НДС расч. 10/110, 6 - НДС расч. 20/120, 7 - НДС 5%, 8 - НДС 7%
       const taxSystemCode = parseInt(process.env.YOOKASSA_TAX_SYSTEM_CODE || '1', 10);
       const vatCode = parseInt(process.env.YOOKASSA_VAT_CODE || '1', 10);
       
-      const receipt = {
+      const receipt: any = {
         items: [
           {
             description: `Оплата заказа ${paymentId}`,
@@ -118,6 +164,13 @@ export class PaymentService {
         ],
         tax_system_code: taxSystemCode
       };
+      
+      // Добавляем информацию о покупателе (обязательно для продакшена)
+      if (customerEmail) {
+        receipt.customer = {
+          email: customerEmail
+        };
+      }
 
       const response = await axios.post(
         'https://api.yookassa.ru/v3/payments',

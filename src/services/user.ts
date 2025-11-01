@@ -66,4 +66,17 @@ export class UserService {
       client.release();
     }
   }
+
+  async updateUserEmail(telegramId: number, email: string | null): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        'UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = $2',
+        [email, telegramId]
+      );
+    } finally {
+      client.release();
+    }
+  }
 }

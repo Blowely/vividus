@@ -21,6 +21,7 @@ export class TelegramService {
   private analyticsService: AnalyticsService;
   private pendingPrompts: Map<number, string> = new Map(); // userId -> fileId
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
+  private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
 
   constructor() {
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
@@ -209,6 +210,7 @@ export class TelegramService {
     // Создаем клавиатуру
     const keyboard = [
       [Markup.button.callback('📋 Мои заказы', 'my_orders')],
+      [Markup.button.callback('⚙️ Настройки', 'settings')],
       [Markup.button.callback('❓ Помощь', 'help')],
       [Markup.button.callback('🎬 Получить результат', 'get_result')],
       [Markup.button.callback('🧪 Тестовая оплата', 'test_payment')]
@@ -392,6 +394,12 @@ export class TelegramService {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       const text = (ctx.message as any).text;
       
+      // Проверяем, ожидает ли пользователь ввода email
+      if (this.waitingForEmail.has(ctx.from!.id)) {
+        await this.processEmailInput(ctx, text);
+        return;
+      }
+      
       // Check if user has pending photo
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
@@ -492,6 +500,19 @@ export class TelegramService {
         break;
       case 'test_payment':
         await this.handleTestPayment(ctx);
+        break;
+      case 'settings':
+        await this.handleSettings(ctx);
+        break;
+      case 'set_email':
+        await this.handleSetEmail(ctx);
+        break;
+      case 'clear_email':
+        await this.handleClearEmail(ctx);
+        break;
+      case 'cancel_email':
+        this.waitingForEmail.delete(ctx.from!.id);
+        await this.handleSettings(ctx);
         break;
       default:
         if (callbackData.startsWith('pay_')) {
@@ -752,6 +773,102 @@ export class TelegramService {
     } catch (error) {
       console.error('Error getting result:', error);
       await this.editOrSendMessage(ctx, '❌ Ошибка при получении результата');
+    }
+  }
+
+  private async handleSettings(ctx: Context) {
+    try {
+      const user = await this.userService.getUserByTelegramId(ctx.from!.id);
+      const currentEmail = user?.email || 'не указан';
+      
+      const settingsMessage = `
+⚙️ <b>Настройки</b>
+
+📧 <b>Email для получения чека:</b> ${currentEmail}
+
+Вы можете указать ваш email, чтобы получать кассовые чеки на почту при оплате.
+Если email не указан, чек будет формироваться автоматически, но отправка на email не произойдет.`;
+
+      const keyboard = [];
+      
+      if (currentEmail === 'не указан') {
+        keyboard.push([Markup.button.callback('✏️ Указать email', 'set_email')]);
+      } else {
+        keyboard.push(
+          [Markup.button.callback('✏️ Изменить email', 'set_email')],
+          [Markup.button.callback('🗑 Удалить email', 'clear_email')]
+        );
+      }
+      
+      keyboard.push(this.getBackButton());
+
+      await this.editOrSendMessage(ctx, settingsMessage, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    } catch (error) {
+      console.error('Error showing settings:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при открытии настроек');
+    }
+  }
+
+  private async handleSetEmail(ctx: Context) {
+    this.waitingForEmail.add(ctx.from!.id);
+    await this.editOrSendMessage(ctx, '📧 Пожалуйста, отправьте ваш email адрес:\n\nПример: example@mail.ru', {
+      reply_markup: {
+        inline_keyboard: [
+          [Markup.button.callback('❌ Отменить', 'cancel_email')]
+        ]
+      }
+    });
+    await ctx.answerCbQuery();
+  }
+
+  private async handleClearEmail(ctx: Context) {
+    try {
+      await this.userService.updateUserEmail(ctx.from!.id, null);
+      await this.editOrSendMessage(ctx, '✅ Email удален из настроек');
+      await ctx.answerCbQuery();
+      // Обновляем меню настроек
+      setTimeout(() => this.handleSettings(ctx), 500);
+    } catch (error) {
+      console.error('Error clearing email:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при удалении email');
+    }
+  }
+
+  private async processEmailInput(ctx: Context, emailText: string) {
+    try {
+      // Простая валидация email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      
+      if (!emailRegex.test(emailText.trim())) {
+        await this.editOrSendMessage(ctx, '❌ Некорректный формат email. Попробуйте еще раз:\n\nПример: example@mail.ru', {
+          reply_markup: {
+            inline_keyboard: [
+              [Markup.button.callback('❌ Отменить', 'cancel_email')]
+            ]
+          }
+        });
+        return;
+      }
+
+      const email = emailText.trim().toLowerCase();
+      await this.userService.updateUserEmail(ctx.from!.id, email);
+      this.waitingForEmail.delete(ctx.from!.id);
+      
+      await this.deleteUserMessage(ctx);
+      await this.editOrSendMessage(ctx, `✅ Email успешно сохранен: ${email}\n\nТеперь кассовые чеки будут приходить на этот адрес.`);
+      
+      // Возвращаемся в меню настроек через 2 секунды
+      setTimeout(() => this.handleSettings(ctx), 2000);
+      
+    } catch (error) {
+      console.error('Error processing email:', error);
+      this.waitingForEmail.delete(ctx.from!.id);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при сохранении email. Попробуйте позже.');
     }
   }
 
