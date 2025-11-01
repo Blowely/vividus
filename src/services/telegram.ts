@@ -1094,9 +1094,10 @@ export class TelegramService {
           const discountedPrice = Math.round(originalPrice * 0.67);
           const discountPercent = Math.round((1 - discountedPrice / originalPrice) * 100);
           // Используем combining strikethrough для зачеркивания в тексте сообщения
+          // Финальная цена только в кнопках, в тексте только зачеркнутая оригинальная
           const originalPriceStr = `${originalPrice}₽`;
           const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
-          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: -${discountPercent}% ${strikethroughPrice} ${discountedPrice}₽\n`;
+          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: -${discountPercent}% ${strikethroughPrice}\n`;
         }
       });
       
@@ -1111,11 +1112,11 @@ ${packageListText}
         
         if (pkg.isTest) {
           actualPrice = pkg.price;
-          buttonText = `🧪 ${actualPrice} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} (тест)`;
+          buttonText = `🧪 ${pkg.count} ${this.getGenerationWord(pkg.count)} → ${actualPrice} ₽ (тест)`;
         } else {
           // Используем цену со скидкой 33% как финальную цену (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
-          buttonText = `${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → ${actualPrice}₽`;
         }
         return [
           Markup.button.callback(
