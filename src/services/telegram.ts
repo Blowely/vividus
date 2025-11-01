@@ -369,11 +369,11 @@ export class TelegramService {
           }
         });
         
-        // Отправляем отдельное сообщение с reply-клавиатурой, чтобы она всегда была видна
+        // Отправляем невидимое сообщение с reply-клавиатурой, чтобы она всегда была видна
         // (после inline-сообщений reply-клавиатура может пропасть)
         setTimeout(async () => {
           try {
-            await ctx.reply('💡 Вы можете отправить описание текстом или использовать кнопки выше', {
+            await ctx.reply('\u200B', {
               reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
             });
           } catch (e) {
@@ -492,9 +492,11 @@ export class TelegramService {
         const keyboard = packages.map(pkg => {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           const discountedPrice = Math.round(pkg.originalPrice * 0.67);
-          // Используем combining strikethrough (U+0336) для визуального зачеркивания
-          const strikethroughOriginal = `${pkg.originalPrice}₽`.split('').join('\u0336') + '\u0336';
-          const buttonText = `${strikethroughOriginal} ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          // Используем combining strikethrough (U+0336) для зачеркивания
+          // Применяем символ зачеркивания к каждому символу, но без дополнительных пробелов
+          const originalPriceStr = `${pkg.originalPrice}₽`;
+          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
+          const buttonText = `${strikethroughPrice} ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
             Markup.button.callback(
               buttonText,
@@ -1101,9 +1103,11 @@ export class TelegramService {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
           const originalPrice = pkg.originalPrice as number;
-          // Используем combining strikethrough (U+0336) для визуального зачеркивания
-          const strikethroughOriginal = `${originalPrice}₽`.split('').join('\u0336') + '\u0336';
-          buttonText = `${strikethroughOriginal} ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          // Используем combining strikethrough (U+0336) для зачеркивания
+          // Применяем символ зачеркивания к каждому символу, но без дополнительных пробелов
+          const originalPriceStr = `${originalPrice}₽`;
+          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
+          buttonText = `${strikethroughPrice} ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
         }
         return [
           Markup.button.callback(
