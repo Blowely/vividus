@@ -98,6 +98,27 @@ export class PaymentService {
       // Формируем Basic Auth: base64(shopId:secretKey)
       const authString = Buffer.from(`${shopId}:${secretKey}`).toString('base64');
       
+      // Формируем чек для продакшена (требование 54-ФЗ)
+      // tax_system_code: 1 - УСН "доходы", 2 - УСН "доходы-расходы", 3 - ОСН, 4 - ЕНВД, 5 - ПСН, 6 - НПД
+      // vat_code: 1 - НДС 20%, 2 - НДС 10%, 3 - НДС расч. 20/120, 4 - НДС расч. 10/110, 5 - НДС 0%, 6 - без НДС
+      const taxSystemCode = parseInt(process.env.YOOKASSA_TAX_SYSTEM_CODE || '1', 10);
+      const vatCode = parseInt(process.env.YOOKASSA_VAT_CODE || '1', 10);
+      
+      const receipt = {
+        items: [
+          {
+            description: `Оплата заказа ${paymentId}`,
+            quantity: '1.00',
+            amount: {
+              value: numericAmount.toFixed(2),
+              currency: 'RUB'
+            },
+            vat_code: vatCode
+          }
+        ],
+        tax_system_code: taxSystemCode
+      };
+
       const response = await axios.post(
         'https://api.yookassa.ru/v3/payments',
         {
@@ -110,6 +131,7 @@ export class PaymentService {
             return_url: process.env.YOOMONEY_SUCCESS_URL || `https://t.me/${process.env.TELEGRAM_BOT_TOKEN?.split(':')[0]}`
           },
           description: `Оплата заказа ${paymentId}`,
+          receipt: receipt,
           metadata: {
             payment_id: paymentId,
             order_id: paymentId
