@@ -7,6 +7,7 @@ import { RunwayService } from './runway';
 import { FileService } from './file';
 import { MockService } from './mock';
 import { AnalyticsService } from './analytics';
+import pool from '../config/database';
 
 config();
 
@@ -41,6 +42,9 @@ export class TelegramService {
     const chatId = ctx.chat!.id;
     const userMessage = this.userMessages.get(userId);
 
+    // Убеждаемся, что reply-клавиатура сохраняется, если не указано явное удаление
+    const extraWithKeyboard = this.ensureReplyKeyboard(ctx, extra);
+
     try {
       if (userMessage && userMessage.chatId === chatId) {
         // Редактируем существующее сообщение
@@ -49,11 +53,11 @@ export class TelegramService {
           userMessage.messageId,
           undefined,
           text,
-          extra
+          extraWithKeyboard
         );
       } else {
         // Отправляем новое сообщение
-        const message = await ctx.reply(text, extra);
+        const message = await ctx.reply(text, extraWithKeyboard);
         if (message && 'message_id' in message) {
           this.userMessages.set(userId, {
             messageId: (message as any).message_id,
@@ -64,7 +68,7 @@ export class TelegramService {
     } catch (error: any) {
       // Если не можем отредактировать (сообщение не найдено или слишком старое), отправляем новое
       if (error.code === 400 || error.description?.includes('message') || error.description?.includes('not found')) {
-        const message = await ctx.reply(text, extra);
+        const message = await ctx.reply(text, extraWithKeyboard);
         if (message && 'message_id' in message) {
           this.userMessages.set(userId, {
             messageId: (message as any).message_id,
@@ -75,6 +79,35 @@ export class TelegramService {
         throw error;
       }
     }
+  }
+
+  private ensureReplyKeyboard(ctx: Context, extra?: any): any {
+    // Если в extra уже есть remove_keyboard - используем как есть (явное удаление)
+    if (extra?.reply_markup?.remove_keyboard) {
+      return extra;
+    }
+    
+    // Если в extra уже есть keyboard - используем как есть
+    if (extra?.reply_markup?.keyboard) {
+      return extra;
+    }
+    
+    // Если есть inline_keyboard - не добавляем reply-клавиатуру в том же сообщении
+    // (в Telegram нельзя одновременно использовать оба типа в одном сообщении)
+    // Но reply-клавиатура останется из предыдущих сообщений
+    if (extra?.reply_markup?.inline_keyboard) {
+      return extra;
+    }
+    
+    // Если нет reply_markup вообще - добавляем главную клавиатуру
+    if (!extra?.reply_markup) {
+      return {
+        ...extra,
+        reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+      };
+    }
+    
+    return extra;
   }
 
   private async deleteUserMessage(ctx: Context): Promise<void> {
@@ -103,15 +136,7 @@ export class TelegramService {
   private getMainReplyKeyboard(userId: number): any {
     const keyboard = [
       [Markup.button.text('🎬 Оживить фото')],
-      [Markup.button.text('📋 Мои заказы')],
-      [
-        Markup.button.text('⚙️ Настройки'),
-        Markup.button.text('❓ Поддержка')
-      ],
-      [
-        Markup.button.text('🎬 Получить результат'),
-        Markup.button.text('🧪 Тестовая оплата')
-      ]
+      [Markup.button.text('✨ Купить генерации'), Markup.button.text('❓ Поддержка')],
     ];
 
     // Добавляем кнопки для админов
@@ -123,6 +148,32 @@ export class TelegramService {
       keyboard: keyboard,
       resize_keyboard: true
     };
+  }
+
+  // Публичный метод для отправки сообщений с сохранением reply-клавиатуры
+  // Используется из других сервисов (PaymentService, ProcessorService)
+  public async sendMessageWithKeyboard(telegramId: number, message: string, extra?: any): Promise<void> {
+    try {
+      // Получаем клавиатуру для пользователя
+      const client = await pool.connect();
+      try {
+        const userResult = await client.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
+        const userId = userResult.rows[0]?.id || null;
+        
+        // Если пользователь найден, добавляем клавиатуру
+        const replyMarkup = userId ? this.getMainReplyKeyboard(telegramId) : undefined;
+        
+        await this.bot.telegram.sendMessage(telegramId, message, {
+          ...extra,
+          reply_markup: extra?.reply_markup || replyMarkup
+        });
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error(`Error sending message to user ${telegramId}:`, error);
+      throw error;
+    }
   }
 
   private setupHandlers() {
@@ -606,9 +657,7 @@ export class TelegramService {
         // Удаляем inline клавиатуру и показываем главное меню с reply клавиатурой
         try {
           await ctx.reply('◀️ Возвращаюсь в главное меню...', {
-            reply_markup: {
-              remove_keyboard: true
-            }
+            reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
           });
         } catch (e) {
           // Игнорируем ошибки
@@ -900,7 +949,9 @@ export class TelegramService {
         
         // Сообщение о возможности отправить следующее фото (отправляем новое сообщение, не редактируем)
         setTimeout(async () => {
-          await ctx.reply('📸 Вы можете сразу отправить следующее фото для создания нового видео!');
+          await ctx.reply('📸 Вы можете сразу отправить следующее фото для создания нового видео!', {
+            reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+          });
         }, 2000);
       } else {
         await this.editOrSendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
@@ -1060,6 +1111,18 @@ export class TelegramService {
           inline_keyboard: keyboard
         }
       });
+      
+      // Отправляем отдельное сообщение с reply-клавиатурой, чтобы она всегда была видна
+      // (после inline-сообщений reply-клавиатура может пропасть)
+      setTimeout(async () => {
+        try {
+          await ctx.reply('💡 Используйте кнопки ниже для навигации', {
+            reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+          });
+        } catch (e) {
+          // Игнорируем ошибки (клавиатура уже может быть видна)
+        }
+      }, 500);
     } catch (error) {
       console.error('Error showing buy generations menu:', error);
       await this.editOrSendMessage(ctx, '❌ Ошибка при загрузке меню покупки генераций');
