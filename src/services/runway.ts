@@ -17,7 +17,12 @@ export class RunwayService {
     this.s3Service = new S3Service();
   }
 
-  private translateRunwayError(errorMessage: string): string {
+  private translateRunwayError(errorMessage: string | undefined | null): string {
+    // Если ошибка не передана, возвращаем общее сообщение
+    if (!errorMessage || typeof errorMessage !== 'string') {
+      return 'Ошибка при обработке видео. Попробуйте позже.';
+    }
+    
     const errorLower = errorMessage.toLowerCase();
     
     // Соотношение сторон
@@ -25,8 +30,12 @@ export class RunwayService {
       return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.5 до 2.';
     }
     
-    // Модерация контента
-    if (errorLower.includes('content moderation') || errorLower.includes('moderation') || errorLower.includes('not passed moderation')) {
+    // Модерация контента (включая public figure)
+    if (errorLower.includes('content moderation') || 
+        errorLower.includes('moderation') || 
+        errorLower.includes('not passed moderation') ||
+        errorLower.includes('public figure') ||
+        errorLower.includes('did not pass')) {
       return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
     }
     
@@ -45,8 +54,8 @@ export class RunwayService {
       return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
     }
     
-    // Возвращаем оригинальное сообщение, если не нашли соответствие
-    return `Ошибка обработки: ${errorMessage}`;
+    // Если не удалось перевести, возвращаем оригинальную ошибку от RunwayML
+    return errorMessage;
   }
 
   async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string> {

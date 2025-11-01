@@ -108,8 +108,9 @@ export class ProcessorService {
               // Игнорируем ошибки удаления
             }
           }
-          // Job failed
-          await this.handleJobFailure(generationId, telegramId, orderId, jobStatus.error);
+          // Job failed - используем failure, error или fallback
+          const errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+          await this.handleJobFailure(generationId, telegramId, orderId, errorMessage);
         } else if (attempts >= maxAttempts) {
           // Удаляем сообщение о прогрессе, если оно есть
           if (progressMessageId) {
@@ -250,7 +251,12 @@ export class ProcessorService {
     }
   }
 
-  private translateRunwayError(errorMessage: string): string {
+  private translateRunwayError(errorMessage: string | undefined | null): string {
+    // Если ошибка не передана, возвращаем общее сообщение
+    if (!errorMessage || typeof errorMessage !== 'string') {
+      return 'Ошибка при обработке видео. Попробуйте позже.';
+    }
+    
     const errorLower = errorMessage.toLowerCase();
     
     // Соотношение сторон
@@ -258,8 +264,12 @@ export class ProcessorService {
       return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.5 до 2.';
     }
     
-    // Модерация контента
-    if (errorLower.includes('content moderation') || errorLower.includes('moderation') || errorLower.includes('not passed moderation')) {
+    // Модерация контента (включая public figure)
+    if (errorLower.includes('content moderation') || 
+        errorLower.includes('moderation') || 
+        errorLower.includes('not passed moderation') ||
+        errorLower.includes('public figure') ||
+        errorLower.includes('did not pass')) {
       return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
     }
     
@@ -278,8 +288,8 @@ export class ProcessorService {
       return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
     }
     
-    // Возвращаем общее сообщение, если не нашли соответствие
-    return 'Ошибка при обработке видео. Попробуйте позже.';
+    // Если не удалось перевести, возвращаем оригинальную ошибку от RunwayML
+    return errorMessage;
   }
 
   private async handleJobTimeout(generationId: string, telegramId: number, orderId: string): Promise<void> {
