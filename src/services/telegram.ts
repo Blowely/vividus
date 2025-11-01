@@ -492,11 +492,9 @@ export class TelegramService {
         const keyboard = packages.map(pkg => {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           const discountedPrice = Math.round(pkg.originalPrice * 0.67);
-          // Используем combining strikethrough (U+0336) для зачеркивания
-          // Применяем символ зачеркивания к каждому символу, но без дополнительных пробелов
+          // Пробуем Markdown форматирование ~текст~ (в кнопках обычно не работает, но попробуем)
           const originalPriceStr = `${pkg.originalPrice}₽`;
-          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
-          const buttonText = `${strikethroughPrice} ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          const buttonText = `~${originalPriceStr}~ ${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
             Markup.button.callback(
               buttonText,
@@ -1103,11 +1101,9 @@ export class TelegramService {
           // Вычисляем цену со скидкой 33% (оригинальная * 0.67)
           actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
           const originalPrice = pkg.originalPrice as number;
-          // Используем combining strikethrough (U+0336) для зачеркивания
-          // Применяем символ зачеркивания к каждому символу, но без дополнительных пробелов
+          // Пробуем HTML форматирование <strike> (в кнопках обычно не работает, но попробуем)
           const originalPriceStr = `${originalPrice}₽`;
-          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
-          buttonText = `${strikethroughPrice} ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          buttonText = `<strike>${originalPriceStr}</strike> ${actualPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
         }
         return [
           Markup.button.callback(
