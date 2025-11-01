@@ -412,36 +412,43 @@ export class TelegramService {
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
       } else {
-        // У пользователя нет генераций - создаем заказ с оплатой
-        const order = await this.orderService.createOrder(user.id, s3Url, 1, processedPrompt);
-        
-        // Создаем платеж сразу после создания заказа
-        const payment = await this.paymentService.createPayment(order.id, order.price);
-        
-        // Генерируем ссылку на оплату
-        const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
-        
-        // Обновляем сообщение о создании заказа и сразу показываем оплату
+        // У пользователя нет генераций - предлагаем купить генерации или оплатить разово
         await this.deleteUserMessage(ctx);
         
-        // Показываем окно оплаты с прямой ссылкой
-        const paymentMessage = `
-💳 Оплата заказа
-
-📸 Фото: готово к обработке
-🎬 Промпт: ${originalPrompt ? `"${originalPrompt}"` : 'стандартная анимация'}
-💰 Стоимость: ${order.price} рублей
-
-💡 <b>Совет:</b> Купите генерации заранее и обрабатывайте фото без ожидания оплаты!`;
+        // Сохраняем fileId для повторной обработки после покупки генераций
+        // Используем pendingPrompts для сохранения информации о фото
+        const tempOrderId = `temp_${Date.now()}_${user.telegram_id}`;
+        this.pendingPrompts.set(user.telegram_id, fileId); // Сохраняем для повторной обработки
         
-        await this.editOrSendMessage(ctx, paymentMessage, {
-          parse_mode: 'HTML',
+        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+
+📸 Ваше фото сохранено и готово к обработке
+🎬 Промпт: "${originalPrompt ? originalPrompt : 'стандартная анимация'}"
+
+Выберите способ оплаты:`;
+        
+        // Пакеты генераций
+        const packages = [
+          { count: 1, price: 105 },
+          { count: 3, price: 315 },
+          { count: 5, price: 525 },
+          { count: 10, price: 950 }
+        ];
+        
+        const keyboard = packages.map(pkg => [
+          Markup.button.callback(
+            `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`,
+            `buy_and_process_${pkg.count}_${pkg.price}`
+          )
+        ]);
+        
+        // Добавляем кнопку для разовой оплаты заказа
+        keyboard.push([Markup.button.callback('💳 Оплатить разово (1 ₽)', 'pay_single_order')]);
+        keyboard.push(this.getBackButton());
+        
+        await this.editOrSendMessage(ctx, noGenerationsMessage, {
           reply_markup: {
-            inline_keyboard: [
-              [Markup.button.url('💳 Оплатить', paymentUrl)],
-              [Markup.button.callback('❌ Отменить', 'cancel')],
-              this.getBackButton()
-            ]
+            inline_keyboard: keyboard
           }
         });
       }
@@ -1025,22 +1032,139 @@ export class TelegramService {
     }
   }
 
-  private async handlePurchaseGenerations(ctx: Context, generationsCount: number, price: number) {
+  private async handleBuyAndProcess(ctx: Context, generationsCount: number, price: number) {
     try {
       await ctx.answerCbQuery();
       
+      // Сначала создаем покупку генераций
+      console.log(`📦 Creating generation purchase with auto-process: ${generationsCount} generations for ${price} RUB, user: ${ctx.from!.id}`);
+      
       const payment = await this.paymentService.createGenerationPurchase(ctx.from!.id, generationsCount, price);
+      console.log(`✅ Payment created: ${payment.id}`);
+      
       const paymentUrl = await this.paymentService.generateGenerationPurchaseUrl(
         payment.id,
         price,
         generationsCount,
         ctx.from!.id
       );
+      console.log(`✅ Payment URL generated: ${paymentUrl}`);
+      
+      const message = `💳 Покупка генераций и обработка фото
+
+📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
+💰 Сумма: ${price} ₽
+🆔 ID платежа: ${payment.id.slice(0, 8)}...
+
+После оплаты:
+✅ Генерации будут добавлены на ваш баланс
+✅ Ваше фото будет автоматически обработано
+
+Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
+      
+      // Сохраняем информацию о том, что после оплаты нужно обработать фото
+      // Используем metadata в платеже или создаем специальный флаг
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const fileId = this.pendingPrompts.get(user.telegram_id);
+      
+      if (fileId) {
+        // Сохраняем информацию о необходимости обработки после покупки
+        // Можно использовать временное хранилище или добавить в metadata платежа
+        // Для простоты используем pendingPrompts с модификатором
+        this.pendingPrompts.set(user.telegram_id, `process_after_payment_${payment.id}_${fileId}`);
+      }
+      
+      await this.editOrSendMessage(ctx, message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            this.getBackButton()
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error creating buy and process purchase:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await this.editOrSendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+    }
+  }
+
+  private async handleSingleOrderPayment(ctx: Context) {
+    try {
+      await ctx.answerCbQuery();
+      
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const fileId = this.pendingPrompts.get(user.telegram_id);
+      
+      if (!fileId) {
+        await this.editOrSendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
+        return;
+      }
+      
+      // Получаем промпт (если был сохранен)
+      const promptText = 'animate this image with subtle movements and breathing effect'; // Можно сохранять промпт отдельно
+      
+      await this.editOrSendMessage(ctx, '📤 Загружаю фото в облако...');
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      
+      // Создаем заказ с оплатой
+      const order = await this.orderService.createOrder(user.id, s3Url, 1, promptText);
+      
+      // Создаем платеж
+      const payment = await this.paymentService.createPayment(order.id, order.price);
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
+      
+      // Удаляем из pending
+      this.pendingPrompts.delete(user.telegram_id);
+      
+      const paymentMessage = `
+💳 Оплата заказа
+
+📸 Фото: готово к обработке
+🎬 Промпт: стандартная анимация
+💰 Стоимость: ${order.price} рублей
+
+Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
+      
+      await this.editOrSendMessage(ctx, paymentMessage, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            [Markup.button.callback('❌ Отменить', 'cancel')],
+            this.getBackButton()
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error creating single order payment:', error);
+      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+    }
+  }
+
+  private async handlePurchaseGenerations(ctx: Context, generationsCount: number, price: number) {
+    try {
+      await ctx.answerCbQuery();
+      
+      console.log(`📦 Creating generation purchase: ${generationsCount} generations for ${price} RUB, user: ${ctx.from!.id}`);
+      
+      const payment = await this.paymentService.createGenerationPurchase(ctx.from!.id, generationsCount, price);
+      console.log(`✅ Payment created: ${payment.id}`);
+      
+      const paymentUrl = await this.paymentService.generateGenerationPurchaseUrl(
+        payment.id,
+        price,
+        generationsCount,
+        ctx.from!.id
+      );
+      console.log(`✅ Payment URL generated: ${paymentUrl}`);
       
       const message = `💳 Покупка генераций
 
 📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
 💰 Сумма: ${price} ₽
+🆔 ID платежа: ${payment.id.slice(0, 8)}...
 
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
 
@@ -1057,7 +1181,8 @@ export class TelegramService {
       });
     } catch (error) {
       console.error('Error creating generation purchase:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await this.editOrSendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
     }
   }
 

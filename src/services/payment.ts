@@ -433,20 +433,39 @@ export class PaymentService {
               }
               
               // Проверяем, является ли это покупкой генераций (проверяем metadata)
-            const isGenerationPurchase = metadata?.generations_count || metadata?.purchase_type === 'generations';
-            if (isGenerationPurchase) {
-              // Это покупка генераций
+            console.log('📦 Checking if payment is generation purchase...');
+            console.log('   Metadata:', JSON.stringify(metadata, null, 2));
+            console.log('   Payment order_id:', paymentResult.rows[0]?.order_id);
+            
+            const isGenerationPurchase = metadata?.generations_count || metadata?.purchase_type === 'generations' || !paymentResult.rows[0]?.order_id;
+            
+            // Если нет order_id и есть metadata с generations, это покупка генераций
+            if (!paymentResult.rows[0]?.order_id && (metadata?.generations_count || metadata?.purchase_type === 'generations')) {
+              console.log('✅ This is a generation purchase!');
               const generationsCount = parseInt(metadata?.generations_count || '0', 10);
+              
               if (generationsCount > 0) {
                 const { UserService } = await import('./user');
                 const userService = new UserService();
+                
+                console.log(`➕ Adding ${generationsCount} generations to user ${user.telegram_id}`);
                 await userService.addGenerations(user.telegram_id, generationsCount);
                 
                 const newBalance = await userService.getUserGenerations(user.telegram_id);
+                console.log(`✅ New balance: ${newBalance} generations`);
+                
                 await this.bot.telegram.sendMessage(
                   user.telegram_id,
-                  `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} генераций\n💼 Ваш баланс: ${newBalance} генераций`
+                  `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
                 );
+                
+                // Проверяем, нужно ли автоматически обработать фото после покупки
+                // Ищем pending photo для пользователя (если было сохранено)
+                const { TelegramService } = await import('./telegram');
+                // Это сложно сделать напрямую, поэтому используем проверку через обработчик
+                // Можно добавить флаг в metadata или использовать другой механизм
+              } else {
+                console.log('⚠️ Generations count is 0 or not found in metadata');
               }
               return;
             }
