@@ -1019,6 +1019,7 @@ export class TelegramService {
       
       // Пакеты генераций со скидкой 33%
       const packages = [
+        { count: 7, price: 1, isTest: true }, // Тестовый пакет
         { count: 1, price: 105 },
         { count: 3, price: 315 },
         { count: 5, price: 525 },
@@ -1029,12 +1030,17 @@ export class TelegramService {
 
 Выберите пакет 👇`;
       
-      const keyboard = packages.map(pkg => [
-        Markup.button.callback(
-          `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`,
-          `buy_generations_${pkg.count}_${pkg.price}`
-        )
-      ]);
+      const keyboard = packages.map(pkg => {
+        const buttonText = pkg.isTest 
+          ? `🧪 ${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)} (тест)`
+          : `${pkg.price} ₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+        return [
+          Markup.button.callback(
+            buttonText,
+            `buy_generations_${pkg.count}_${pkg.price}`
+          )
+        ];
+      });
       
       // Добавляем кнопку оплаты звёздами (пока заглушка)
       keyboard.push([Markup.button.callback('⭐ Оплатить звёздами', 'buy_generations_stars')]);
