@@ -239,16 +239,7 @@ export class TelegramService {
     // Создаем reply клавиатуру (кнопки под полем ввода)
     const keyboard = [
       [Markup.button.text('🎬 Оживить фото')],
-      [Markup.button.text('✨ Купить генерации')],
-      [Markup.button.text('📋 Мои заказы')],
-      [
-        Markup.button.text('⚙️ Настройки'),
-        Markup.button.text('❓ Поддержка')
-      ],
-      [
-        Markup.button.text('🎬 Получить результат'),
-        Markup.button.text('🧪 Тестовая оплата')
-      ]
+      [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
     ];
 
     // Добавляем кнопки для админов
@@ -1241,7 +1232,6 @@ export class TelegramService {
       await this.bot.telegram.setMyCommands([
         { command: 'start', description: '🚀 Начать работу с ботом' },
         { command: 'help', description: '❓ Помощь и инструкции' },
-        { command: 'mock_pay', description: '🎭 Тест оплаты (для разработки)' },
         { command: 'orders', description: '📋 Мои заказы' }
       ]);
       
