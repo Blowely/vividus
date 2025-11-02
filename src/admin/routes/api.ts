@@ -835,6 +835,39 @@ router.get('/logs', async (req, res) => {
   }
 });
 
+// Удалить все логи
+router.delete('/logs', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      // Проверяем, существует ли таблица activity_logs
+      const tableExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'activity_logs'
+        );
+      `);
+      
+      if (!tableExists.rows[0].exists) {
+        return res.status(404).json({ error: 'Таблица activity_logs не найдена' });
+      }
+
+      const result = await client.query('DELETE FROM activity_logs');
+      
+      res.json({ 
+        message: 'Все логи успешно удалены',
+        deletedCount: result.rowCount || 0
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Error deleting logs:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
 // Получить список доступных таблиц для фильтрации
 router.get('/logs/tables', async (req, res) => {
   try {

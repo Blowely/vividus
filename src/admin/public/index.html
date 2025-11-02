@@ -650,6 +650,9 @@
                     <select id="filter-logs-campaign" onchange="applyLogsFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
                         <option value="">Все кампании</option>
                     </select>
+                    <button onclick="clearAllLogs()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap;">
+                        🗑️ Очистить все логи
+                    </button>
                 </div>
                 <div id="active-filters-logs" class="active-filters"></div>
                 <div id="logs-table"></div>
@@ -2254,6 +2257,34 @@
                 updateActiveFilters('logs');
             } catch (error) {
                 container.innerHTML = `<div class="empty">Ошибка загрузки логов: ${error.message}</div>`;
+            }
+        }
+
+        // Очистка всех логов
+        async function clearAllLogs() {
+            if (!confirm('⚠️ Вы уверены, что хотите удалить ВСЕ логи? Это действие нельзя отменить!')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/logs', {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(`Ошибка: ${error.error || error.details || 'Неизвестная ошибка'}`);
+                    return;
+                }
+                
+                const result = await response.json();
+                alert(`✅ ${result.message}\nУдалено записей: ${result.deletedCount || 0}`);
+                
+                // Перезагружаем логи
+                loadLogs(1);
+            } catch (error) {
+                console.error('Error clearing logs:', error);
+                alert(`Ошибка при удалении логов: ${error.message}`);
             }
         }
 
