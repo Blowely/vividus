@@ -52,12 +52,22 @@ function verifyTelegramAuth(authData: any): boolean {
   console.log('Data fields:', Object.keys(data));
   
   // Создаём строку для проверки подписи
-  const dataCheckString = Object.keys(data)
+  // Важно: все значения должны быть строками, исключаем только undefined/null
+  const filteredData: any = {};
+  for (const key in data) {
+    if (data[key] !== undefined && data[key] !== null) {
+      filteredData[key] = String(data[key]);
+    }
+  }
+  
+  const dataCheckString = Object.keys(filteredData)
     .sort()
-    .map(key => `${key}=${data[key]}`)
+    .map(key => `${key}=${filteredData[key]}`)
     .join('\n');
   
+  console.log('Filtered data fields:', Object.keys(filteredData));
   console.log('Data check string:', dataCheckString);
+  console.log('Data check string (escaped):', JSON.stringify(dataCheckString));
 
   if (!BOT_TOKEN) {
     console.error('BOT_TOKEN is missing');
@@ -65,12 +75,16 @@ function verifyTelegramAuth(authData: any): boolean {
   }
 
   // Создаём секретный ключ из bot token
+  // Согласно документации Telegram: secret_key = HMAC-SHA256("WebAppData", bot_token)
+  // В Node.js: createHmac('sha256', ключ).update(данные)
   const secretKey = crypto
     .createHmac('sha256', 'WebAppData')
     .update(BOT_TOKEN)
     .digest();
 
-  // Вычисляем хеш
+  console.log('Secret key (first 16 bytes):', secretKey.slice(0, 16).toString('hex'));
+
+  // Вычисляем хеш используя secretKey как ключ для HMAC
   const calculatedHash = crypto
     .createHmac('sha256', secretKey)
     .update(dataCheckString)
