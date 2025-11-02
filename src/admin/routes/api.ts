@@ -529,12 +529,20 @@ router.get('/stats', async (req, res) => {
           (SELECT COUNT(*) FROM orders o 
            INNER JOIN users u ON u.id = o.user_id 
            WHERE o.status = 'failed' ${campaignFilter}) as failed_orders,
-          (SELECT COUNT(*) FROM payments p 
-           INNER JOIN users u ON u.id = p.user_id 
-           WHERE p.status = 'success' ${campaignFilter}) as successful_payments,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p 
-           INNER JOIN users u ON u.id = p.user_id 
-           WHERE p.status = 'success' ${campaignFilter}) as total_revenue,
+          (SELECT COUNT(*) 
+           FROM payments p 
+           LEFT JOIN orders o ON p.order_id = o.id
+           LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
+           WHERE p.status = 'success' 
+             AND u.id IS NOT NULL
+             ${campaign ? 'AND u.start_param = $1' : ''}) as successful_payments,
+          (SELECT COALESCE(SUM(p.amount), 0) 
+           FROM payments p 
+           LEFT JOIN orders o ON p.order_id = o.id
+           LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
+           WHERE p.status = 'success' 
+             AND u.id IS NOT NULL
+             ${campaign ? 'AND u.start_param = $1' : ''}) as total_revenue,
           (SELECT COALESCE(SUM(u.generations), 0) FROM users u ${campaign ? 'WHERE start_param = $1' : ''}) as total_generations,
           (SELECT COUNT(*) FROM did_jobs dj 
            INNER JOIN orders o ON o.id = dj.order_id 
