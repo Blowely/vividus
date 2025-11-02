@@ -52,22 +52,25 @@ function verifyTelegramAuth(authData: any): boolean {
   console.log('Data fields:', Object.keys(data));
   
   // Создаём строку для проверки подписи
-  // Важно: все значения должны быть строками, исключаем только undefined/null
+  // Согласно документации Telegram: исключаем только hash, остальные поля включаем
+  // Все значения должны быть строками
   const filteredData: any = {};
   for (const key in data) {
-    if (data[key] !== undefined && data[key] !== null) {
+    if (key !== 'hash' && data[key] !== undefined && data[key] !== null) {
       filteredData[key] = String(data[key]);
     }
   }
   
-  const dataCheckString = Object.keys(filteredData)
-    .sort()
+  // Сортируем ключи и создаём строку в формате key=value\nkey=value
+  const sortedKeys = Object.keys(filteredData).sort();
+  const dataCheckString = sortedKeys
     .map(key => `${key}=${filteredData[key]}`)
     .join('\n');
   
-  console.log('Filtered data fields:', Object.keys(filteredData));
+  console.log('Filtered data fields:', sortedKeys);
   console.log('Data check string:', dataCheckString);
   console.log('Data check string (escaped):', JSON.stringify(dataCheckString));
+  console.log('Data check string bytes:', Buffer.from(dataCheckString, 'utf8').length);
 
   if (!BOT_TOKEN) {
     console.error('BOT_TOKEN is missing');
@@ -75,11 +78,10 @@ function verifyTelegramAuth(authData: any): boolean {
   }
 
   // Создаём секретный ключ из bot token
-  // Согласно документации Telegram: secret_key = HMAC-SHA256("WebAppData", bot_token)
-  // Важно: в документации это записывается как HMAC-SHA256(key="WebAppData", data=bot_token)
-  // В Node.js: createHmac('sha256', key).update(data).digest()
+  // Согласно официальной документации Telegram: secret_key = SHA256(bot_token)
+  // НЕ HMAC-SHA256, а просто SHA256!
   const secretKey = crypto
-    .createHmac('sha256', 'WebAppData')
+    .createHash('sha256')
     .update(BOT_TOKEN)
     .digest(); // Buffer длиной 32 байта
 
@@ -91,7 +93,7 @@ function verifyTelegramAuth(authData: any): boolean {
 
   // Вычисляем хеш используя secretKey (Buffer) как ключ для HMAC
   // hash = HMAC-SHA256(secret_key, data_check_string)
-  // где key = secretKey (Buffer), data = dataCheckString (string)
+  // где key = secretKey (Buffer от SHA256 токена), data = dataCheckString (string)
   const hmac = crypto.createHmac('sha256', secretKey);
   hmac.update(dataCheckString, 'utf8');
   const calculatedHash = hmac.digest('hex');
@@ -149,25 +151,8 @@ app.post('/api/auth/telegram', async (req, res) => {
 async function processTelegramAuth(authData: any, res: express.Response, req?: express.Request) {
   try {
     // Проверяем подпись
-    // Временно: если это админ из списка, пропускаем проверку подписи (для отладки)
-    const isTrustedAdmin = ADMIN_USERNAMES.includes(authData.username || '') || 
-                           (process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || []).includes(parseInt(authData.id));
-    
-    let isValid = false;
-    if (isTrustedAdmin) {
-      // Для доверенных админов сначала пробуем проверить подпись
-      isValid = verifyTelegramAuth(authData);
-      console.log('Signature verification result:', isValid);
-      
-      // Если подпись не совпадает, но это доверенный админ - логируем, но пропускаем
-      if (!isValid) {
-        console.warn('Signature verification failed, but user is trusted admin - allowing access');
-        isValid = true; // Временно разрешаем для отладки
-      }
-    } else {
-      isValid = verifyTelegramAuth(authData);
-      console.log('Signature verification result:', isValid);
-    }
+    const isValid = verifyTelegramAuth(authData);
+    console.log('Signature verification result:', isValid);
     
     if (!isValid) {
       console.error('Invalid Telegram authentication signature');
