@@ -152,7 +152,13 @@ BEGIN
     -- Determine record ID and user_id based on table
     IF TG_TABLE_NAME = 'users' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
-        user_id_val := COALESCE(NEW.id, OLD.id);
+        -- Для DELETE устанавливаем user_id в NULL, так как пользователь будет удалён
+        -- ID пользователя будет сохранён в old_data
+        IF TG_OP = 'DELETE' THEN
+            user_id_val := NULL;
+        ELSE
+            user_id_val := COALESCE(NEW.id, OLD.id);
+        END IF;
     ELSIF TG_TABLE_NAME = 'orders' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
         user_id_val := COALESCE(NEW.user_id, OLD.user_id);
@@ -226,7 +232,7 @@ $$ LANGUAGE plpgsql;
 -- Create triggers for all tables (drop if exists to allow re-running migration)
 DROP TRIGGER IF EXISTS log_users_activity ON users;
 CREATE TRIGGER log_users_activity
-    AFTER INSERT OR UPDATE OR DELETE ON users
+    AFTER INSERT OR UPDATE OR BEFORE DELETE ON users
     FOR EACH ROW EXECUTE FUNCTION log_activity();
 
 DROP TRIGGER IF EXISTS log_orders_activity ON orders;
