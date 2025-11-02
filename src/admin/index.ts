@@ -175,11 +175,12 @@ async function processTelegramAuth(authData: any, res: express.Response, req?: e
       }
 
       const adminIds = getAdminIds();
+      const userTelegramId = parseInt(user.telegram_id) || user.telegram_id;
       console.log('Admin IDs from env (processTelegramAuth):', adminIds);
-      console.log('User telegram_id (processTelegramAuth):', user.telegram_id);
-      console.log('Is admin? (processTelegramAuth):', adminIds.includes(user.telegram_id));
+      console.log('User telegram_id (processTelegramAuth):', userTelegramId, 'type:', typeof userTelegramId);
+      console.log('Is admin? (processTelegramAuth):', adminIds.includes(userTelegramId));
       
-      const isAdmin = adminIds.includes(user.telegram_id);
+      const isAdmin = adminIds.includes(userTelegramId);
 
       if (!isAdmin) {
         console.error(`Access denied for telegram_id ${user.telegram_id}. Admin IDs: ${adminIds.join(', ')}`);
@@ -256,10 +257,11 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
 
       const user = result.rows[0];
       const adminIds = getAdminIds();
+      const userTelegramId = parseInt(user.telegram_id) || user.telegram_id;
       console.log('Admin IDs from env (requireAuth):', adminIds);
-      console.log('User telegram_id (requireAuth):', user.telegram_id);
+      console.log('User telegram_id (requireAuth):', userTelegramId, 'type:', typeof userTelegramId);
       
-      const isAdmin = adminIds.includes(user.telegram_id);
+      const isAdmin = adminIds.includes(userTelegramId);
 
       if (!isAdmin) {
         console.error(`Access denied for telegram_id ${user.telegram_id}. Admin IDs: ${adminIds.join(', ')}`);
