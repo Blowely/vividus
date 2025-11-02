@@ -96,8 +96,14 @@ export class ProcessorService {
           // Job completed successfully
           await this.handleJobSuccess(generationId, telegramId, orderId, jobStatus.output[0]);
         } else if (jobStatus.status === 'FAILED') {
-          // Job failed - используем failure, error или fallback
-          const errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+          // Job failed - учитываем failureCode для специфичных ошибок
+          let errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+          
+          // Если есть failureCode, добавляем его к сообщению об ошибке для лучшей обработки
+          if ((jobStatus as any).failureCode) {
+            errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
+          }
+          
           await this.handleJobFailure(generationId, telegramId, orderId, errorMessage);
         } else if (attempts >= maxAttempts) {
           // Timeout
@@ -243,6 +249,19 @@ export class ProcessorService {
     // Если ошибка не передана, возвращаем общее сообщение
     if (!errorMessage || typeof errorMessage !== 'string') {
       return 'Ошибка при обработке видео. Попробуйте позже.';
+    }
+    
+    // Проверяем наличие failureCode в сообщении
+    const failureCodeMatch = errorMessage.match(/failureCode:([^\|]+)/);
+    if (failureCodeMatch) {
+      const failureCode = failureCodeMatch[1];
+      // Убираем failureCode из сообщения для дальнейшей обработки
+      errorMessage = errorMessage.replace(/\|failureCode:[^\|]+/, '');
+      
+      // Обрабатываем специфичные коды ошибок
+      if (failureCode === 'INTERNAL.BAD_OUTPUT.CODE01') {
+        return 'Ошибка при генерации видео. Попробуйте другое изображение или измените промпт.';
+      }
     }
     
     const errorLower = errorMessage.toLowerCase();
