@@ -6,6 +6,11 @@ import { Telegraf } from 'telegraf';
 
 config();
 
+// Глобальное хранилище для покупок генераций с автообработкой фото
+if (typeof (global as any).pendingGenerationPurchases === 'undefined') {
+  (global as any).pendingGenerationPurchases = new Map<string, { fileId: string; prompt: string; telegramId: number }>();
+}
+
 export class PaymentService {
   private bot: Telegraf;
   
@@ -96,18 +101,10 @@ export class PaymentService {
         [null, userId, amount, PaymentStatus.PENDING]
       );
       
-      // Сохраняем file_id и prompt в отдельной таблице или в комментарии к платежу
-      // Временно используем подход через глобальное хранилище pendingPromptsData
-      // Но лучше сохранить в базе данных
+      // Сохраняем file_id и prompt в глобальном хранилище для использования в webhook
       if (fileId || prompt) {
-        // Сохраняем в временное хранилище, которое будет доступно в webhook
         const paymentId = result.rows[0].id;
-        // Используем Redis или временное хранилище
-        // Для простоты используем глобальную Map
-        if (typeof (global as any).pendingGenerationPurchases === 'undefined') {
-          (global as any).pendingGenerationPurchases = new Map();
-        }
-        (global as any).pendingGenerationPurchases.set(paymentId, { fileId, prompt, telegramId });
+        (global as any).pendingGenerationPurchases.set(paymentId, { fileId: fileId!, prompt: prompt!, telegramId });
         console.log(`💾 Saved file_id and prompt for payment ${paymentId}`);
       }
       
@@ -445,18 +442,23 @@ export class PaymentService {
                 `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
               );
               
-              // Обновляем статистику кампании после покупки генераций
-              if (user.start_param) {
-                const { AnalyticsService } = await import('./analytics');
-                const analyticsService = new AnalyticsService();
-                await analyticsService.updateCampaignStats(user.start_param);
-              }
-              
               // Проверяем, нужно ли автоматически обработать фото после покупки
               // Получаем file_id и prompt из metadata (они передаются через ЮKassa)
               // или из глобального хранилища (если metadata не вернула данные)
               let fileId = metadata?.file_id;
               let prompt = metadata?.prompt;
+              
+              // Обновляем статистику кампании после покупки генераций (после получения fileId/prompt, чтобы не блокировать автообработку)
+              if (user.start_param) {
+                try {
+                  const { AnalyticsService } = await import('./analytics');
+                  const analyticsService = new AnalyticsService();
+                  await analyticsService.updateCampaignStats(user.start_param);
+                } catch (error) {
+                  console.error('Error updating campaign stats after generation purchase:', error);
+                  // Не блокируем автообработку при ошибке обновления статистики
+                }
+              }
               
               // Если в metadata нет, пытаемся получить из глобального хранилища
               if ((!fileId || !prompt) && typeof (global as any).pendingGenerationPurchases !== 'undefined') {

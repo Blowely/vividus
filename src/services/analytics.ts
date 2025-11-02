@@ -51,10 +51,10 @@ export class AnalyticsService {
       // Включаем как платежи за заказы, так и платежи за покупку генераций (без order_id)
       const stats = await client.query(`
         SELECT 
-          COUNT(DISTINCT u.id) as users_count,
-          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount ELSE 0 END), 0) as total_payments_rub,
-          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount * 7 ELSE 0 END), 0) as total_payments_stars,
-          COUNT(CASE WHEN o.status = 'completed' THEN 1 END) as completed_orders
+          COUNT(DISTINCT u.id)::INTEGER as users_count,
+          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount ELSE 0 END), 0)::DECIMAL(12,2) as total_payments_rub,
+          COALESCE(SUM(CASE WHEN p.status = 'success' THEN (p.amount * 7)::INTEGER ELSE 0 END), 0)::INTEGER as total_payments_stars,
+          COUNT(CASE WHEN o.status = 'completed' THEN 1 END)::INTEGER as completed_orders
         FROM users u
         LEFT JOIN orders o ON u.id = o.user_id
         LEFT JOIN payments p ON (
