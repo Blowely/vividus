@@ -1032,7 +1032,10 @@
         // Проверка авторизации
         async function checkAuth() {
             try {
-                const response = await fetchWithAuth('/api/auth/check');
+                // Используем обычный fetch, чтобы не показывать модалку на странице авторизации
+                const response = await fetch('/api/auth/check', {
+                    credentials: 'include'
+                });
                 const data = await response.json();
                 if (data.authenticated) {
                     isAuthenticated = true;
@@ -1050,6 +1053,8 @@
 
         // Показать экран входа
         function showLoginScreen() {
+            // Закрываем модалку авторизации, если она открыта
+            closeAuthModal();
             document.getElementById('loginScreen').classList.remove('hidden');
             document.getElementById('mainContent').classList.add('hidden');
             initTelegramLogin();
@@ -1063,6 +1068,8 @@
                 document.getElementById('userInfo').style.display = 'flex';
                 document.getElementById('userName').textContent = `@${currentUser.username || currentUser.telegram_id}`;
             }
+            // Закрываем модалку авторизации, если она открыта
+            closeAuthModal();
             // Загружаем список кампаний для всех фильтров
             loadCampaigns();
         }
@@ -1261,6 +1268,8 @@
                 if (data.success) {
                     isAuthenticated = true;
                     currentUser = data.user;
+                    // Закрываем модалку авторизации перед показом контента
+                    closeAuthModal();
                     showMainContent();
                     loadStats();
                     loadUsers();
