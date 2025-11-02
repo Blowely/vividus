@@ -48,6 +48,7 @@ export class AnalyticsService {
 
       // Подсчитываем статистику
       // Выручка считается только из успешных платежей (status = 'success')
+      // Включаем как платежи за заказы, так и платежи за покупку генераций (без order_id)
       const stats = await client.query(`
         SELECT 
           COUNT(DISTINCT u.id) as users_count,
@@ -56,7 +57,10 @@ export class AnalyticsService {
           COUNT(CASE WHEN o.status = 'completed' THEN 1 END) as completed_orders
         FROM users u
         LEFT JOIN orders o ON u.id = o.user_id
-        LEFT JOIN payments p ON o.id = p.order_id
+        LEFT JOIN payments p ON (
+          (p.order_id IS NOT NULL AND o.id = p.order_id) OR 
+          (p.order_id IS NULL AND p.user_id = u.id)
+        )
         WHERE u.start_param = $1
       `, [campaignName]);
 

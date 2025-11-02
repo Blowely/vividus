@@ -420,6 +420,13 @@ export class PaymentService {
                 `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
               );
               
+              // Обновляем статистику кампании после покупки генераций
+              if (user.start_param) {
+                const { AnalyticsService } = await import('./analytics');
+                const analyticsService = new AnalyticsService();
+                await analyticsService.updateCampaignStats(user.start_param);
+              }
+              
               // Проверяем, нужно ли автоматически обработать фото после покупки
               if (metadata?.file_id && metadata?.prompt) {
                 console.log('🔄 Auto-processing photo after generation purchase...');
