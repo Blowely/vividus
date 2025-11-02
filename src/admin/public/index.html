@@ -304,11 +304,98 @@
             font-size: 12px;
             color: #999;
         }
+
+        .login-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .login-card h2 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .login-card p {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .telegram-login-button {
+            background: #0088cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .telegram-login-button:hover {
+            background: #006ba3;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
     </style>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+    <!-- Экран авторизации -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-card">
+            <h2>🚀 Админ-панель Vividus Bot</h2>
+            <p>Войдите через Telegram для доступа к панели управления</p>
+            <div id="telegram-login-container"></div>
+        </div>
+    </div>
+
+    <!-- Основной контент -->
+    <div id="mainContent" class="hidden">
     <div class="header">
-        <h1>🚀 Админ-панель Vividus Bot</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>🚀 Админ-панель Vividus Bot</h1>
+            <div class="user-info" id="userInfo" style="display: none;">
+                <span id="userName"></span>
+                <button class="logout-btn" onclick="logout()">Выйти</button>
+            </div>
+        </div>
         <div class="stats" id="stats">
             <div class="stat-item">
                 <div class="label">Пользователи</div>
@@ -358,6 +445,7 @@
             </div>
         </div>
     </div>
+    </div>
 
     <!-- Modal для изменения генераций -->
     <div class="modal" id="editGenerationsModal">
@@ -396,26 +484,118 @@
         let currentPage = { users: 1, orders: 1, payments: 1, jobs: 1 };
         let currentData = {};
         let searchTimeout = null;
+        let isAuthenticated = false;
+        let currentUser = null;
 
-        // Получение username из localStorage или запрос
-        function getUsername() {
-            let username = localStorage.getItem('admin_username');
-            if (!username) {
-                username = prompt('Введите ваш Telegram username:') || '';
-                if (username) {
-                    localStorage.setItem('admin_username', username);
+        // Проверка авторизации
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/check');
+                const data = await response.json();
+                if (data.authenticated) {
+                    isAuthenticated = true;
+                    currentUser = data.user;
+                    showMainContent();
+                    loadStats();
+                    loadUsers();
+                } else {
+                    showLoginScreen();
                 }
+            } catch (error) {
+                showLoginScreen();
             }
-            return username;
+        }
+
+        // Показать экран входа
+        function showLoginScreen() {
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('mainContent').classList.add('hidden');
+            initTelegramLogin();
+        }
+
+        // Показать основной контент
+        function showMainContent() {
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('mainContent').classList.remove('hidden');
+            if (currentUser) {
+                document.getElementById('userInfo').style.display = 'flex';
+                document.getElementById('userName').textContent = `@${currentUser.username || currentUser.telegram_id}`;
+            }
+        }
+
+        // Инициализация Telegram Widget Login
+        async function initTelegramLogin() {
+            const container = document.getElementById('telegram-login-container');
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+            
+            try {
+                // Получаем bot username через API
+                const response = await fetch('/api/bot-username');
+                const data = await response.json();
+                const botUsername = data.botUsername;
+                
+                if (!botUsername) {
+                    container.innerHTML = '<p style="color: red;">Ошибка: Bot username не настроен</p>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                const script = document.createElement('script');
+                script.src = 'https://telegram.org/js/telegram-widget.js?22';
+                script.setAttribute('data-telegram-login', botUsername);
+                script.setAttribute('data-size', 'large');
+                script.setAttribute('data-userpic', 'false');
+                script.setAttribute('data-request-access', 'write');
+                script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+                script.async = true;
+                container.appendChild(script);
+            } catch (error) {
+                container.innerHTML = '<p style="color: red;">Ошибка загрузки виджета: ' + error.message + '</p>';
+            }
+        }
+
+        // Обработчик авторизации Telegram
+        async function onTelegramAuth(user) {
+            try {
+                const response = await fetch('/api/auth/telegram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(user)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    isAuthenticated = true;
+                    currentUser = data.user;
+                    showMainContent();
+                    loadStats();
+                    loadUsers();
+                } else {
+                    alert('Ошибка авторизации: ' + (data.error || 'Неизвестная ошибка'));
+                }
+            } catch (error) {
+                alert('Ошибка при авторизации: ' + error.message);
+            }
+        }
+
+        // Выход
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                isAuthenticated = false;
+                currentUser = null;
+                showLoginScreen();
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
         }
 
         // Загрузка статистики
         async function loadStats() {
             try {
-                const username = getUsername();
-                if (!username) return;
-                
-                const response = await fetch(`/api/stats?username=${username}`);
+                const response = await fetch('/api/stats');
                 const stats = await response.json();
                 
                 document.getElementById('stat-users').textContent = stats.total_users || 0;
@@ -446,33 +626,28 @@
 
             try {
                 let response;
-                const username = getUsername();
-                if (!username) {
-                    container.innerHTML = '<div class="empty">Требуется авторизация</div>';
-                    return;
-                }
                 
                 switch(tab) {
                     case 'users':
-                        response = await fetch(`/api/users?page=${currentPage.users}&limit=50&username=${username}`);
+                        response = await fetch(`/api/users?page=${currentPage.users}&limit=50`);
                         const usersData = await response.json();
                         currentData.users = usersData;
                         renderUsers(usersData);
                         break;
                     case 'orders':
-                        response = await fetch(`/api/orders?page=${currentPage.orders}&limit=50&username=${username}`);
+                        response = await fetch(`/api/orders?page=${currentPage.orders}&limit=50`);
                         const ordersData = await response.json();
                         currentData.orders = ordersData;
                         renderOrders(ordersData);
                         break;
                     case 'payments':
-                        response = await fetch(`/api/payments?page=${currentPage.payments}&limit=50&username=${username}`);
+                        response = await fetch(`/api/payments?page=${currentPage.payments}&limit=50`);
                         const paymentsData = await response.json();
                         currentData.payments = paymentsData;
                         renderPayments(paymentsData);
                         break;
                     case 'jobs':
-                        response = await fetch(`/api/did-jobs?page=${currentPage.jobs}&limit=50&username=${username}`);
+                        response = await fetch(`/api/did-jobs?page=${currentPage.jobs}&limit=50`);
                         const jobsData = await response.json();
                         currentData.jobs = jobsData;
                         renderJobs(jobsData);
@@ -497,15 +672,9 @@
             container.innerHTML = '<div class="loading">Загрузка...</div>';
 
             try {
-                const username = getUsername();
-                if (!username) {
-                    container.innerHTML = '<div class="empty">Требуется авторизация</div>';
-                    return;
-                }
-                
                 const url = search 
-                    ? `/api/users?page=${currentPage.users}&limit=50&search=${encodeURIComponent(search)}&username=${username}`
-                    : `/api/users?page=${currentPage.users}&limit=50&username=${username}`;
+                    ? `/api/users?page=${currentPage.users}&limit=50&search=${encodeURIComponent(search)}`
+                    : `/api/users?page=${currentPage.users}&limit=50`;
                 
                 const response = await fetch(url);
                 const data = await response.json();
@@ -756,13 +925,7 @@
             }
 
             try {
-                const username = getUsername();
-                if (!username) {
-                    alert('Требуется авторизация');
-                    return;
-                }
-                
-                const response = await fetch(`/api/users/${editingUserId}/generations?username=${username}`, {
+                const response = await fetch(`/api/users/${editingUserId}/generations`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json'
@@ -793,13 +956,7 @@
 
         async function confirmDeleteUser() {
             try {
-                const username = getUsername();
-                if (!username) {
-                    alert('Требуется авторизация');
-                    return;
-                }
-                
-                const response = await fetch(`/api/users/${deletingUserId}?username=${username}`, {
+                const response = await fetch(`/api/users/${deletingUserId}`, {
                     method: 'DELETE'
                 });
 
@@ -822,13 +979,7 @@
 
         async function viewUserHistory(userId) {
             try {
-                const username = getUsername();
-                if (!username) {
-                    alert('Требуется авторизация');
-                    return;
-                }
-                
-                const response = await fetch(`/api/users/${userId}/history?username=${username}`);
+                const response = await fetch(`/api/users/${userId}/history`);
                 const history = await response.json();
                 
                 let historyText = `Пользователь: @${history.user.username || history.user.telegram_id}\n`;
@@ -845,8 +996,7 @@
         }
 
         // Инициализация
-        loadStats();
-        loadUsers();
+        checkAuth();
     </script>
 </body>
 </html>
