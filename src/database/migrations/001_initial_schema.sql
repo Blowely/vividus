@@ -152,13 +152,9 @@ BEGIN
     -- Determine record ID and user_id based on table
     IF TG_TABLE_NAME = 'users' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
-        -- Для DELETE устанавливаем user_id в NULL, так как пользователь будет удалён
-        -- ID пользователя будет сохранён в old_data
-        IF TG_OP = 'DELETE' THEN
-            user_id_val := NULL;
-        ELSE
-            user_id_val := COALESCE(NEW.id, OLD.id);
-        END IF;
+        -- Для BEFORE DELETE пользователь еще существует, поэтому можем сохранить реальный user_id
+        -- Для AFTER операций также сохраняем реальный user_id
+        user_id_val := COALESCE(NEW.id, OLD.id);
     ELSIF TG_TABLE_NAME = 'orders' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
         user_id_val := COALESCE(NEW.user_id, OLD.user_id);
