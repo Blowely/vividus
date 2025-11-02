@@ -112,11 +112,20 @@ export class PaymentService {
     }
   }
 
-  async generateGenerationPurchaseUrl(paymentId: string, amount: number, generationsCount: number, telegramId: number): Promise<string> {
-    const metadata = {
+  async generateGenerationPurchaseUrl(paymentId: string, amount: number, generationsCount: number, telegramId: number, fileId?: string, prompt?: string): Promise<string> {
+    const metadata: any = {
       purchase_type: 'generations',
       generations_count: generationsCount.toString()
     };
+    
+    // Добавляем fileId и prompt для автоматической обработки после оплаты
+    if (fileId) {
+      metadata.file_id = fileId;
+    }
+    if (prompt) {
+      metadata.prompt = prompt;
+    }
+    
     return await this.generatePaymentUrl(paymentId, amount, telegramId, metadata);
   }
 
@@ -410,6 +419,97 @@ export class PaymentService {
                 user.telegram_id,
                 `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
               );
+              
+              // Проверяем, нужно ли автоматически обработать фото после покупки
+              if (metadata?.file_id && metadata?.prompt) {
+                console.log('🔄 Auto-processing photo after generation purchase...');
+                console.log('   File ID:', metadata.file_id);
+                console.log('   Prompt:', metadata.prompt);
+                
+                try {
+                  const { TelegramService } = await import('./telegram');
+                  const telegramService = new TelegramService();
+                  
+                  // Получаем user object для processPrompt
+                  const userForProcessing = await client.query(
+                    'SELECT * FROM users WHERE id = $1',
+                    [userId]
+                  );
+                  
+                  if (userForProcessing.rows[0]) {
+                    // Импортируем FileService для загрузки файла
+                    const { FileService } = await import('./file');
+                    const fileService = new FileService();
+                    
+                    // Загружаем файл из Telegram в S3
+                    const s3Url = await fileService.downloadTelegramFileToS3(metadata.file_id);
+                    
+                    // Обрабатываем промпт (используем ту же логику что и в TelegramService)
+                    let processedPrompt = (metadata.prompt as string).toLowerCase().trim();
+                    if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
+                      processedPrompt = 'animate this image with subtle movements and breathing effect';
+                    } else {
+                      // Переводим русский промпт на английский
+                      const translations: { [key: string]: string } = {
+                        'машет рукой': 'waving hand',
+                        'улыбается': 'smiling',
+                        'моргает': 'blinking',
+                        'дышит': 'breathing',
+                        'кивает': 'nodding',
+                        'качает головой': 'shaking head',
+                        'подмигивает': 'winking',
+                        'смеется': 'laughing',
+                        'плачет': 'crying',
+                        'злится': 'angry expression',
+                        'удивляется': 'surprised expression',
+                        'грустный': 'sad expression',
+                        'счастливый': 'happy expression',
+                        'танцует': 'dancing',
+                        'бегает': 'running',
+                        'идет': 'walking',
+                        'прыгает': 'jumping',
+                        'сидит': 'sitting',
+                        'стоит': 'standing',
+                        'лежит': 'lying down',
+                        'говорит': 'speaking',
+                        'поет': 'singing',
+                        'читает': 'reading',
+                        'пишет': 'writing',
+                        'рисует': 'drawing',
+                        'играет': 'playing',
+                        'работает': 'working',
+                        'спит': 'sleeping',
+                        'ест': 'eating',
+                        'пьет': 'drinking',
+                        'бежит': 'running'
+                      };
+                      
+                      let translatedPrompt = translations[processedPrompt] || processedPrompt;
+                      translatedPrompt = translatedPrompt.replace(/^animate this image with\s*/i, '');
+                      processedPrompt = `animate this image with ${translatedPrompt}`;
+                    }
+                    
+                    // Создаем заказ
+                    const { OrderService } = await import('./order');
+                    const orderService = new OrderService();
+                    const order = await orderService.createOrder(userId, s3Url, 0, processedPrompt);
+                    await orderService.updateOrderStatus(order.id, 'processing' as any);
+                    
+                    // Запускаем обработку
+                    const { ProcessorService } = await import('./processor');
+                    const processorService = new ProcessorService();
+                    await processorService.processOrder(order.id);
+                    
+                    await this.bot.telegram.sendMessage(
+                      user.telegram_id,
+                      `🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`
+                    );
+                  }
+                } catch (error) {
+                  console.error('Error auto-processing photo after generation purchase:', error);
+                  // Не блокируем успешную покупку генераций, если обработка фото не удалась
+                }
+              }
             } else {
               console.log('⚠️ Generations count is 0 or not found in metadata');
               await this.bot.telegram.sendMessage(

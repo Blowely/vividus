@@ -21,6 +21,7 @@ export class TelegramService {
   private mockService: MockService;
   private analyticsService: AnalyticsService;
   private pendingPrompts: Map<number, string> = new Map(); // userId -> fileId
+  private pendingPromptsData: Map<number, { fileId: string; prompt: string }> = new Map(); // userId -> {fileId, prompt}
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
 
@@ -395,10 +396,9 @@ export class TelegramService {
       } else {
         // У пользователя нет генераций - предлагаем купить генерации
         
-        // Сохраняем fileId для повторной обработки после покупки генераций
-        // Используем pendingPrompts для сохранения информации о фото
-        const tempOrderId = `temp_${Date.now()}_${user.telegram_id}`;
-        this.pendingPrompts.set(user.telegram_id, fileId); // Сохраняем для повторной обработки
+        // Сохраняем fileId и промпт для повторной обработки после покупки генераций
+        this.pendingPrompts.set(user.telegram_id, fileId);
+        this.pendingPromptsData.set(user.telegram_id, { fileId, prompt: originalPrompt || 'пропустить' });
         
         const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
 
@@ -426,6 +426,14 @@ export class TelegramService {
             )
           ];
         });
+        
+        // Добавляем тестовую кнопку: 1 ₽ → 7 генераций
+        keyboard.push([
+          Markup.button.callback(
+            `1 ₽ → 7 ${this.getGenerationWord(7)} (тест)`,
+            `buy_and_process_7_1`
+          )
+        ]);
         
         keyboard.push(this.getBackButton());
         
@@ -619,8 +627,32 @@ export class TelegramService {
       case 'buy_generations_stars':
         await ctx.answerCbQuery('Оплата звёздами пока не доступна');
         break;
+      case 'back_to_stats':
+        await ctx.answerCbQuery('◀️');
+        await this.showAnalytics(ctx);
+        break;
       default:
-        if (callbackData.startsWith('pay_')) {
+        if (callbackData.startsWith('buy_and_process_')) {
+          // Формат: buy_and_process_{count}_{price}
+          const parts = callbackData.replace('buy_and_process_', '').split('_');
+          if (parts.length === 2) {
+            const count = parseInt(parts[0], 10);
+            const price = parseInt(parts[1], 10);
+            if (!isNaN(count) && !isNaN(price)) {
+              // Сначала покупаем генерации, затем обрабатываем фото
+              await this.handlePurchaseGenerationsAndProcess(ctx, count, price);
+            } else {
+              console.error(`Invalid buy_and_process callback: ${callbackData}`);
+              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            }
+          } else {
+            console.error(`Invalid buy_and_process callback format: ${callbackData}`);
+            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+          }
+        } else if (callbackData.startsWith('campaign_stats_')) {
+          const campaignName = callbackData.replace('campaign_stats_', '');
+          await this.showCampaignStats(ctx, campaignName);
+        } else if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
           await this.handlePayOrder(ctx, orderId);
         } else if (callbackData.startsWith('buy_generations_')) {
@@ -706,6 +738,58 @@ export class TelegramService {
     return adminIds.includes(userId);
   }
 
+  private async showCampaignStats(ctx: Context, campaignName: string) {
+    if (!this.isAdmin(ctx.from!.id)) {
+      await ctx.answerCbQuery('❌ У вас нет прав для просмотра статистики');
+      return;
+    }
+
+    try {
+      const analytics = await this.analyticsService.getCampaignAnalytics(campaignName);
+      
+      if (analytics.length === 0) {
+        await ctx.answerCbQuery('❌ Статистика по кампании не найдена');
+        return;
+      }
+
+      const stat = analytics[0];
+      
+      // Экранируем специальные символы Markdown в названии кампании
+      const escapedCampaignName = stat.campaign_name
+        .replace(/\*/g, '\\*')
+        .replace(/_/g, '\\_')
+        .replace(/\[/g, '\\[')
+        .replace(/\]/g, '\\]')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)')
+        .replace(/~/g, '\\~')
+        .replace(/`/g, '\\`');
+
+      // Форматируем сообщение для пересылки (без inline-кнопок или с минимальными)
+      const message = `📊 *Статистика по кампании: ${escapedCampaignName}*\n\n` +
+        `👥 Пользователи: ${stat.total_users}\n` +
+        `💰 Сумма оплат: ${stat.total_payments_rub.toFixed(2)} ₽\n` +
+        `⭐ Сумма в stars: ${stat.total_payments_stars}\n` +
+        `🎬 Успешных генераций: ${stat.completed_orders}\n` +
+        `📈 Конверсия: ${stat.conversion_rate}%\n\n` +
+        `💡 Вы можете переслать это сообщение`;
+
+      await ctx.answerCbQuery('✅');
+      
+      await this.sendMessage(ctx, message, { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.callback('◀️ Назад к общей статистике', 'back_to_stats')]
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error showing campaign stats:', error);
+      await ctx.answerCbQuery('❌ Ошибка при получении статистики');
+    }
+  }
+
   private async showAnalytics(ctx: Context) {
     if (!this.isAdmin(ctx.from!.id)) {
       await this.sendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
@@ -721,6 +805,7 @@ export class TelegramService {
       }
 
       let message = '📊 Статистика по кампаниям:\n\n';
+      const inlineKeyboard: any[] = [];
       
       for (const stat of analytics) {
         // Экранируем специальные символы Markdown в названии кампании
@@ -740,12 +825,19 @@ export class TelegramService {
         message += `⭐ Сумма в stars: ${stat.total_payments_stars}\n`;
         message += `🎬 Успешных генераций: ${stat.completed_orders}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
+        
+        // Добавляем кнопку для детальной статистики по кампании
+        inlineKeyboard.push([
+          Markup.button.callback(`📊 Детали: ${stat.campaign_name}`, `campaign_stats_${stat.campaign_name}`)
+        ]);
       }
+      
+      inlineKeyboard.push(this.getBackButton());
 
       await this.sendMessage(ctx, message, { 
         parse_mode: 'Markdown',
         reply_markup: {
-          inline_keyboard: [this.getBackButton()]
+          inline_keyboard: inlineKeyboard
         }
       });
     } catch (error) {
@@ -1202,6 +1294,69 @@ ${packageListText}
     } catch (error) {
       console.error('Error creating single order payment:', error);
       await this.sendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+    }
+  }
+
+  private async handlePurchaseGenerationsAndProcess(ctx: Context, generationsCount: number, price: number) {
+    try {
+      await ctx.answerCbQuery();
+      
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      
+      // Получаем сохраненное фото и промпт
+      const promptData = this.pendingPromptsData.get(user.telegram_id);
+      const fileId = this.pendingPrompts.get(user.telegram_id);
+      
+      if (!fileId || !promptData) {
+        await this.sendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
+        return;
+      }
+      
+      const originalPrompt = promptData.prompt || 'пропустить';
+      
+      console.log(`📦 Creating generation purchase with auto-process: ${generationsCount} generations for ${price} RUB, user: ${ctx.from!.id}`);
+      
+      // Создаем покупку генераций
+      const payment = await this.paymentService.createGenerationPurchase(
+        ctx.from!.id, 
+        generationsCount, 
+        price
+      );
+      
+      // Генерируем URL с metadata, включая fileId и prompt для автоматической обработки
+      const paymentUrl = await this.paymentService.generateGenerationPurchaseUrl(
+        payment.id,
+        price,
+        generationsCount,
+        ctx.from!.id,
+        fileId,
+        originalPrompt
+      );
+      
+      // Удаляем сохраненные данные после создания платежа
+      this.pendingPrompts.delete(user.telegram_id);
+      this.pendingPromptsData.delete(user.telegram_id);
+      
+      const message = `💳 Покупка генераций и обработка фото
+
+📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
+💰 Сумма: ${price} ₽
+
+После оплаты генерации будут добавлены на баланс, и фото будет обработано автоматически.`;
+      
+      await this.sendMessage(ctx, message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            this.getBackButton()
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error creating generation purchase with processing:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
     }
   }
 
