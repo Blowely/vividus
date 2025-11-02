@@ -231,8 +231,12 @@ $$ LANGUAGE plpgsql;
 
 -- Create triggers for all tables (drop if exists to allow re-running migration)
 DROP TRIGGER IF EXISTS log_users_activity ON users;
+DROP TRIGGER IF EXISTS log_users_activity_delete ON users;
 CREATE TRIGGER log_users_activity
-    AFTER INSERT OR UPDATE OR BEFORE DELETE ON users
+    AFTER INSERT OR UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
+CREATE TRIGGER log_users_activity_delete
+    BEFORE DELETE ON users
     FOR EACH ROW EXECUTE FUNCTION log_activity();
 
 DROP TRIGGER IF EXISTS log_orders_activity ON orders;
