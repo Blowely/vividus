@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель Vividus Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .header .stats {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+        }
+
+        .stat-item .label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .stat-item .value {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .tab:hover {
+            background: #f0f0f0;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .content {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .search-box {
+            margin-bottom: 20px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #666;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.success { background: #d4edda; color: #155724; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .badge.failed { background: #f8d7da; color: #721c24; }
+        .badge.processing { background: #d1ecf1; color: #0c5460; }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .pagination {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+            align-items: center;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #f0f0f0;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .link:hover {
+            text-decoration: underline;
+        }
+
+        .timestamp {
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Админ-панель Vividus Bot</h1>
+        <div class="stats" id="stats">
+            <div class="stat-item">
+                <div class="label">Пользователи</div>
+                <div class="value" id="stat-users">-</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Заказы</div>
+                <div class="value" id="stat-orders">-</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Выручка</div>
+                <div class="value" id="stat-revenue">-</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Генерации</div>
+                <div class="value" id="stat-generations">-</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('users')">👥 Пользователи</button>
+            <button class="tab" onclick="switchTab('orders')">📦 Заказы</button>
+            <button class="tab" onclick="switchTab('payments')">💳 Платежи</button>
+            <button class="tab" onclick="switchTab('jobs')">🎬 Генерации</button>
+        </div>
+
+        <div class="content">
+            <div id="content-users" class="tab-content">
+                <div class="search-box">
+                    <input type="text" id="search-users" placeholder="Поиск по username, имени или telegram_id..." oninput="searchUsers()">
+                </div>
+                <div id="users-table"></div>
+            </div>
+
+            <div id="content-orders" class="tab-content" style="display: none;">
+                <div id="orders-table"></div>
+            </div>
+
+            <div id="content-payments" class="tab-content" style="display: none;">
+                <div id="payments-table"></div>
+            </div>
+
+            <div id="content-jobs" class="tab-content" style="display: none;">
+                <div id="jobs-table"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal для изменения генераций -->
+    <div class="modal" id="editGenerationsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Изменить количество генераций</h2>
+                <p id="edit-user-info"></p>
+            </div>
+            <div class="form-group">
+                <label>Новое количество генераций:</label>
+                <input type="number" id="edit-generations-input" min="0">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="saveGenerations()">Сохранить</button>
+                <button class="btn" onclick="closeModal('editGenerationsModal')">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal для подтверждения удаления -->
+    <div class="modal" id="deleteUserModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Удалить пользователя?</h2>
+                <p id="delete-user-info"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="confirmDeleteUser()">Удалить</button>
+                <button class="btn" onclick="closeModal('deleteUserModal')">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'users';
+        let currentPage = { users: 1, orders: 1, payments: 1, jobs: 1 };
+        let currentData = {};
+        let searchTimeout = null;
+
+        // Получение username из localStorage или запрос
+        function getUsername() {
+            let username = localStorage.getItem('admin_username');
+            if (!username) {
+                username = prompt('Введите ваш Telegram username:') || '';
+                if (username) {
+                    localStorage.setItem('admin_username', username);
+                }
+            }
+            return username;
+        }
+
+        // Загрузка статистики
+        async function loadStats() {
+            try {
+                const username = getUsername();
+                if (!username) return;
+                
+                const response = await fetch(`/api/stats?username=${username}`);
+                const stats = await response.json();
+                
+                document.getElementById('stat-users').textContent = stats.total_users || 0;
+                document.getElementById('stat-orders').textContent = stats.completed_orders || 0;
+                document.getElementById('stat-revenue').textContent = `${parseFloat(stats.total_revenue || 0).toFixed(2)} ₽`;
+                document.getElementById('stat-generations').textContent = stats.total_generations || 0;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Переключение вкладок
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            
+            event.target.classList.add('active');
+            document.getElementById(`content-${tab}`).style.display = 'block';
+            
+            loadTabData(tab);
+        }
+
+        // Загрузка данных вкладки
+        async function loadTabData(tab) {
+            const container = document.getElementById(`${tab}-table`);
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+            try {
+                let response;
+                const username = getUsername();
+                if (!username) {
+                    container.innerHTML = '<div class="empty">Требуется авторизация</div>';
+                    return;
+                }
+                
+                switch(tab) {
+                    case 'users':
+                        response = await fetch(`/api/users?page=${currentPage.users}&limit=50&username=${username}`);
+                        const usersData = await response.json();
+                        currentData.users = usersData;
+                        renderUsers(usersData);
+                        break;
+                    case 'orders':
+                        response = await fetch(`/api/orders?page=${currentPage.orders}&limit=50&username=${username}`);
+                        const ordersData = await response.json();
+                        currentData.orders = ordersData;
+                        renderOrders(ordersData);
+                        break;
+                    case 'payments':
+                        response = await fetch(`/api/payments?page=${currentPage.payments}&limit=50&username=${username}`);
+                        const paymentsData = await response.json();
+                        currentData.payments = paymentsData;
+                        renderPayments(paymentsData);
+                        break;
+                    case 'jobs':
+                        response = await fetch(`/api/did-jobs?page=${currentPage.jobs}&limit=50&username=${username}`);
+                        const jobsData = await response.json();
+                        currentData.jobs = jobsData;
+                        renderJobs(jobsData);
+                        break;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        // Поиск пользователей
+        function searchUsers() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const search = document.getElementById('search-users').value;
+                loadUsers(search);
+            }, 300);
+        }
+
+        async function loadUsers(search = '') {
+            const container = document.getElementById('users-table');
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+            try {
+                const username = getUsername();
+                if (!username) {
+                    container.innerHTML = '<div class="empty">Требуется авторизация</div>';
+                    return;
+                }
+                
+                const url = search 
+                    ? `/api/users?page=${currentPage.users}&limit=50&search=${encodeURIComponent(search)}&username=${username}`
+                    : `/api/users?page=${currentPage.users}&limit=50&username=${username}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                currentData.users = data;
+                renderUsers(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        // Рендеринг пользователей
+        function renderUsers(data) {
+            const container = document.getElementById('users-table');
+            
+            if (!data.users || data.users.length === 0) {
+                container.innerHTML = '<div class="empty">Пользователи не найдены</div>';
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Telegram ID</th>
+                            <th>Username</th>
+                            <th>Имя</th>
+                            <th>Генерации</th>
+                            <th>Регистрация</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.users.forEach(user => {
+                html += `
+                    <tr>
+                        <td>${user.id}</td>
+                        <td>${user.telegram_id}</td>
+                        <td>@${user.username || '-'}</td>
+                        <td>${user.first_name || '-'} ${user.last_name || ''}</td>
+                        <td>${user.generations || 0}</td>
+                        <td class="timestamp">${new Date(user.created_at).toLocaleString('ru-RU')}</td>
+                        <td class="actions">
+                            <button class="btn btn-primary btn-sm" onclick="editGenerations(${user.id}, '${user.username || user.first_name || 'User'}', ${user.generations || 0})">Изменить генерации</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id}, '${user.username || user.first_name || 'User'}')">Удалить</button>
+                            <button class="btn btn-primary btn-sm" onclick="viewUserHistory(${user.id})">История</button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            
+            if (data.total > 50) {
+                html += renderPagination('users', data);
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Рендеринг заказов
+        function renderOrders(data) {
+            const container = document.getElementById('orders-table');
+            
+            if (!data.orders || data.orders.length === 0) {
+                container.innerHTML = '<div class="empty">Заказы не найдены</div>';
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Пользователь</th>
+                            <th>Статус</th>
+                            <th>Цена</th>
+                            <th>Промпт</th>
+                            <th>Создан</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.orders.forEach(order => {
+                html += `
+                    <tr>
+                        <td><a href="#" onclick="viewOrderDetails('${order.id}')" class="link">${order.id.substring(0, 8)}...</a></td>
+                        <td>@${order.username || order.telegram_id || '-'}</td>
+                        <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
+                        <td>${order.price} ₽</td>
+                        <td>${(order.custom_prompt || 'Базовая анимация').substring(0, 30)}${order.custom_prompt && order.custom_prompt.length > 30 ? '...' : ''}</td>
+                        <td class="timestamp">${new Date(order.created_at).toLocaleString('ru-RU')}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            
+            if (data.total > 50) {
+                html += renderPagination('orders', data);
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Рендеринг платежей
+        function renderPayments(data) {
+            const container = document.getElementById('payments-table');
+            
+            if (!data.payments || data.payments.length === 0) {
+                container.innerHTML = '<div class="empty">Платежи не найдены</div>';
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Пользователь</th>
+                            <th>Сумма</th>
+                            <th>Статус</th>
+                            <th>YooMoney ID</th>
+                            <th>Создан</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.payments.forEach(payment => {
+                html += `
+                    <tr>
+                        <td>${payment.id.substring(0, 8)}...</td>
+                        <td>@${payment.username || payment.telegram_id || '-'}</td>
+                        <td>${payment.amount} ₽</td>
+                        <td><span class="badge ${getStatusBadge(payment.status)}">${payment.status}</span></td>
+                        <td>${payment.yoomoney_payment_id || '-'}</td>
+                        <td class="timestamp">${new Date(payment.created_at).toLocaleString('ru-RU')}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            
+            if (data.total > 50) {
+                html += renderPagination('payments', data);
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Рендеринг заданий
+        function renderJobs(data) {
+            const container = document.getElementById('jobs-table');
+            
+            if (!data.jobs || data.jobs.length === 0) {
+                container.innerHTML = '<div class="empty">Задания не найдены</div>';
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Пользователь</th>
+                            <th>Промпт</th>
+                            <th>Статус</th>
+                            <th>Результат</th>
+                            <th>Ошибка</th>
+                            <th>Создан</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.jobs.forEach(job => {
+                html += `
+                    <tr>
+                        <td>${job.id.substring(0, 8)}...</td>
+                        <td>@${job.username || job.telegram_id || '-'}</td>
+                        <td>${(job.custom_prompt || 'Базовая анимация').substring(0, 30)}${job.custom_prompt && job.custom_prompt.length > 30 ? '...' : ''}</td>
+                        <td><span class="badge ${getStatusBadge(job.status)}">${job.status}</span></td>
+                        <td>${job.result_url ? `<a href="${job.result_url}" target="_blank" class="link">Смотреть</a>` : '-'}</td>
+                        <td>${job.error_message ? `<span style="color: red;">${job.error_message.substring(0, 50)}...</span>` : '-'}</td>
+                        <td class="timestamp">${new Date(job.created_at).toLocaleString('ru-RU')}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            
+            if (data.total > 50) {
+                html += renderPagination('jobs', data);
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Пагинация
+        function renderPagination(tab, data) {
+            const totalPages = Math.ceil(data.total / 50);
+            return `
+                <div class="pagination">
+                    <button ${currentPage[tab] === 1 ? 'disabled' : ''} onclick="changePage('${tab}', ${currentPage[tab] - 1})">‹ Назад</button>
+                    <span>Страница ${currentPage[tab]} из ${totalPages} (всего: ${data.total})</span>
+                    <button ${currentPage[tab] >= totalPages ? 'disabled' : ''} onclick="changePage('${tab}', ${currentPage[tab] + 1})">Вперёд ›</button>
+                </div>
+            `;
+        }
+
+        function changePage(tab, page) {
+            currentPage[tab] = page;
+            loadTabData(tab);
+        }
+
+        // Вспомогательные функции
+        function getStatusBadge(status) {
+            const statusMap = {
+                'completed': 'success',
+                'succeeded': 'success',
+                'pending': 'pending',
+                'processing': 'processing',
+                'failed': 'failed',
+                'running': 'processing'
+            };
+            return statusMap[status] || 'pending';
+        }
+
+        // Редактирование генераций
+        let editingUserId = null;
+        function editGenerations(userId, userName, currentGenerations) {
+            editingUserId = userId;
+            document.getElementById('edit-user-info').textContent = `Пользователь: ${userName} (Текущее: ${currentGenerations})`;
+            document.getElementById('edit-generations-input').value = currentGenerations;
+            document.getElementById('editGenerationsModal').classList.add('active');
+        }
+
+        async function saveGenerations() {
+            const newValue = parseInt(document.getElementById('edit-generations-input').value);
+            
+            if (isNaN(newValue) || newValue < 0) {
+                alert('Введите корректное число');
+                return;
+            }
+
+            try {
+                const username = getUsername();
+                if (!username) {
+                    alert('Требуется авторизация');
+                    return;
+                }
+                
+                const response = await fetch(`/api/users/${editingUserId}/generations?username=${username}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ generations: newValue })
+                });
+
+                if (response.ok) {
+                    closeModal('editGenerationsModal');
+                    loadUsers();
+                    loadStats();
+                    alert('Генерации успешно обновлены');
+                } else {
+                    alert('Ошибка обновления генераций');
+                }
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Удаление пользователя
+        let deletingUserId = null;
+        function deleteUser(userId, userName) {
+            deletingUserId = userId;
+            document.getElementById('delete-user-info').textContent = `Вы уверены, что хотите удалить пользователя: ${userName}? Это действие нельзя отменить.`;
+            document.getElementById('deleteUserModal').classList.add('active');
+        }
+
+        async function confirmDeleteUser() {
+            try {
+                const username = getUsername();
+                if (!username) {
+                    alert('Требуется авторизация');
+                    return;
+                }
+                
+                const response = await fetch(`/api/users/${deletingUserId}?username=${username}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    closeModal('deleteUserModal');
+                    loadUsers();
+                    loadStats();
+                    alert('Пользователь успешно удалён');
+                } else {
+                    alert('Ошибка удаления пользователя');
+                }
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        async function viewUserHistory(userId) {
+            try {
+                const username = getUsername();
+                if (!username) {
+                    alert('Требуется авторизация');
+                    return;
+                }
+                
+                const response = await fetch(`/api/users/${userId}/history?username=${username}`);
+                const history = await response.json();
+                
+                let historyText = `Пользователь: @${history.user.username || history.user.telegram_id}\n`;
+                historyText += `Регистрация: ${new Date(history.user.created_at).toLocaleString('ru-RU')}\n`;
+                historyText += `Генерации: ${history.user.generations || 0}\n\n`;
+                historyText += `Заказов: ${history.orders.length}\n`;
+                historyText += `Платежей: ${history.payments.length}\n`;
+                historyText += `Заданий: ${history.jobs.length}\n`;
+                
+                alert(historyText);
+            } catch (error) {
+                alert('Ошибка загрузки истории: ' + error.message);
+            }
+        }
+
+        // Инициализация
+        loadStats();
+        loadUsers();
+    </script>
+</body>
+</html>
+
