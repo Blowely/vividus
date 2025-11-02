@@ -404,6 +404,25 @@ router.get('/logs', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
+      // Проверяем, существует ли таблица activity_logs
+      const tableExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'activity_logs'
+        );
+      `);
+      
+      if (!tableExists.rows[0].exists) {
+        return res.json({
+          logs: [],
+          total: 0,
+          page: 1,
+          limit: 100,
+          message: 'Таблица activity_logs не найдена. Примените миграцию базы данных.'
+        });
+      }
+
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 100;
       const offset = (page - 1) * limit;
@@ -459,9 +478,19 @@ router.get('/logs', async (req, res) => {
     } finally {
       client.release();
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching logs:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    // Если таблица не существует, возвращаем понятное сообщение
+    if (error.code === '42P01') { // undefined_table
+      return res.json({
+        logs: [],
+        total: 0,
+        page: 1,
+        limit: 100,
+        message: 'Таблица activity_logs не найдена. Примените миграцию базы данных.'
+      });
+    }
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -470,6 +499,19 @@ router.get('/logs/tables', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
+      // Проверяем, существует ли таблица activity_logs
+      const tableExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'activity_logs'
+        );
+      `);
+      
+      if (!tableExists.rows[0].exists) {
+        return res.json([]);
+      }
+
       const result = await client.query(`
         SELECT DISTINCT table_name 
         FROM activity_logs 
@@ -479,9 +521,13 @@ router.get('/logs/tables', async (req, res) => {
     } finally {
       client.release();
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching log tables:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    // Если таблица не существует, возвращаем пустой массив
+    if (error.code === '42P01') { // undefined_table
+      return res.json([]);
+    }
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 

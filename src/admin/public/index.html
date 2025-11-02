@@ -1686,6 +1686,22 @@
         function renderLogs(data) {
             const container = document.getElementById('logs-table');
             
+            // Проверяем, есть ли сообщение о том, что таблица не найдена
+            if (data.message) {
+                container.innerHTML = `
+                    <div class="empty" style="padding: 40px; text-align: center;">
+                        <p style="margin-bottom: 15px; font-size: 16px; color: #856404;">⚠️ ${data.message}</p>
+                        <p style="color: #666; font-size: 14px;">
+                            Выполните команду:<br>
+                            <code style="background: #f8f9fa; padding: 5px 10px; border-radius: 4px; margin-top: 10px; display: inline-block;">
+                                docker compose exec app npm run migrate
+                            </code>
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+            
             if (!data.logs || data.logs.length === 0) {
                 container.innerHTML = '<div class="empty">Логи не найдены</div>';
                 return;
