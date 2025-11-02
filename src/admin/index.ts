@@ -81,7 +81,7 @@ function verifyTelegramAuth(authData: any): boolean {
   return true;
 }
 
-// Endpoint для авторизации через Telegram
+// Endpoint для авторизации через Telegram (БЕЗ requireAuth - нужен для входа)
 app.post('/api/auth/telegram', async (req, res) => {
   try {
     const authData = req.body;
@@ -146,7 +146,7 @@ app.post('/api/auth/telegram', async (req, res) => {
   }
 });
 
-// Endpoint для проверки авторизации
+// Endpoint для проверки авторизации (БЕЗ requireAuth - нужен для проверки статуса)
 app.get('/api/auth/check', async (req, res) => {
   const session = getSession(req);
   if (!session || !session.isAuthenticated) {
@@ -155,7 +155,7 @@ app.get('/api/auth/check', async (req, res) => {
   res.json({ authenticated: true, user: session.user });
 });
 
-// Endpoint для выхода
+// Endpoint для выхода (БЕЗ requireAuth - нужен для выхода)
 app.post('/api/auth/logout', (req, res) => {
   const sessionId = req.cookies?.sessionId;
   if (sessionId) {
@@ -205,14 +205,11 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
   }
 }
 
-// API Routes
-import apiRoutes from './routes/api';
-app.use('/api', requireAuth, apiRoutes);
-
 // Кеш для bot username
 let cachedBotUsername: string | null = null;
 
 // Endpoint для получения bot username (для Telegram Widget)
+// Должен быть ДО авторизации, так как нужен для входа
 app.get('/api/bot-username', async (req, res) => {
   try {
     // Если есть кеш, используем его
@@ -261,6 +258,10 @@ app.get('/api/bot-username', async (req, res) => {
     res.status(500).json({ error: 'Failed to get bot username: ' + error.message });
   }
 });
+
+// API Routes (требуют авторизацию)
+import apiRoutes from './routes/api';
+app.use('/api', requireAuth, apiRoutes);
 
 // Serve frontend
 app.get('*', (req, res) => {
