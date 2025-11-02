@@ -10,8 +10,13 @@ config();
 
 const app = express();
 const ADMIN_PORT = process.env.ADMIN_PORT || 3001;
-const ADMIN_USERNAMES = ['in_a_state_of_flux', 'pronewa'];
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+
+// Получаем список ID админов из переменной окружения
+function getAdminIds(): number[] {
+  const ids = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) || [];
+  return ids;
+}
 
 // Простое хранилище сессий в памяти (для продакшена лучше использовать Redis)
 const sessions: Map<string, any> = new Map();
@@ -159,9 +164,8 @@ async function processTelegramAuth(authData: any, res: express.Response, req?: e
         user = result.rows[0];
       }
 
-      const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
-      const isAdmin = ADMIN_USERNAMES.includes(user.username || '') || 
-                     adminIds.includes(user.telegram_id);
+      const adminIds = getAdminIds();
+      const isAdmin = adminIds.includes(user.telegram_id);
 
       if (!isAdmin) {
         return res.status(403).json({ error: 'Forbidden - not admin' });
@@ -236,9 +240,8 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
       }
 
       const user = result.rows[0];
-      const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
-      const isAdmin = ADMIN_USERNAMES.includes(user.username || '') || 
-                     adminIds.includes(user.telegram_id);
+      const adminIds = getAdminIds();
+      const isAdmin = adminIds.includes(user.telegram_id);
 
       if (!isAdmin) {
         return res.status(403).json({ error: 'Forbidden - not admin' });
