@@ -723,7 +723,18 @@ export class TelegramService {
       let message = '📊 Статистика по кампаниям:\n\n';
       
       for (const stat of analytics) {
-        message += `🏷️ **${stat.campaign_name}**\n`;
+        // Экранируем специальные символы Markdown в названии кампании
+        const campaignName = stat.campaign_name
+          .replace(/\*/g, '\\*')
+          .replace(/_/g, '\\_')
+          .replace(/\[/g, '\\[')
+          .replace(/\]/g, '\\]')
+          .replace(/\(/g, '\\(')
+          .replace(/\)/g, '\\)')
+          .replace(/~/g, '\\~')
+          .replace(/`/g, '\\`');
+        
+        message += `🏷️ *${campaignName}*\n`;
         message += `👥 Пользователи: ${stat.total_users}\n`;
         message += `💰 Сумма оплат: ${stat.total_payments_rub} руб\n`;
         message += `⭐ Сумма в stars: ${stat.total_payments_stars}\n`;
