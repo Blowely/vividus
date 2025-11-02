@@ -236,7 +236,7 @@ BEGIN
         -- Convert OLD row to JSONB
         old_json := to_jsonb(OLD);
         
-        -- Для DELETE операций на users явно используем NULL вместо user_id_val
+        -- Для DELETE операций на users явно используем NULL
         IF TG_TABLE_NAME = 'users' THEN
             INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data)
             VALUES (TG_TABLE_NAME, record_id_val, NULL, 'DELETE', old_json);
