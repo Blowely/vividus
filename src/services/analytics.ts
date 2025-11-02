@@ -49,19 +49,26 @@ export class AnalyticsService {
       // Подсчитываем статистику
       // Выручка считается только из успешных платежей (status = 'success')
       // Включаем как платежи за заказы, так и платежи за покупку генераций (без order_id)
+      // Используем отдельные подзапросы для избежания дублирования из-за JOIN'ов
       const stats = await client.query(`
         SELECT 
-          COUNT(DISTINCT u.id)::INTEGER as users_count,
-          COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount ELSE 0 END), 0)::DECIMAL(12,2) as total_payments_rub,
-          COALESCE(SUM(CASE WHEN p.status = 'success' THEN (p.amount * 7)::INTEGER ELSE 0 END), 0)::INTEGER as total_payments_stars,
-          COUNT(CASE WHEN o.status = 'completed' THEN 1 END)::INTEGER as completed_orders
-        FROM users u
-        LEFT JOIN orders o ON u.id = o.user_id
-        LEFT JOIN payments p ON (
-          (p.order_id IS NOT NULL AND o.id = p.order_id) OR 
-          (p.order_id IS NULL AND p.user_id = u.id)
-        )
-        WHERE u.start_param = $1
+          (SELECT COUNT(DISTINCT id)::INTEGER FROM users WHERE start_param = $1) as users_count,
+          (
+            SELECT COALESCE(SUM(amount), 0)::DECIMAL(12,2)
+            FROM payments
+            WHERE status = 'success'
+              AND (
+                order_id IN (SELECT id FROM orders WHERE user_id IN (SELECT id FROM users WHERE start_param = $1))
+                OR (order_id IS NULL AND user_id IN (SELECT id FROM users WHERE start_param = $1))
+              )
+          ) as total_payments_rub,
+          0::INTEGER as total_payments_stars,
+          (
+            SELECT COUNT(DISTINCT id)::INTEGER
+            FROM orders
+            WHERE status = 'completed'
+              AND user_id IN (SELECT id FROM users WHERE start_param = $1)
+          ) as completed_orders
       `, [campaignName]);
 
       const { users_count, total_payments_rub, total_payments_stars, completed_orders } = stats.rows[0];

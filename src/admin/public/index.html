@@ -1528,6 +1528,7 @@
                                 <th>Telegram ID</th>
                                 <th>Username</th>
                                 <th>Имя</th>
+                                <th>Кампания</th>
                                 <th>Генерации</th>
                                 <th>Регистрация</th>
                                 <th>Действия</th>
@@ -1543,6 +1544,7 @@
                         <td>${user.telegram_id}</td>
                         <td>@${user.username || '-'}</td>
                         <td>${user.first_name || '-'} ${user.last_name || ''}</td>
+                        <td>${user.start_param || '-'}</td>
                         <td>${user.generations || 0}</td>
                         <td class="timestamp">${new Date(user.created_at).toLocaleString('ru-RU')}</td>
                         <td class="actions">
