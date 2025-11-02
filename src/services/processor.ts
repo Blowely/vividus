@@ -67,7 +67,8 @@ export class ProcessorService {
         const user = await this.userService.getUserById(order.user_id);
         if (user) {
           // Проверяем, был ли заказ оплачен генерациями - возвращаем их
-          if (order.price === 0) {
+          // Используем Number() так как price может быть Decimal или строкой из PostgreSQL
+          if (Number(order.price) === 0) {
             await this.userService.returnGenerations(user.telegram_id, 1);
             const newBalance = await this.userService.getUserGenerations(user.telegram_id);
             await this.notifyUser(user.telegram_id, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
@@ -172,7 +173,8 @@ export class ProcessorService {
 
       // Проверяем, был ли заказ оплачен генерациями (price = 0 означает оплату генерациями)
       // Списываем генерации только после успешной генерации
-      if (order && order.price === 0) {
+      // Используем Number() так как price может быть Decimal или строкой из PostgreSQL
+      if (order && Number(order.price) === 0) {
         const deducted = await this.userService.deductGenerations(telegramId, 1);
         if (deducted) {
           const remainingGenerations = await this.userService.getUserGenerations(telegramId);
@@ -227,7 +229,8 @@ export class ProcessorService {
 
       // Проверяем, был ли заказ оплачен генерациями (price = 0 означает оплату генерациями)
       const order = await this.orderService.getOrder(orderId);
-      if (order && order.price === 0) {
+      // Используем Number() так как price может быть Decimal или строкой из PostgreSQL
+      if (order && Number(order.price) === 0) {
         // Заказ был оплачен генерациями - возвращаем их
         await this.userService.returnGenerations(telegramId, 1);
         const newBalance = await this.userService.getUserGenerations(telegramId);
