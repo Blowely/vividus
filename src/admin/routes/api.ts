@@ -399,5 +399,91 @@ router.get('/users/:id/history', async (req, res) => {
   }
 });
 
+// Получить логи активности
+router.get('/logs', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const offset = (page - 1) * limit;
+      const tableName = req.query.table as string;
+      const action = req.query.action as string;
+
+      let query = `SELECT * FROM activity_logs WHERE 1=1`;
+      const params: any[] = [];
+      let paramCount = 0;
+
+      if (tableName) {
+        paramCount++;
+        query += ` AND table_name = $${paramCount}`;
+        params.push(tableName);
+      }
+
+      if (action) {
+        paramCount++;
+        query += ` AND action = $${paramCount}`;
+        params.push(action.toUpperCase());
+      }
+
+      query += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+      params.push(limit, offset);
+
+      const result = await client.query(query, params);
+
+      // Получаем общее количество
+      let countQuery = 'SELECT COUNT(*) FROM activity_logs WHERE 1=1';
+      const countParams: any[] = [];
+      let countParamCount = 0;
+
+      if (tableName) {
+        countParamCount++;
+        countQuery += ` AND table_name = $${countParamCount}`;
+        countParams.push(tableName);
+      }
+
+      if (action) {
+        countParamCount++;
+        countQuery += ` AND action = $${countParamCount}`;
+        countParams.push(action.toUpperCase());
+      }
+
+      const countResult = await client.query(countQuery, countParams);
+
+      res.json({
+        logs: result.rows,
+        total: parseInt(countResult.rows[0].count),
+        page,
+        limit
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Получить список доступных таблиц для фильтрации
+router.get('/logs/tables', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(`
+        SELECT DISTINCT table_name 
+        FROM activity_logs 
+        ORDER BY table_name
+      `);
+      res.json(result.rows.map(row => row.table_name));
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching log tables:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
 

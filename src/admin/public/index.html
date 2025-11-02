@@ -509,6 +509,7 @@
             <button class="tab" onclick="switchTab('payments')">💳 Платежи</button>
             <button class="tab" onclick="switchTab('jobs')">🎬 Генерации</button>
             <button class="tab" onclick="switchTab('analytics')">📊 Аналитика</button>
+            <button class="tab" onclick="switchTab('logs')">📋 Логи</button>
         </div>
 
         <div class="content">
@@ -533,6 +534,21 @@
 
             <div id="content-analytics" class="tab-content" style="display: none;">
                 <div id="analytics-content"></div>
+            </div>
+
+            <div id="content-logs" class="tab-content" style="display: none;">
+                <div class="search-box" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <select id="log-table-filter" onchange="loadLogs()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                        <option value="">Все таблицы</option>
+                    </select>
+                    <select id="log-action-filter" onchange="loadLogs()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                        <option value="">Все действия</option>
+                        <option value="INSERT">Создание (INSERT)</option>
+                        <option value="UPDATE">Обновление (UPDATE)</option>
+                        <option value="DELETE">Удаление (DELETE)</option>
+                    </select>
+                </div>
+                <div id="logs-table"></div>
             </div>
         </div>
     </div>
@@ -775,6 +791,8 @@
             let container;
             if (tab === 'analytics') {
                 container = document.getElementById('analytics-content');
+            } else if (tab === 'logs') {
+                container = document.getElementById('logs-table');
             } else {
                 container = document.getElementById(`${tab}-table`);
             }
@@ -816,6 +834,10 @@
                         break;
                     case 'analytics':
                         loadAnalytics();
+                        break;
+                    case 'logs':
+                        await loadLogTables();
+                        loadLogs();
                         break;
                 }
             } catch (error) {
@@ -921,6 +943,7 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Пользователь</th>
+                                <th>Изображение</th>
                                 <th>Статус</th>
                                 <th>Цена</th>
                                 <th>Промпт</th>
@@ -936,11 +959,14 @@
                 const promptText = order.custom_prompt || 'Базовая анимация';
                 const isLongPrompt = promptText.length > 30;
                 const shortPrompt = isLongPrompt ? promptText.substring(0, 30) + '...' : promptText;
+                const imageUrl = order.original_file_path || '';
+                const hasImage = imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
                 
                 html += `
                     <tr>
                         <td><a href="#" onclick="viewOrderDetails('${order.id}')" class="link">${order.id.substring(0, 8)}...</a></td>
                         <td>@${order.username || order.telegram_id || '-'}</td>
+                        <td>${hasImage ? `<a href="${imageUrl}" target="_blank" class="link" style="font-size: 11px;">📷 Открыть</a>` : '-'}</td>
                         <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
                         <td>${priceDisplay}</td>
                         <td>
@@ -1609,6 +1635,141 @@
                     }
                 }
             });
+        }
+
+        // Загрузка списка таблиц для фильтрации логов
+        async function loadLogTables() {
+            try {
+                const response = await fetch('/api/logs/tables');
+                const tables = await response.json();
+                
+                const select = document.getElementById('log-table-filter');
+                if (select) {
+                    // Очищаем опции кроме первой
+                    select.innerHTML = '<option value="">Все таблицы</option>';
+                    tables.forEach(table => {
+                        const option = document.createElement('option');
+                        option.value = table;
+                        option.textContent = table;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading log tables:', error);
+            }
+        }
+
+        // Загрузка логов
+        async function loadLogs(page = 1) {
+            const container = document.getElementById('logs-table');
+            if (!container) return;
+            
+            container.innerHTML = '<div class="loading">Загрузка логов...</div>';
+
+            try {
+                const tableFilter = document.getElementById('log-table-filter')?.value || '';
+                const actionFilter = document.getElementById('log-action-filter')?.value || '';
+                
+                let url = `/api/logs?page=${page}&limit=100`;
+                if (tableFilter) url += `&table=${encodeURIComponent(tableFilter)}`;
+                if (actionFilter) url += `&action=${encodeURIComponent(actionFilter)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                renderLogs(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки логов: ${error.message}</div>`;
+            }
+        }
+
+        // Рендеринг логов
+        function renderLogs(data) {
+            const container = document.getElementById('logs-table');
+            
+            if (!data.logs || data.logs.length === 0) {
+                container.innerHTML = '<div class="empty">Логи не найдены</div>';
+                return;
+            }
+
+            let html = `
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Таблица</th>
+                                <th>Действие</th>
+                                <th>ID записи</th>
+                                <th>Измененные поля</th>
+                                <th>Данные</th>
+                                <th>Время</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            data.logs.forEach((log, index) => {
+                const actionColors = {
+                    'INSERT': 'success',
+                    'UPDATE': 'pending',
+                    'DELETE': 'failed'
+                };
+                const actionLabels = {
+                    'INSERT': 'Создание',
+                    'UPDATE': 'Обновление',
+                    'DELETE': 'Удаление'
+                };
+                const actionColor = actionColors[log.action] || 'pending';
+                const changedFields = log.changed_fields ? log.changed_fields.join(', ') : '-';
+                const dataId = `log-data-${log.id}-${index}`;
+                const hasOldData = log.old_data && Object.keys(log.old_data).length > 0;
+                const hasNewData = log.new_data && Object.keys(log.new_data).length > 0;
+                
+                html += `
+                    <tr>
+                        <td>${log.id}</td>
+                        <td><strong>${log.table_name}</strong></td>
+                        <td><span class="badge ${actionColor}">${actionLabels[log.action] || log.action}</span></td>
+                        <td style="font-family: monospace; font-size: 11px;">${log.record_id}</td>
+                        <td style="font-size: 11px;">${changedFields}</td>
+                        <td>
+                            ${hasOldData || hasNewData ? `
+                                <button class="btn btn-primary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="toggleLogData('${dataId}')">
+                                    Показать данные
+                                </button>
+                                <div id="${dataId}" style="display: none; margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 300px; overflow-y: auto;">
+                                    ${hasOldData ? `<div style="margin-bottom: 10px;"><strong>Старые данные:</strong><pre style="margin-top: 5px; font-size: 10px; white-space: pre-wrap; word-break: break-all;">${JSON.stringify(log.old_data, null, 2)}</pre></div>` : ''}
+                                    ${hasNewData ? `<div><strong>Новые данные:</strong><pre style="margin-top: 5px; font-size: 10px; white-space: pre-wrap; word-break: break-all;">${JSON.stringify(log.new_data, null, 2)}</pre></div>` : ''}
+                                </div>
+                            ` : '-'}
+                        </td>
+                        <td class="timestamp">${new Date(log.created_at).toLocaleString('ru-RU')}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table></div>`;
+            
+            if (data.total > 100) {
+                const totalPages = Math.ceil(data.total / 100);
+                html += `
+                    <div class="pagination">
+                        <button onclick="loadLogs(${Math.max(1, data.page - 1)})" ${data.page === 1 ? 'disabled' : ''}>Назад</button>
+                        <span>Страница ${data.page} из ${totalPages} (Всего: ${data.total})</span>
+                        <button onclick="loadLogs(${Math.min(totalPages, data.page + 1)})" ${data.page === totalPages ? 'disabled' : ''}>Вперед</button>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Переключение отображения данных лога
+        function toggleLogData(dataId) {
+            const element = document.getElementById(dataId);
+            if (element) {
+                element.style.display = element.style.display === 'none' ? 'block' : 'none';
+            }
         }
 
         // Инициализация
