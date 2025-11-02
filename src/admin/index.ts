@@ -15,7 +15,6 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Получаем список ID админов из переменной окружения
 function getAdminIds(): number[] {
   const envValue = process.env.ADMIN_TELEGRAM_IDS;
-  console.log('ADMIN_TELEGRAM_IDS from env:', envValue);
   
   if (!envValue) {
     console.warn('ADMIN_TELEGRAM_IDS is not set in environment variables');
@@ -23,7 +22,6 @@ function getAdminIds(): number[] {
   }
   
   const ids = envValue.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-  console.log('Parsed admin IDs:', ids);
   
   return ids;
 }
@@ -176,14 +174,10 @@ async function processTelegramAuth(authData: any, res: express.Response, req?: e
 
       const adminIds = getAdminIds();
       const userTelegramId = parseInt(user.telegram_id) || user.telegram_id;
-      console.log('Admin IDs from env (processTelegramAuth):', adminIds);
-      console.log('User telegram_id (processTelegramAuth):', userTelegramId, 'type:', typeof userTelegramId);
-      console.log('Is admin? (processTelegramAuth):', adminIds.includes(userTelegramId));
-      
       const isAdmin = adminIds.includes(userTelegramId);
 
       if (!isAdmin) {
-        console.error(`Access denied for telegram_id ${user.telegram_id}. Admin IDs: ${adminIds.join(', ')}`);
+        console.error(`Access denied for telegram_id ${userTelegramId}. Admin IDs: ${adminIds.join(', ')}`);
         return res.status(403).json({ error: 'Forbidden - not admin' });
       }
 
@@ -258,13 +252,10 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
       const user = result.rows[0];
       const adminIds = getAdminIds();
       const userTelegramId = parseInt(user.telegram_id) || user.telegram_id;
-      console.log('Admin IDs from env (requireAuth):', adminIds);
-      console.log('User telegram_id (requireAuth):', userTelegramId, 'type:', typeof userTelegramId);
-      
       const isAdmin = adminIds.includes(userTelegramId);
 
       if (!isAdmin) {
-        console.error(`Access denied for telegram_id ${user.telegram_id}. Admin IDs: ${adminIds.join(', ')}`);
+        console.error(`Access denied for telegram_id ${userTelegramId}. Admin IDs: ${adminIds.join(', ')}`);
         return res.status(403).json({ error: 'Forbidden - not admin' });
       }
 
