@@ -300,8 +300,8 @@ router.get('/stats', async (req, res) => {
           (SELECT COUNT(*) FROM orders) as total_orders,
           (SELECT COUNT(*) FROM orders WHERE status = 'completed') as completed_orders,
           (SELECT COUNT(*) FROM orders WHERE status = 'failed') as failed_orders,
-          (SELECT COUNT(*) FROM payments WHERE status IN ('succeeded', 'success')) as successful_payments,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status IN ('succeeded', 'success')) as total_revenue,
+          (SELECT COUNT(*) FROM payments WHERE status = 'success') as successful_payments,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'success') as total_revenue,
           (SELECT COALESCE(SUM(generations), 0) FROM users) as total_generations,
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'completed') as completed_jobs,
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs
