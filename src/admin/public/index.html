@@ -538,6 +538,9 @@
 
             <div id="content-logs" class="tab-content" style="display: none;">
                 <div class="search-box" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <input type="text" id="log-user-search" placeholder="Поиск по username, telegram_id или user_id..." 
+                           oninput="clearTimeout(logSearchTimeout); logSearchTimeout = setTimeout(() => loadLogs(), 300);"
+                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; flex: 1; min-width: 200px;">
                     <select id="log-table-filter" onchange="loadLogs()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                         <option value="">Все таблицы</option>
                     </select>
@@ -607,6 +610,7 @@
         let currentPage = { users: 1, orders: 1, payments: 1, jobs: 1 };
         let currentData = {};
         let searchTimeout = null;
+        let logSearchTimeout = null;
         let isAuthenticated = false;
         let currentUser = null;
 
@@ -1669,10 +1673,12 @@
             try {
                 const tableFilter = document.getElementById('log-table-filter')?.value || '';
                 const actionFilter = document.getElementById('log-action-filter')?.value || '';
+                const userSearch = document.getElementById('log-user-search')?.value || '';
                 
                 let url = `/api/logs?page=${page}&limit=100`;
                 if (tableFilter) url += `&table=${encodeURIComponent(tableFilter)}`;
                 if (actionFilter) url += `&action=${encodeURIComponent(actionFilter)}`;
+                if (userSearch) url += `&user=${encodeURIComponent(userSearch)}`;
                 
                 const response = await fetch(url);
                 const data = await response.json();

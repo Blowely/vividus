@@ -428,6 +428,7 @@ router.get('/logs', async (req, res) => {
       const offset = (page - 1) * limit;
       const tableName = req.query.table as string;
       const action = req.query.action as string;
+      const userSearch = req.query.user as string;
 
       let query = `SELECT * FROM activity_logs WHERE 1=1`;
       const params: any[] = [];
@@ -443,6 +444,22 @@ router.get('/logs', async (req, res) => {
         paramCount++;
         query += ` AND action = $${paramCount}`;
         params.push(action.toUpperCase());
+      }
+
+      // Поиск по пользователю: ищем в JSONB данных по telegram_id, username или user_id
+      if (userSearch) {
+        paramCount++;
+        // Поиск в new_data или old_data по telegram_id, username, user_id
+        // Используем ILIKE для частичного совпадения
+        query += ` AND (
+          (new_data->>'telegram_id')::text ILIKE $${paramCount}
+          OR (old_data->>'telegram_id')::text ILIKE $${paramCount}
+          OR new_data->>'username' ILIKE $${paramCount}
+          OR old_data->>'username' ILIKE $${paramCount}
+          OR (new_data->>'user_id')::text ILIKE $${paramCount}
+          OR (old_data->>'user_id')::text ILIKE $${paramCount}
+        )`;
+        params.push(`%${userSearch}%`);
       }
 
       query += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
@@ -465,6 +482,20 @@ router.get('/logs', async (req, res) => {
         countParamCount++;
         countQuery += ` AND action = $${countParamCount}`;
         countParams.push(action.toUpperCase());
+      }
+
+      // Поиск по пользователю для подсчета
+      if (userSearch) {
+        countParamCount++;
+        countQuery += ` AND (
+          (new_data->>'telegram_id')::text ILIKE $${countParamCount}
+          OR (old_data->>'telegram_id')::text ILIKE $${countParamCount}
+          OR new_data->>'username' ILIKE $${countParamCount}
+          OR old_data->>'username' ILIKE $${countParamCount}
+          OR (new_data->>'user_id')::text ILIKE $${countParamCount}
+          OR (old_data->>'user_id')::text ILIKE $${countParamCount}
+        )`;
+        countParams.push(`%${userSearch}%`);
       }
 
       const countResult = await client.query(countQuery, countParams);
