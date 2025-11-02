@@ -541,12 +541,14 @@
                 
                 container.innerHTML = '';
                 const script = document.createElement('script');
-                script.src = 'https://telegram.org/js/telegram-widget.js?22';
+                // Добавляем timestamp для предотвращения кеширования виджета
+                script.src = 'https://telegram.org/js/telegram-widget.js?22&t=' + Date.now();
                 script.setAttribute('data-telegram-login', botUsername);
                 script.setAttribute('data-size', 'large');
                 script.setAttribute('data-userpic', 'false');
                 script.setAttribute('data-request-access', 'write');
-                script.setAttribute('data-auth-url', window.location.origin + '/api/auth/telegram');
+                // Добавляем уникальный параметр в auth-url для сброса кеша авторизации
+                script.setAttribute('data-auth-url', window.location.origin + '/api/auth/telegram?t=' + Date.now());
                 script.setAttribute('data-onauth', 'onTelegramAuth(user)');
                 script.async = true;
                 container.appendChild(script);
@@ -585,12 +587,52 @@
         // Выход
         async function logout() {
             try {
+                // Очищаем сессию на сервере
                 await fetch('/api/auth/logout', { method: 'POST' });
+                
+                // Очищаем локальное состояние
                 isAuthenticated = false;
                 currentUser = null;
-                showLoginScreen();
+                
+                // Полностью очищаем контейнер Telegram Widget и пересоздаём его
+                const container = document.getElementById('telegram-login-container');
+                if (container) {
+                    // Удаляем все дочерние элементы (включая скрипт виджета)
+                    container.innerHTML = '';
+                }
+                
+                // Очищаем cookies (если есть)
+                document.cookie.split(";").forEach(function(c) { 
+                    document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+                });
+                
+                // Очищаем localStorage и sessionStorage (Telegram Widget может использовать их)
+                try {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                } catch (e) {
+                    // Игнорируем ошибки, если хранилища недоступны
+                }
+                
+                // Небольшая задержка перед пересозданием виджета для полной очистки
+                setTimeout(() => {
+                    showLoginScreen();
+                }, 100);
             } catch (error) {
                 console.error('Logout error:', error);
+                // Полная очистка даже при ошибке
+                const container = document.getElementById('telegram-login-container');
+                if (container) {
+                    container.innerHTML = '';
+                }
+                try {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                } catch (e) {}
+                // Всё равно показываем экран входа
+                setTimeout(() => {
+                    showLoginScreen();
+                }, 100);
             }
         }
 
