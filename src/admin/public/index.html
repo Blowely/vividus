@@ -521,19 +521,40 @@
             </div>
 
             <div id="content-orders" class="tab-content" style="display: none;">
+                <div class="search-box">
+                    <input type="text" id="search-orders-user" placeholder="Поиск по username, telegram_id или id..." 
+                           oninput="clearTimeout(orderSearchTimeout); orderSearchTimeout = setTimeout(() => loadOrders(), 300);"
+                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 100%; max-width: 400px;">
+                </div>
                 <div id="orders-table"></div>
             </div>
 
             <div id="content-payments" class="tab-content" style="display: none;">
+                <div class="search-box">
+                    <input type="text" id="search-payments-user" placeholder="Поиск по username, telegram_id или id..." 
+                           oninput="clearTimeout(paymentSearchTimeout); paymentSearchTimeout = setTimeout(() => loadPayments(), 300);"
+                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 100%; max-width: 400px;">
+                </div>
                 <div id="payments-table"></div>
             </div>
 
             <div id="content-jobs" class="tab-content" style="display: none;">
+                <div class="search-box">
+                    <input type="text" id="search-jobs-user" placeholder="Поиск по username, telegram_id или id..." 
+                           oninput="clearTimeout(jobSearchTimeout); jobSearchTimeout = setTimeout(() => loadJobs(), 300);"
+                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 100%; max-width: 400px;">
+                </div>
                 <div id="jobs-table"></div>
             </div>
 
             <div id="content-analytics" class="tab-content" style="display: none;">
+                <div class="search-box" style="margin-bottom: 20px;">
+                    <input type="text" id="search-analytics-user" placeholder="Поиск по пользователю (username, telegram_id или id) для анализа флоу..." 
+                           oninput="clearTimeout(analyticsSearchTimeout); analyticsSearchTimeout = setTimeout(() => loadUserAnalytics(), 300);"
+                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 100%; max-width: 400px;">
+                </div>
                 <div id="analytics-content"></div>
+                <div id="user-analytics-content" style="display: none;"></div>
             </div>
 
             <div id="content-logs" class="tab-content" style="display: none;">
@@ -611,6 +632,10 @@
         let currentData = {};
         let searchTimeout = null;
         let logSearchTimeout = null;
+        let orderSearchTimeout = null;
+        let paymentSearchTimeout = null;
+        let jobSearchTimeout = null;
+        let analyticsSearchTimeout = null;
         let isAuthenticated = false;
         let currentUser = null;
 
@@ -819,22 +844,13 @@
                         renderUsers(usersData);
                         break;
                     case 'orders':
-                        response = await fetch(`/api/orders?page=${currentPage.orders}&limit=50`);
-                        const ordersData = await response.json();
-                        currentData.orders = ordersData;
-                        renderOrders(ordersData);
+                        loadOrders();
                         break;
                     case 'payments':
-                        response = await fetch(`/api/payments?page=${currentPage.payments}&limit=50`);
-                        const paymentsData = await response.json();
-                        currentData.payments = paymentsData;
-                        renderPayments(paymentsData);
+                        loadPayments();
                         break;
                     case 'jobs':
-                        response = await fetch(`/api/did-jobs?page=${currentPage.jobs}&limit=50`);
-                        const jobsData = await response.json();
-                        currentData.jobs = jobsData;
-                        renderJobs(jobsData);
+                        loadJobs();
                         break;
                     case 'analytics':
                         loadAnalytics();
@@ -873,6 +889,60 @@
                 const data = await response.json();
                 currentData.users = data;
                 renderUsers(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        async function loadOrders() {
+            const container = document.getElementById('orders-table');
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+            try {
+                const userSearch = document.getElementById('search-orders-user')?.value || '';
+                let url = `/api/orders?page=${currentPage.orders}&limit=50`;
+                if (userSearch) url += `&user=${encodeURIComponent(userSearch)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                currentData.orders = data;
+                renderOrders(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        async function loadPayments() {
+            const container = document.getElementById('payments-table');
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+            try {
+                const userSearch = document.getElementById('search-payments-user')?.value || '';
+                let url = `/api/payments?page=${currentPage.payments}&limit=50`;
+                if (userSearch) url += `&user=${encodeURIComponent(userSearch)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                currentData.payments = data;
+                renderPayments(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+            }
+        }
+
+        async function loadJobs() {
+            const container = document.getElementById('jobs-table');
+            container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+            try {
+                const userSearch = document.getElementById('search-jobs-user')?.value || '';
+                let url = `/api/did-jobs?page=${currentPage.jobs}&limit=50`;
+                if (userSearch) url += `&user=${encodeURIComponent(userSearch)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                currentData.jobs = data;
+                renderJobs(data);
             } catch (error) {
                 container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
             }
@@ -1329,7 +1399,20 @@
 
         // Загрузка и отрисовка аналитики
         async function loadAnalytics() {
+            const userSearch = document.getElementById('search-analytics-user')?.value || '';
+            
+            // Если есть поиск по пользователю, загружаем статистику пользователя
+            if (userSearch) {
+                await loadUserAnalytics(userSearch);
+                return;
+            }
+            
+            // Иначе загружаем общую аналитику
             const container = document.getElementById('analytics-content');
+            const userContainer = document.getElementById('user-analytics-content');
+            
+            container.style.display = 'block';
+            userContainer.style.display = 'none';
             container.innerHTML = '<div class="loading">Загрузка аналитики...</div>';
             
             try {
@@ -1345,6 +1428,188 @@
             } catch (error) {
                 container.innerHTML = `<div class="empty">Ошибка загрузки аналитики: ${error.message}</div>`;
             }
+        }
+
+        async function loadUserAnalytics(userSearch = null) {
+            const search = userSearch || document.getElementById('search-analytics-user')?.value || '';
+            
+            if (!search) {
+                document.getElementById('analytics-content').style.display = 'block';
+                document.getElementById('user-analytics-content').style.display = 'none';
+                loadAnalytics();
+                return;
+            }
+
+            const container = document.getElementById('analytics-content');
+            const userContainer = document.getElementById('user-analytics-content');
+            
+            container.style.display = 'none';
+            userContainer.style.display = 'block';
+            userContainer.innerHTML = '<div class="loading">Поиск пользователя и загрузка статистики...</div>';
+
+            try {
+                // Сначала находим user_id
+                const userSearchResponse = await fetch(`/api/users?search=${encodeURIComponent(search)}&limit=1`);
+                const userSearchData = await userSearchResponse.json();
+                
+                if (!userSearchData.users || userSearchData.users.length === 0) {
+                    userContainer.innerHTML = '<div class="empty">Пользователь не найден</div>';
+                    return;
+                }
+
+                const userId = userSearchData.users[0].id;
+                
+                // Получаем статистику по пользователю
+                const analyticsResponse = await fetch(`/api/analytics/user/${userId}`);
+                const analytics = await analyticsResponse.json();
+                
+                renderUserAnalytics(analytics);
+            } catch (error) {
+                userContainer.innerHTML = `<div class="empty">Ошибка загрузки статистики: ${error.message}</div>`;
+            }
+        }
+
+        function renderUserAnalytics(data) {
+            const container = document.getElementById('user-analytics-content');
+            
+            const flowSteps = [
+                { name: 'Регистрация', passed: data.flow.registered, icon: '✅' },
+                { name: 'Создал заказ', passed: data.flow.has_orders, icon: data.flow.has_orders ? '✅' : '❌' },
+                { name: 'Оплатил / Использовал генерации', passed: data.flow.has_payments, icon: data.flow.has_payments ? '✅' : '❌' },
+                { name: 'Завершил заказ', passed: data.flow.has_completed, icon: data.flow.has_completed ? '✅' : '❌' }
+            ];
+            
+            const allPassed = flowSteps.every(step => step.passed);
+            const completionRate = data.flow.completion_rate;
+
+            let html = `
+                <div style="margin-bottom: 30px;">
+                    <h2 style="margin-bottom: 15px;">👤 Статистика пользователя</h2>
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Пользователь</div>
+                                <div style="font-size: 16px; font-weight: bold;">@${data.user.username || data.user.telegram_id || 'Без имени'}</div>
+                                <div style="font-size: 12px; color: #999; margin-top: 2px;">ID: ${data.user.id} | Telegram: ${data.user.telegram_id}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Генерации на балансе</div>
+                                <div style="font-size: 24px; font-weight: bold;">${data.user.generations || 0}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Регистрация</div>
+                                <div style="font-size: 14px;">${new Date(data.user.created_at).toLocaleDateString('ru-RU')}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 15px;">🔄 Прохождение флоу</h3>
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="margin-bottom: 20px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span style="font-weight: bold;">Статус:</span>
+                                <span style="font-size: 18px; font-weight: bold; color: ${allPassed ? '#28a745' : '#ffc107'};">
+                                    ${allPassed ? '✅ Полный флоу пройден' : '⚠️ Флоу не завершён'}
+                                </span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-weight: bold;">Процент завершения заказов:</span>
+                                <span style="font-size: 18px; font-weight: bold;">${completionRate}%</span>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            ${flowSteps.map(step => `
+                                <div style="padding: 15px; background: ${step.passed ? '#d4edda' : '#f8d7da'}; border-radius: 6px; border-left: 4px solid ${step.passed ? '#28a745' : '#dc3545'};">
+                                    <div style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">
+                                        ${step.icon} ${step.name}
+                                    </div>
+                                    <div style="font-size: 12px; color: #666;">
+                                        ${step.passed ? 'Выполнено' : 'Не выполнено'}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h4 style="margin-bottom: 15px;">📦 Заказы</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Всего</div>
+                                <div style="font-size: 24px; font-weight: bold;">${data.orders.total}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Завершено</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #28a745;">${data.orders.completed}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Провалено</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${data.orders.failed}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Ожидают оплаты</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #ffc107;">${data.orders.pending}</div>
+                            </div>
+                        </div>
+                        ${data.orders.generations_orders > 0 ? `
+                            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">
+                                <div style="font-size: 12px; color: #666;">Заказы за генерации</div>
+                                <div style="font-size: 18px; font-weight: bold;">${data.orders.generations_orders}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h4 style="margin-bottom: 15px;">💳 Платежи</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Всего</div>
+                                <div style="font-size: 24px; font-weight: bold;">${data.payments.total}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Успешных</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #28a745;">${data.payments.successful}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Ожидают</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #ffc107;">${data.payments.pending}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Потрачено</div>
+                                <div style="font-size: 24px; font-weight: bold;">${parseFloat(data.payments.total_spent).toFixed(2)} ₽</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h4 style="margin-bottom: 15px;">🎬 Генерации</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Всего</div>
+                                <div style="font-size: 24px; font-weight: bold;">${data.jobs.total}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Завершено</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #28a745;">${data.jobs.completed}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Провалено</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${data.jobs.failed}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 12px; color: #666;">Обрабатывается</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #17a2b8;">${data.jobs.processing}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
         }
 
         function renderAnalytics(campaigns, stats) {
@@ -1719,6 +1984,7 @@
                         <thead>
                             <tr>
                                 <th>ID</th>
+                                <th>Пользователь</th>
                                 <th>Таблица</th>
                                 <th>Действие</th>
                                 <th>ID записи</th>
@@ -1746,10 +2012,12 @@
                 const dataId = `log-data-${log.id}-${index}`;
                 const hasOldData = log.old_data && Object.keys(log.old_data).length > 0;
                 const hasNewData = log.new_data && Object.keys(log.new_data).length > 0;
+                const userDisplay = log.username ? `@${log.username}` : (log.telegram_id ? `ID: ${log.telegram_id}` : (log.user_id ? `User ID: ${log.user_id}` : '-'));
                 
                 html += `
                     <tr>
                         <td>${log.id}</td>
+                        <td>${userDisplay}</td>
                         <td><strong>${log.table_name}</strong></td>
                         <td><span class="badge ${actionColor}">${actionLabels[log.action] || log.action}</span></td>
                         <td style="font-family: monospace; font-size: 11px;">${log.record_id}</td>

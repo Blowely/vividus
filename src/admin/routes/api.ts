@@ -132,7 +132,21 @@ router.get('/orders', async (req, res) => {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = (page - 1) * limit;
-      const userId = req.query.user_id as string;
+      const userSearch = req.query.user as string;
+
+      // Поиск user_id по telegram_id, username или id
+      let userId: number | null = null;
+      if (userSearch) {
+        const userSearchQuery = await client.query(`
+          SELECT id FROM users 
+          WHERE telegram_id::text ILIKE $1 OR username ILIKE $1 OR id::text = $1
+          LIMIT 1
+        `, [`%${userSearch}%`]);
+        
+        if (userSearchQuery.rows.length > 0) {
+          userId = userSearchQuery.rows[0].id;
+        }
+      }
 
       let query = `
         SELECT 
@@ -145,27 +159,34 @@ router.get('/orders', async (req, res) => {
         LEFT JOIN users u ON o.user_id = u.id
       `;
       const params: any[] = [];
+      let paramCount = 0;
 
-      if (userId) {
-        query += ' WHERE o.user_id = $1';
+      if (userId !== null) {
+        paramCount++;
+        query += ` WHERE o.user_id = $${paramCount}`;
         params.push(userId);
-        query += ` ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-        params.push(limit, offset);
-      } else {
-        query += ` ORDER BY o.created_at DESC LIMIT $1 OFFSET $2`;
-        params.push(limit, offset);
+      } else if (userSearch) {
+        // Если пользователь не найден, возвращаем пустой результат
+        query += ` WHERE 1=0`;
       }
+
+      query += ` ORDER BY o.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+      params.push(limit, offset);
 
       const result = await client.query(query, params);
 
       // Получаем общее количество
-      const countQuery = userId 
-        ? 'SELECT COUNT(*) FROM orders WHERE user_id = $1'
-        : 'SELECT COUNT(*) FROM orders';
-      const countResult = await client.query(
-        countQuery,
-        userId ? [userId] : []
-      );
+      let countQuery = 'SELECT COUNT(*) FROM orders';
+      const countParams: any[] = [];
+      
+      if (userId !== null) {
+        countQuery += ' WHERE user_id = $1';
+        countParams.push(userId);
+      } else if (userSearch) {
+        countQuery += ' WHERE 1=0';
+      }
+      
+      const countResult = await client.query(countQuery, countParams);
 
       res.json({
         orders: result.rows,
@@ -190,7 +211,21 @@ router.get('/payments', async (req, res) => {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = (page - 1) * limit;
-      const userId = req.query.user_id as string;
+      const userSearch = req.query.user as string;
+
+      // Поиск user_id по telegram_id, username или id
+      let userId: number | null = null;
+      if (userSearch) {
+        const userSearchQuery = await client.query(`
+          SELECT id FROM users 
+          WHERE telegram_id::text ILIKE $1 OR username ILIKE $1 OR id::text = $1
+          LIMIT 1
+        `, [`%${userSearch}%`]);
+        
+        if (userSearchQuery.rows.length > 0) {
+          userId = userSearchQuery.rows[0].id;
+        }
+      }
 
       let query = `
         SELECT 
@@ -205,27 +240,33 @@ router.get('/payments', async (req, res) => {
         LEFT JOIN orders o ON p.order_id = o.id
       `;
       const params: any[] = [];
+      let paramCount = 0;
 
-      if (userId) {
-        query += ' WHERE p.user_id = $1';
+      if (userId !== null) {
+        paramCount++;
+        query += ` WHERE p.user_id = $${paramCount}`;
         params.push(userId);
-        query += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-        params.push(limit, offset);
-      } else {
-        query += ` ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`;
-        params.push(limit, offset);
+      } else if (userSearch) {
+        query += ` WHERE 1=0`;
       }
+
+      query += ` ORDER BY p.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+      params.push(limit, offset);
 
       const result = await client.query(query, params);
 
       // Получаем общее количество
-      const countQuery = userId 
-        ? 'SELECT COUNT(*) FROM payments WHERE user_id = $1'
-        : 'SELECT COUNT(*) FROM payments';
-      const countResult = await client.query(
-        countQuery,
-        userId ? [userId] : []
-      );
+      let countQuery = 'SELECT COUNT(*) FROM payments';
+      const countParams: any[] = [];
+      
+      if (userId !== null) {
+        countQuery += ' WHERE user_id = $1';
+        countParams.push(userId);
+      } else if (userSearch) {
+        countQuery += ' WHERE 1=0';
+      }
+      
+      const countResult = await client.query(countQuery, countParams);
 
       res.json({
         payments: result.rows,
@@ -250,8 +291,23 @@ router.get('/did-jobs', async (req, res) => {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = (page - 1) * limit;
+      const userSearch = req.query.user as string;
 
-      const query = `
+      // Поиск user_id по telegram_id, username или id
+      let userId: number | null = null;
+      if (userSearch) {
+        const userSearchQuery = await client.query(`
+          SELECT id FROM users 
+          WHERE telegram_id::text ILIKE $1 OR username ILIKE $1 OR id::text = $1
+          LIMIT 1
+        `, [`%${userSearch}%`]);
+        
+        if (userSearchQuery.rows.length > 0) {
+          userId = userSearchQuery.rows[0].id;
+        }
+      }
+
+      let query = `
         SELECT 
           dj.*,
           o.user_id,
@@ -265,14 +321,35 @@ router.get('/did-jobs', async (req, res) => {
         FROM did_jobs dj
         LEFT JOIN orders o ON dj.order_id = o.id
         LEFT JOIN users u ON o.user_id = u.id
-        ORDER BY dj.created_at DESC
-        LIMIT $1 OFFSET $2
       `;
+      const params: any[] = [];
+      let paramCount = 0;
 
-      const result = await client.query(query, [limit, offset]);
+      if (userId !== null) {
+        paramCount++;
+        query += ` WHERE o.user_id = $${paramCount}`;
+        params.push(userId);
+      } else if (userSearch) {
+        query += ` WHERE 1=0`;
+      }
+
+      query += ` ORDER BY dj.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+      params.push(limit, offset);
+
+      const result = await client.query(query, params);
 
       // Получаем общее количество
-      const countResult = await client.query('SELECT COUNT(*) FROM did_jobs');
+      let countQuery = 'SELECT COUNT(*) FROM did_jobs dj LEFT JOIN orders o ON dj.order_id = o.id';
+      const countParams: any[] = [];
+      
+      if (userId !== null) {
+        countQuery += ' WHERE o.user_id = $1';
+        countParams.push(userId);
+      } else if (userSearch) {
+        countQuery += ' WHERE 1=0';
+      }
+      
+      const countResult = await client.query(countQuery, countParams);
 
       res.json({
         jobs: result.rows,
@@ -430,39 +507,49 @@ router.get('/logs', async (req, res) => {
       const action = req.query.action as string;
       const userSearch = req.query.user as string;
 
-      let query = `SELECT * FROM activity_logs WHERE 1=1`;
+      // Поиск по пользователю: сначала пытаемся найти user_id по telegram_id или username
+      let userId: number | null = null;
+      if (userSearch) {
+        const userSearchQuery = await client.query(`
+          SELECT id FROM users 
+          WHERE telegram_id::text ILIKE $1 OR username ILIKE $1 OR id::text = $1
+          LIMIT 1
+        `, [`%${userSearch}%`]);
+        
+        if (userSearchQuery.rows.length > 0) {
+          userId = userSearchQuery.rows[0].id;
+        }
+      }
+
+      let query = `SELECT al.*, u.telegram_id, u.username, u.first_name, u.last_name 
+                   FROM activity_logs al 
+                   LEFT JOIN users u ON al.user_id = u.id 
+                   WHERE 1=1`;
       const params: any[] = [];
       let paramCount = 0;
 
       if (tableName) {
         paramCount++;
-        query += ` AND table_name = $${paramCount}`;
+        query += ` AND al.table_name = $${paramCount}`;
         params.push(tableName);
       }
 
       if (action) {
         paramCount++;
-        query += ` AND action = $${paramCount}`;
+        query += ` AND al.action = $${paramCount}`;
         params.push(action.toUpperCase());
       }
 
-      // Поиск по пользователю: ищем в JSONB данных по telegram_id, username или user_id
-      if (userSearch) {
+      if (userSearch && userId !== null) {
         paramCount++;
-        // Поиск в new_data или old_data по telegram_id, username, user_id
-        // Используем ILIKE для частичного совпадения
-        query += ` AND (
-          (new_data->>'telegram_id')::text ILIKE $${paramCount}
-          OR (old_data->>'telegram_id')::text ILIKE $${paramCount}
-          OR new_data->>'username' ILIKE $${paramCount}
-          OR old_data->>'username' ILIKE $${paramCount}
-          OR (new_data->>'user_id')::text ILIKE $${paramCount}
-          OR (old_data->>'user_id')::text ILIKE $${paramCount}
-        )`;
-        params.push(`%${userSearch}%`);
+        query += ` AND al.user_id = $${paramCount}`;
+        params.push(userId);
+      } else if (userSearch) {
+        // Если пользователь не найден, возвращаем пустой результат
+        query += ` AND 1=0`; // Всегда false
       }
-
-      query += ` ORDER BY created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+      
+      query += ` ORDER BY al.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
       params.push(limit, offset);
 
       const result = await client.query(query, params);
@@ -484,18 +571,23 @@ router.get('/logs', async (req, res) => {
         countParams.push(action.toUpperCase());
       }
 
-      // Поиск по пользователю для подсчета
+      // Поиск по пользователю для подсчета (используем тот же user_id что в основном запросе)
       if (userSearch) {
-        countParamCount++;
-        countQuery += ` AND (
-          (new_data->>'telegram_id')::text ILIKE $${countParamCount}
-          OR (old_data->>'telegram_id')::text ILIKE $${countParamCount}
-          OR new_data->>'username' ILIKE $${countParamCount}
-          OR old_data->>'username' ILIKE $${countParamCount}
-          OR (new_data->>'user_id')::text ILIKE $${countParamCount}
-          OR (old_data->>'user_id')::text ILIKE $${countParamCount}
-        )`;
-        countParams.push(`%${userSearch}%`);
+        // Находим user_id аналогично основному запросу
+        const userSearchQuery = await client.query(`
+          SELECT id FROM users 
+          WHERE telegram_id::text ILIKE $1 OR username ILIKE $1 OR id::text = $1
+          LIMIT 1
+        `, [`%${userSearch}%`]);
+        
+        if (userSearchQuery.rows.length > 0) {
+          const userId = userSearchQuery.rows[0].id;
+          countParamCount++;
+          countQuery += ` AND user_id = $${countParamCount}`;
+          countParams.push(userId);
+        } else {
+          countQuery += ` AND 1=0`; // Всегда false
+        }
       }
 
       const countResult = await client.query(countQuery, countParams);
@@ -559,6 +651,117 @@ router.get('/logs/tables', async (req, res) => {
       return res.json([]);
     }
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Получить статистику по пользователю (прохождение флоу)
+router.get('/analytics/user/:userId', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const userId = parseInt(req.params.userId);
+      
+      if (isNaN(userId)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      // Получаем информацию о пользователе
+      const userResult = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
+      
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const user = userResult.rows[0];
+
+      // Статистика по заказам
+      const ordersStats = await client.query(`
+        SELECT 
+          COUNT(*) as total_orders,
+          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_orders,
+          COUNT(CASE WHEN status = 'payment_required' THEN 1 END) as pending_orders
+        FROM orders
+        WHERE user_id = $1
+      `, [userId]);
+
+      // Статистика по платежам
+      const paymentsStats = await client.query(`
+        SELECT 
+          COUNT(*) as total_payments,
+          COUNT(CASE WHEN status = 'success' THEN 1 END) as successful_payments,
+          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_payments,
+          COALESCE(SUM(CASE WHEN status = 'success' THEN amount ELSE 0 END), 0) as total_spent
+        FROM payments
+        WHERE user_id = $1
+      `, [userId]);
+
+      // Статистика по генерациям (did_jobs)
+      const jobsStats = await client.query(`
+        SELECT 
+          COUNT(*) as total_jobs,
+          COUNT(CASE WHEN dj.status = 'completed' THEN 1 END) as completed_jobs,
+          COUNT(CASE WHEN dj.status = 'failed' THEN 1 END) as failed_jobs,
+          COUNT(CASE WHEN dj.status = 'processing' THEN 1 END) as processing_jobs
+        FROM did_jobs dj
+        LEFT JOIN orders o ON dj.order_id = o.id
+        WHERE o.user_id = $1
+      `, [userId]);
+
+      // Заказы, оплаченные генерациями (price = 0)
+      const generationsOrders = await client.query(`
+        SELECT COUNT(*) as generations_orders
+        FROM orders
+        WHERE user_id = $1 AND price = 0
+      `, [userId]);
+
+      const stats = {
+        user: {
+          id: user.id,
+          telegram_id: user.telegram_id,
+          username: user.username,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          generations: user.generations,
+          created_at: user.created_at
+        },
+        orders: {
+          total: parseInt(ordersStats.rows[0].total_orders) || 0,
+          completed: parseInt(ordersStats.rows[0].completed_orders) || 0,
+          failed: parseInt(ordersStats.rows[0].failed_orders) || 0,
+          pending: parseInt(ordersStats.rows[0].pending_orders) || 0,
+          generations_orders: parseInt(generationsOrders.rows[0].generations_orders) || 0
+        },
+        payments: {
+          total: parseInt(paymentsStats.rows[0].total_payments) || 0,
+          successful: parseInt(paymentsStats.rows[0].successful_payments) || 0,
+          pending: parseInt(paymentsStats.rows[0].pending_payments) || 0,
+          total_spent: parseFloat(paymentsStats.rows[0].total_spent) || 0
+        },
+        jobs: {
+          total: parseInt(jobsStats.rows[0].total_jobs) || 0,
+          completed: parseInt(jobsStats.rows[0].completed_jobs) || 0,
+          failed: parseInt(jobsStats.rows[0].failed_jobs) || 0,
+          processing: parseInt(jobsStats.rows[0].processing_jobs) || 0
+        },
+        flow: {
+          registered: true,
+          has_orders: (parseInt(ordersStats.rows[0].total_orders) || 0) > 0,
+          has_payments: (parseInt(paymentsStats.rows[0].total_payments) || 0) > 0 || (parseInt(ordersStats.rows[0].total_orders) || 0) > 0,
+          has_completed: (parseInt(ordersStats.rows[0].completed_orders) || 0) > 0,
+          completion_rate: ordersStats.rows[0].total_orders > 0 
+            ? ((parseInt(ordersStats.rows[0].completed_orders) || 0) / parseInt(ordersStats.rows[0].total_orders) * 100).toFixed(1)
+            : '0.0'
+        }
+      };
+
+      res.json(stats);
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching user analytics:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

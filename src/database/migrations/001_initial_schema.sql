@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     id SERIAL PRIMARY KEY,
     table_name VARCHAR(100) NOT NULL,
     record_id VARCHAR(255) NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     action VARCHAR(20) NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
     old_data JSONB,
     new_data JSONB,
@@ -120,9 +121,20 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add user_id column if table exists but column doesn't (for existing installations)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'activity_logs') THEN
+        IF NOT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'activity_logs' AND column_name = 'user_id') THEN
+            ALTER TABLE activity_logs ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+    END IF;
+END $$;
+
 -- Create indexes for activity_logs
 CREATE INDEX IF NOT EXISTS idx_activity_logs_table_name ON activity_logs(table_name);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_record_id ON activity_logs(record_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON activity_logs(action);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at DESC);
 
@@ -135,26 +147,47 @@ DECLARE
     changed_fields TEXT[];
     key TEXT;
     record_id_val VARCHAR(255);
+    user_id_val INTEGER;
 BEGIN
-    -- Determine record ID based on table
+    -- Determine record ID and user_id based on table
     IF TG_TABLE_NAME = 'users' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
-    ELSIF TG_TABLE_NAME IN ('orders', 'payments', 'did_jobs') THEN
+        user_id_val := COALESCE(NEW.id, OLD.id);
+    ELSIF TG_TABLE_NAME = 'orders' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
+        user_id_val := COALESCE(NEW.user_id, OLD.user_id);
+    ELSIF TG_TABLE_NAME = 'payments' THEN
+        record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
+        user_id_val := COALESCE(NEW.user_id, OLD.user_id);
+    ELSIF TG_TABLE_NAME = 'did_jobs' THEN
+        record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
+        -- Для did_jobs нужно найти user_id через order_id
+        IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+            SELECT o.user_id INTO user_id_val
+            FROM orders o
+            WHERE o.id = NEW.order_id;
+        ELSIF TG_OP = 'DELETE' THEN
+            SELECT o.user_id INTO user_id_val
+            FROM orders o
+            WHERE o.id = OLD.order_id;
+        END IF;
     ELSIF TG_TABLE_NAME = 'campaigns' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
+        user_id_val := NULL;
     ELSIF TG_TABLE_NAME = 'campaign_stats' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
+        user_id_val := NULL;
     ELSE
         record_id_val := 'unknown';
+        user_id_val := NULL;
     END IF;
 
     IF TG_OP = 'INSERT' THEN
         -- Convert NEW row to JSONB
         new_json := to_jsonb(NEW);
         
-        INSERT INTO activity_logs (table_name, record_id, action, new_data)
-        VALUES (TG_TABLE_NAME, record_id_val, 'INSERT', new_json);
+        INSERT INTO activity_logs (table_name, record_id, user_id, action, new_data)
+        VALUES (TG_TABLE_NAME, record_id_val, user_id_val, 'INSERT', new_json);
         
         RETURN NEW;
         
@@ -171,8 +204,8 @@ BEGIN
             END IF;
         END LOOP;
         
-        INSERT INTO activity_logs (table_name, record_id, action, old_data, new_data, changed_fields)
-        VALUES (TG_TABLE_NAME, record_id_val, 'UPDATE', old_json, new_json, changed_fields);
+        INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data, new_data, changed_fields)
+        VALUES (TG_TABLE_NAME, record_id_val, user_id_val, 'UPDATE', old_json, new_json, changed_fields);
         
         RETURN NEW;
         
@@ -180,8 +213,8 @@ BEGIN
         -- Convert OLD row to JSONB
         old_json := to_jsonb(OLD);
         
-        INSERT INTO activity_logs (table_name, record_id, action, old_data)
-        VALUES (TG_TABLE_NAME, record_id_val, 'DELETE', old_json);
+        INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data)
+        VALUES (TG_TABLE_NAME, record_id_val, user_id_val, 'DELETE', old_json);
         
         RETURN OLD;
     END IF;
