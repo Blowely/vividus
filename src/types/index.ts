@@ -17,7 +17,6 @@ export interface Order {
   status: OrderStatus;
   original_file_path: string;
   did_job_id?: string;
-  payment_id?: string;
   custom_prompt?: string;
   created_at: Date;
   updated_at: Date;

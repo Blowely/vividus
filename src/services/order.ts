@@ -87,4 +87,19 @@ export class OrderService {
       client.release();
     }
   }
+
+  async hasPayment(orderId: string): Promise<boolean> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        'SELECT COUNT(*) as count FROM payments WHERE order_id = $1',
+        [orderId]
+      );
+      
+      return parseInt(result.rows[0].count) > 0;
+    } finally {
+      client.release();
+    }
+  }
 }

@@ -553,14 +553,14 @@ router.get('/stats', async (req, res) => {
            FROM orders o 
            INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
-           WHERE (o.payment_id IS NULL OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_paid_or_used_generations,
+           WHERE (NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.order_id = o.id) OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_paid_or_used_generations,
           -- Пользователи, которые завершили заказ
           (SELECT COUNT(DISTINCT o.user_id) 
            FROM orders o 
            INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
            WHERE o.status = 'completed' 
-           AND (o.payment_id IS NULL OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_completed_orders
+           AND (NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.order_id = o.id) OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_completed_orders
       `, params);
 
       const result = stats.rows[0];
