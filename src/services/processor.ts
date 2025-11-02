@@ -154,12 +154,25 @@ export class ProcessorService {
 
   private async handleJobSuccess(generationId: string, telegramId: number, orderId: string, videoUrl: string): Promise<void> {
     try {
+      // Получаем заказ для проверки способа оплаты
+      const order = await this.orderService.getOrder(orderId);
+      
       // Update order with result (videoUrl already contains the S3 link, no need to save locally)
       await this.orderService.updateOrderResult(orderId, generationId);
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
 
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+
+      // Проверяем, был ли заказ оплачен генерациями (price = 0 означает оплату генерациями)
+      // Списываем генерации только после успешной генерации
+      if (order && order.price === 0) {
+        const deducted = await this.userService.deductGenerations(telegramId, 1);
+        if (deducted) {
+          const remainingGenerations = await this.userService.getUserGenerations(telegramId);
+          await this.notifyUser(telegramId, `✅ Генерация использована! Осталось: ${remainingGenerations}`);
+        }
+      }
 
       // Update campaign statistics
       try {

@@ -252,37 +252,37 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Логирование отключено (триггеры не создаются)
--- Для включения логирования раскомментируйте строки ниже
-
 -- Create triggers for all tables (drop if exists to allow re-running migration)
--- DROP TRIGGER IF EXISTS log_users_activity ON users;
--- DROP TRIGGER IF EXISTS log_users_activity_delete ON users;
--- CREATE TRIGGER log_users_activity
---     AFTER INSERT OR UPDATE ON users
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+-- Примечание: для users не создаем триггер на DELETE, чтобы избежать проблем с foreign key constraint
+-- Функция log_activity() уже настроена на установку user_id = NULL для DELETE операций на users
+DROP TRIGGER IF EXISTS log_users_activity ON users;
+DROP TRIGGER IF EXISTS log_users_activity_delete ON users;
+CREATE TRIGGER log_users_activity
+    AFTER INSERT OR UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
+-- DELETE триггер не создаем для users, удаление пользователей логируется через каскадное удаление связанных записей
 
--- DROP TRIGGER IF EXISTS log_orders_activity ON orders;
--- CREATE TRIGGER log_orders_activity
---     AFTER INSERT OR UPDATE OR DELETE ON orders
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+DROP TRIGGER IF EXISTS log_orders_activity ON orders;
+CREATE TRIGGER log_orders_activity
+    AFTER INSERT OR UPDATE OR DELETE ON orders
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
 
--- DROP TRIGGER IF EXISTS log_payments_activity ON payments;
--- CREATE TRIGGER log_payments_activity
---     AFTER INSERT OR UPDATE OR DELETE ON payments
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+DROP TRIGGER IF EXISTS log_payments_activity ON payments;
+CREATE TRIGGER log_payments_activity
+    AFTER INSERT OR UPDATE OR DELETE ON payments
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
 
--- DROP TRIGGER IF EXISTS log_did_jobs_activity ON did_jobs;
--- CREATE TRIGGER log_did_jobs_activity
---     AFTER INSERT OR UPDATE OR DELETE ON did_jobs
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+DROP TRIGGER IF EXISTS log_did_jobs_activity ON did_jobs;
+CREATE TRIGGER log_did_jobs_activity
+    AFTER INSERT OR UPDATE OR DELETE ON did_jobs
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
 
--- DROP TRIGGER IF EXISTS log_campaigns_activity ON campaigns;
--- CREATE TRIGGER log_campaigns_activity
---     AFTER INSERT OR UPDATE OR DELETE ON campaigns
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+DROP TRIGGER IF EXISTS log_campaigns_activity ON campaigns;
+CREATE TRIGGER log_campaigns_activity
+    AFTER INSERT OR UPDATE OR DELETE ON campaigns
+    FOR EACH ROW EXECUTE FUNCTION log_activity();
 
--- DROP TRIGGER IF EXISTS log_campaign_stats_activity ON campaign_stats;
--- CREATE TRIGGER log_campaign_stats_activity
---     AFTER INSERT OR UPDATE OR DELETE ON campaign_stats
---     FOR EACH ROW EXECUTE FUNCTION log_activity();
+DROP TRIGGER IF EXISTS log_campaign_stats_activity ON campaign_stats;
+CREATE TRIGGER log_campaign_stats_activity
+    AFTER INSERT OR UPDATE OR DELETE ON campaign_stats
+    FOR EACH ROW EXECUTE FUNCTION log_activity();

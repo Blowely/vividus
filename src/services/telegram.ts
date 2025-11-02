@@ -376,10 +376,8 @@ export class TelegramService {
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
       if (userGenerations >= 1) {
-        // У пользователя есть генерации - списываем их и создаем заказ без оплаты
-        const deducted = await this.userService.deductGenerations(user.telegram_id, 1);
-        
-        if (!deducted) {
+        // Проверяем баланс, но не списываем - списание будет после успешной генерации
+        if (userGenerations < 1) {
           await this.sendMessage(ctx, '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.');
           return;
         }
@@ -388,11 +386,9 @@ export class TelegramService {
         const order = await this.orderService.createOrder(user.id, s3Url, 0, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
-        const remainingGenerations = await this.userService.getUserGenerations(user.telegram_id);
+        await this.sendMessage(ctx, `🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
         
-        await this.sendMessage(ctx, `✅ Генерация использована! Осталось: ${remainingGenerations}\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
-        
-        // Запускаем обработку заказа
+        // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
