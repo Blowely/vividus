@@ -1583,7 +1583,6 @@
                                 <th>Пользователь</th>
                                 <th>Изображение</th>
                                 <th>Статус</th>
-                                <th>Цена</th>
                                 <th>Промпт</th>
                                 <th>Создан</th>
                             </tr>
@@ -1592,7 +1591,6 @@
             `;
 
             data.orders.forEach((order, index) => {
-                const priceDisplay = order.price === 0 || order.price === null ? '1 генерация' : `${order.price} ₽`;
                 const promptId = `prompt-${order.id}-${index}`;
                 const promptText = order.custom_prompt || 'Базовая анимация';
                 const isLongPrompt = promptText.length > 30;
@@ -1606,7 +1604,6 @@
                         <td>@${order.username || order.telegram_id || '-'}</td>
                         <td>${hasImage ? `<a href="${imageUrl}" target="_blank" class="link" style="font-size: 11px;">📷 Открыть</a>` : '-'}</td>
                         <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
-                        <td>${priceDisplay}</td>
                         <td>
                             <span id="${promptId}-short">${shortPrompt}</span>
                             ${isLongPrompt ? `
@@ -1890,7 +1887,7 @@
                                             <tr>
                                                 <td>${order.id.substring(0, 8)}...</td>
                                                 <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
-                                                <td>${order.price || 0} ₽</td>
+                                                <td>-</td>
                                                 <td>${new Date(order.created_at).toLocaleString('ru-RU')}</td>
                                             </tr>
                                         `).join('')}
@@ -2258,19 +2255,30 @@
                                     <th>Выручка (⭐)</th>
                                     <th>Заказы</th>
                                     <th>Конверсия (%)</th>
+                                    <th>Действия</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${campaigns.map(c => `
+                                ${campaigns.map(c => {
+                                    const campaignName = c.campaign_name || '';
+                                    const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                    return `
                                     <tr>
-                                        <td>${c.campaign_name || 'Без кампании'}</td>
+                                        <td>${campaignName || 'Без кампании'}</td>
                                         <td>${c.total_users || 0}</td>
                                         <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
                                         <td>${c.total_payments_stars || 0}</td>
                                         <td>${c.completed_orders || 0}</td>
                                         <td>${parseFloat(c.conversion_rate || 0).toFixed(2)}%</td>
+                                        <td class="actions">
+                                            ${campaignName && campaignName !== 'Без кампании' ? `
+                                                <button class="btn btn-danger btn-sm" onclick="resetCampaignStats('${safeCampaignName}')" style="margin-right: 5px;">🔄 Сбросить</button>
+                                                <button class="btn btn-danger btn-sm" onclick="deleteCampaign('${safeCampaignName}')">🗑️ Удалить</button>
+                                            ` : '<span style="color: #999;">-</span>'}
+                                        </td>
                                     </tr>
-                                `).join('')}
+                                `;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -2573,6 +2581,53 @@
         // Очистка всех логов
         function clearAllLogs() {
             document.getElementById('confirmDeleteLogsModal').classList.add('active');
+        }
+
+        // Удалить кампанию
+        async function deleteCampaign(campaignName) {
+            if (!confirm(`Вы уверены, что хотите удалить кампанию "${campaignName}"?\n\nЭто действие удалит:\n- Кампанию из базы данных\n- Всю статистику кампании\n\nЭто действие нельзя отменить.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetchWithAuth(`/api/campaigns/${encodeURIComponent(campaignName)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast('Кампания успешно удалена', 'success');
+                    loadAnalytics();
+                    loadCampaigns();
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'Ошибка удаления кампании', 'error');
+                }
+            } catch (error) {
+                showToast(error.message, 'error', 'Ошибка');
+            }
+        }
+
+        // Сбросить статистику кампании
+        async function resetCampaignStats(campaignName) {
+            if (!confirm(`Вы уверены, что хотите сбросить статистику кампании "${campaignName}"?\n\nЭто действие удалит всю статистику кампании, но сама кампания останется.\n\nЭто действие нельзя отменить.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetchWithAuth(`/api/campaigns/${encodeURIComponent(campaignName)}/reset`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showToast('Статистика кампании успешно сброшена', 'success');
+                    loadAnalytics();
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'Ошибка сброса статистики', 'error');
+                }
+            } catch (error) {
+                showToast(error.message, 'error', 'Ошибка');
+            }
         }
 
         async function confirmDeleteLogs() {

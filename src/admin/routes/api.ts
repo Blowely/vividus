@@ -553,14 +553,14 @@ router.get('/stats', async (req, res) => {
            FROM orders o 
            INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
-           WHERE (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_paid_or_used_generations,
+           WHERE (o.payment_id IS NULL OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_paid_or_used_generations,
           -- Пользователи, которые завершили заказ
           (SELECT COUNT(DISTINCT o.user_id) 
            FROM orders o 
            INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
            WHERE o.status = 'completed' 
-           AND (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_completed_orders
+           AND (o.payment_id IS NULL OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_completed_orders
       `, params);
 
       const result = stats.rows[0];
@@ -601,6 +601,7 @@ router.get('/analytics/campaigns', async (req, res) => {
     try {
       const result = await client.query(`
         SELECT 
+          c.id as campaign_id,
           c.name as campaign_name,
           COUNT(DISTINCT cs.id) as stats_count,
           SUM(cs.users_count) as total_users,
@@ -624,6 +625,62 @@ router.get('/analytics/campaigns', async (req, res) => {
     }
   } catch (error) {
     console.error('Error fetching campaign analytics:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Удалить кампанию
+router.delete('/campaigns/:name', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const campaignName = decodeURIComponent(req.params.name);
+      
+      // Сначала удаляем статистику кампании (CASCADE должно это сделать автоматически, но для безопасности)
+      await client.query('DELETE FROM campaign_stats WHERE campaign_id IN (SELECT id FROM campaigns WHERE name = $1)', [campaignName]);
+      
+      // Удаляем кампанию
+      const result = await client.query('DELETE FROM campaigns WHERE name = $1 RETURNING id', [campaignName]);
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Кампания не найдена' });
+      }
+      
+      res.json({ success: true, message: 'Кампания успешно удалена' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error deleting campaign:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Сбросить статистику кампании
+router.post('/campaigns/:name/reset', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const campaignName = decodeURIComponent(req.params.name);
+      
+      // Получаем ID кампании
+      const campaignResult = await client.query('SELECT id FROM campaigns WHERE name = $1', [campaignName]);
+      
+      if (campaignResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Кампания не найдена' });
+      }
+      
+      const campaignId = campaignResult.rows[0].id;
+      
+      // Удаляем всю статистику кампании
+      await client.query('DELETE FROM campaign_stats WHERE campaign_id = $1', [campaignId]);
+      
+      res.json({ success: true, message: 'Статистика кампании успешно сброшена' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error resetting campaign stats:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

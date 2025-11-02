@@ -549,7 +549,7 @@ export class PaymentService {
                     // Создаем заказ
                     const { OrderService } = await import('./order');
                     const orderService = new OrderService();
-                    const order = await orderService.createOrder(userId, s3Url, 0, processedPrompt);
+                    const order = await orderService.createOrder(userId, s3Url, processedPrompt);
                     await orderService.updateOrderStatus(order.id, 'processing' as any);
                     
                     // Запускаем обработку

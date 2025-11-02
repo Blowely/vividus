@@ -382,7 +382,7 @@ export class TelegramService {
         }
         
         // Создаем заказ со статусом processing (без оплаты)
-        const order = await this.orderService.createOrder(user.id, s3Url, 0, processedPrompt);
+        const order = await this.orderService.createOrder(user.id, s3Url, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
         await this.sendMessage(ctx, `🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
@@ -682,7 +682,6 @@ export class TelegramService {
 
 📸 Фото: готово к обработке
 🎬 Промпт: ${customPrompt ? `"${customPrompt}"` : 'стандартная анимация'}
-💰 Стоимость: ${order.price} рублей
 
 Для оплаты нажмите кнопку ниже:`;
     
@@ -713,7 +712,6 @@ export class TelegramService {
       const status = this.getOrderStatusText(order.status);
       message += `🆔 ${order.id.slice(0, 8)}...\n`;
       message += `📊 Статус: ${status}\n`;
-      message += `💰 Стоимость: ${order.price} руб\n`;
       message += `📅 Дата: ${new Date(order.created_at).toLocaleDateString()}\n\n`;
     }
     
@@ -856,17 +854,17 @@ export class TelegramService {
         return;
       }
       
-      // Create payment
-      const payment = await this.paymentService.createPayment(order.id, order.price);
+      // Create payment (цена 1 рубль для денежной оплаты)
+      const paymentAmount = 1;
+      const payment = await this.paymentService.createPayment(order.id, paymentAmount);
       
       // Generate YooMoney payment URL
-      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, paymentAmount);
       
       const paymentMessage = `
 💳 Оплата заказа
 
 🆔 Заказ: ${order.id.slice(0, 8)}...
-💰 Сумма: ${order.price} рублей
 
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
 
@@ -1260,11 +1258,12 @@ ${packageListText}
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
       // Создаем заказ с оплатой
-      const order = await this.orderService.createOrder(user.id, s3Url, 1, promptText);
+      const order = await this.orderService.createOrder(user.id, s3Url, promptText);
       
-      // Создаем платеж
-      const payment = await this.paymentService.createPayment(order.id, order.price);
-      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, order.price);
+      // Создаем платеж (цена 1 рубль для денежной оплаты)
+      const paymentAmount = 1;
+      const payment = await this.paymentService.createPayment(order.id, paymentAmount);
+      const paymentUrl = await this.paymentService.generatePaymentUrl(payment.id, paymentAmount);
       
       // Удаляем из pending
       this.pendingPrompts.delete(user.telegram_id);
@@ -1274,8 +1273,6 @@ ${packageListText}
 
 📸 Фото: готово к обработке
 🎬 Промпт: стандартная анимация
-💰 Стоимость: ${order.price} рублей
-
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
       
       await this.sendMessage(ctx, paymentMessage, {

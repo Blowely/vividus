@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS orders (
     original_file_path VARCHAR(500) NOT NULL,
     did_job_id VARCHAR(255),
     payment_id UUID,
-    price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     custom_prompt TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -103,6 +102,9 @@ CREATE TABLE IF NOT EXISTS campaign_stats (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(campaign_id, date)
 );
+
+-- Drop price column from orders table if it exists (for existing databases)
+ALTER TABLE orders DROP COLUMN IF EXISTS price;
 
 -- Create trigger for campaign_stats
 CREATE TRIGGER update_campaign_stats_updated_at BEFORE UPDATE ON campaign_stats

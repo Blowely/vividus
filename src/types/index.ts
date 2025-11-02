@@ -18,7 +18,6 @@ export interface Order {
   original_file_path: string;
   did_job_id?: string;
   payment_id?: string;
-  price: number;
   custom_prompt?: string;
   created_at: Date;
   updated_at: Date;

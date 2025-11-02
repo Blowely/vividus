@@ -2,15 +2,15 @@ import pool from '../config/database';
 import { Order, OrderStatus } from '../types';
 
 export class OrderService {
-  async createOrder(userId: number, filePath: string, price: number, customPrompt?: string): Promise<Order> {
+  async createOrder(userId: number, filePath: string, customPrompt?: string): Promise<Order> {
     const client = await pool.connect();
     
     try {
       const result = await client.query(
-        `INSERT INTO orders (user_id, original_file_path, price, status, custom_prompt) 
-         VALUES ($1, $2, $3, $4, $5) 
+        `INSERT INTO orders (user_id, original_file_path, status, custom_prompt) 
+         VALUES ($1, $2, $3, $4) 
          RETURNING *`,
-        [userId, filePath, price, OrderStatus.PAYMENT_REQUIRED, customPrompt]
+        [userId, filePath, OrderStatus.PAYMENT_REQUIRED, customPrompt]
       );
       
       return result.rows[0];
