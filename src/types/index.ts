@@ -16,7 +16,6 @@ export interface Order {
   user_id: number;
   status: OrderStatus;
   original_file_path: string;
-  result_file_path?: string;
   did_job_id?: string;
   payment_id?: string;
   price: number;

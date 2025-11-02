@@ -37,48 +37,10 @@ export class TelegramService {
     this.setupHandlers();
   }
 
-  private async editOrSendMessage(ctx: Context, text: string, extra?: any): Promise<void> {
-    const userId = ctx.from!.id;
-    const chatId = ctx.chat!.id;
-    const userMessage = this.userMessages.get(userId);
-
-    // Убеждаемся, что reply-клавиатура сохраняется, если не указано явное удаление
+  // Простой метод для отправки сообщений (без редактирования)
+  private async sendMessage(ctx: Context, text: string, extra?: any): Promise<void> {
     const extraWithKeyboard = this.ensureReplyKeyboard(ctx, extra);
-
-    try {
-      if (userMessage && userMessage.chatId === chatId) {
-        // Редактируем существующее сообщение
-        await ctx.telegram.editMessageText(
-          chatId,
-          userMessage.messageId,
-          undefined,
-          text,
-          extraWithKeyboard
-        );
-      } else {
-        // Отправляем новое сообщение
-        const message = await ctx.reply(text, extraWithKeyboard);
-        if (message && 'message_id' in message) {
-          this.userMessages.set(userId, {
-            messageId: (message as any).message_id,
-            chatId: chatId
-          });
-        }
-      }
-    } catch (error: any) {
-      // Если не можем отредактировать (сообщение не найдено или слишком старое), отправляем новое
-      if (error.code === 400 || error.description?.includes('message') || error.description?.includes('not found')) {
-        const message = await ctx.reply(text, extraWithKeyboard);
-        if (message && 'message_id' in message) {
-          this.userMessages.set(userId, {
-            messageId: (message as any).message_id,
-            chatId: chatId
-          });
-        }
-      } else {
-        throw error;
-      }
-    }
+    await ctx.reply(text, extraWithKeyboard);
   }
 
   private ensureReplyKeyboard(ctx: Context, extra?: any): any {
@@ -110,20 +72,6 @@ export class TelegramService {
     return extra;
   }
 
-  private async deleteUserMessage(ctx: Context): Promise<void> {
-    const userId = ctx.from!.id;
-    const userMessage = this.userMessages.get(userId);
-
-    if (userMessage) {
-      try {
-        await ctx.telegram.deleteMessage(userMessage.chatId, userMessage.messageId);
-        this.userMessages.delete(userId);
-      } catch (error) {
-        // Игнорируем ошибки при удалении (сообщение может быть уже удалено)
-        console.error('Error deleting message:', error);
-      }
-    }
-  }
 
   private formatLink(url: string, text: string = 'Ссылка'): string {
     return `<a href="${url}">${text}</a>`;
@@ -221,7 +169,7 @@ export class TelegramService {
     this.bot.catch(async (err, ctx) => {
       console.error('Bot error:', err);
       if (ctx.from && ctx.chat) {
-        await this.editOrSendMessage(ctx, 'Произошла ошибка. Попробуйте позже.');
+        await this.sendMessage(ctx, 'Произошла ошибка. Попробуйте позже.');
       }
     });
   }
@@ -255,16 +203,6 @@ export class TelegramService {
     console.log(`User ${ctx.from?.id} (${ctx.from?.username || 'no username'}) is admin: ${isAdminUser}`);
     
     await this.showMainMenu(ctx);
-    
-    // Удаляем сообщение /start пользователя
-    if (ctx.message && 'message_id' in ctx.message && ctx.chat) {
-      try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
-      } catch (error) {
-        // Игнорируем ошибки при удалении (сообщение может быть уже удалено или права недостаточны)
-        console.error('Error deleting /start message:', error);
-      }
-    }
   }
 
   private async showMainMenu(ctx: Context) {
@@ -331,7 +269,7 @@ export class TelegramService {
 
 Для начала отправьте фото!`;
     
-        await this.editOrSendMessage(ctx, helpMessage, {
+        await this.sendMessage(ctx, helpMessage, {
           reply_markup: {
             inline_keyboard: [this.getBackButton()]
           }
@@ -349,9 +287,6 @@ export class TelegramService {
       // Проверяем наличие caption (текста, прикрепленного к фото)
       const caption = (ctx.message as any)['caption'];
       
-      // Удаляем предыдущее сообщение, если есть
-      await this.deleteUserMessage(ctx);
-      
       if (caption) {
         // Если есть caption, сразу обрабатываем его как промпт
         this.pendingPrompts.set(user.telegram_id, fileId);
@@ -360,7 +295,7 @@ export class TelegramService {
         // Если нет caption, просим ввести промпт
         const promptMessage = '📸 Фото получено!\n\n✍️ Опишите, как вы хотите анимировать изображение.\n\nНапример: "машет рукой", "улыбается", "моргает", "дышит" и т.д.';
         
-        await this.editOrSendMessage(ctx, promptMessage, {
+        await this.sendMessage(ctx, promptMessage, {
           reply_markup: {
             inline_keyboard: [
               [Markup.button.callback('⏭️ Пропустить промпт', 'skip_prompt')],
@@ -387,7 +322,7 @@ export class TelegramService {
       
     } catch (error) {
       console.error('Error handling photo:', error);
-      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке фото. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке фото. Попробуйте позже.');
     }
   }
 
@@ -398,7 +333,7 @@ export class TelegramService {
     if (mimeType && mimeType.startsWith('image/')) {
       await this.handlePhoto(ctx);
     } else {
-      await this.editOrSendMessage(ctx, '❌ Пожалуйста, отправьте изображение в формате JPG или PNG.');
+      await this.sendMessage(ctx, '❌ Пожалуйста, отправьте изображение в формате JPG или PNG.');
     }
   }
 
@@ -406,15 +341,15 @@ export class TelegramService {
     try {
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
-        await this.editOrSendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
+        await this.sendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
         return;
       }
       
       // Remove from pending prompts
       this.pendingPrompts.delete(user.telegram_id);
       
-      // Обновляем сообщение о загрузке
-      await this.editOrSendMessage(ctx, '📤 Загружаю фото в облако...');
+      // Отправляем сообщение о загрузке (замена только для загрузки)
+      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
       
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
@@ -435,10 +370,7 @@ export class TelegramService {
         processedPrompt = `animate this image with ${translatedPrompt}`;
       }
       
-      // Удаляем сообщение и создаем новое
-      await this.deleteUserMessage(ctx);
-      
-      await this.editOrSendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
+      await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
       
       // Проверяем баланс генераций пользователя
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
@@ -448,7 +380,7 @@ export class TelegramService {
         const deducted = await this.userService.deductGenerations(user.telegram_id, 1);
         
         if (!deducted) {
-          await this.editOrSendMessage(ctx, '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.');
+          await this.sendMessage(ctx, '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.');
           return;
         }
         
@@ -458,8 +390,7 @@ export class TelegramService {
         
         const remainingGenerations = await this.userService.getUserGenerations(user.telegram_id);
         
-        await this.deleteUserMessage(ctx);
-        await this.editOrSendMessage(ctx, `✅ Генерация использована! Осталось: ${remainingGenerations}\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
+        await this.sendMessage(ctx, `✅ Генерация использована! Осталось: ${remainingGenerations}\n\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
         
         // Запускаем обработку заказа
         const { ProcessorService } = await import('./processor');
@@ -467,7 +398,6 @@ export class TelegramService {
         await processorService.processOrder(order.id);
       } else {
         // У пользователя нет генераций - предлагаем купить генерации
-        await this.deleteUserMessage(ctx);
         
         // Сохраняем fileId для повторной обработки после покупки генераций
         // Используем pendingPrompts для сохранения информации о фото
@@ -503,7 +433,7 @@ export class TelegramService {
         
         keyboard.push(this.getBackButton());
         
-        await this.editOrSendMessage(ctx, noGenerationsMessage, {
+        await this.sendMessage(ctx, noGenerationsMessage, {
           reply_markup: {
             inline_keyboard: keyboard
           }
@@ -512,7 +442,7 @@ export class TelegramService {
       
     } catch (error) {
       console.error('Error processing prompt:', error);
-      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
     }
   }
 
@@ -529,7 +459,7 @@ export class TelegramService {
       
       // Обрабатываем команды от reply кнопок
       if (text === '🎬 Оживить фото') {
-        await this.editOrSendMessage(ctx, '📸 Отправьте фото для создания анимации!');
+        await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
         return;
       }
       
@@ -572,7 +502,7 @@ export class TelegramService {
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
         // User doesn't have pending photo, treat as regular message
-        await this.editOrSendMessage(ctx, '📸 Отправьте фото для создания анимации!');
+        await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
         return;
       }
       
@@ -581,7 +511,7 @@ export class TelegramService {
       
     } catch (error) {
       console.error('Error handling text:', error);
-      await this.editOrSendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
     }
   }
 
@@ -730,7 +660,7 @@ export class TelegramService {
 
 Для оплаты нажмите кнопку ниже:`;
     
-    await this.editOrSendMessage(ctx, paymentMessage, {
+    await this.sendMessage(ctx, paymentMessage, {
       reply_markup: {
         inline_keyboard: [
           [Markup.button.callback('💳 Оплатить', `pay_${order.id}`)],
@@ -746,7 +676,7 @@ export class TelegramService {
     const orders = await this.orderService.getUserOrders(user.id);
     
     if (orders.length === 0) {
-      await this.editOrSendMessage(ctx, '📋 У вас пока нет заказов. Отправьте фото для создания первого заказа!');
+      await this.sendMessage(ctx, '📋 У вас пока нет заказов. Отправьте фото для создания первого заказа!');
       return;
     }
     
@@ -768,7 +698,7 @@ export class TelegramService {
     }
     keyboard.push(this.getBackButton());
     
-    await this.editOrSendMessage(ctx, message, {
+    await this.sendMessage(ctx, message, {
       reply_markup: {
         inline_keyboard: keyboard
       }
@@ -782,7 +712,7 @@ export class TelegramService {
 
   private async showAnalytics(ctx: Context) {
     if (!this.isAdmin(ctx.from!.id)) {
-      await this.editOrSendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
+      await this.sendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
       return;
     }
 
@@ -790,7 +720,7 @@ export class TelegramService {
       const analytics = await this.analyticsService.getCampaignAnalytics();
       
       if (analytics.length === 0) {
-        await this.editOrSendMessage(ctx, '📊 Статистика пока пуста');
+        await this.sendMessage(ctx, '📊 Статистика пока пуста');
         return;
       }
 
@@ -805,7 +735,7 @@ export class TelegramService {
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
       }
 
-      await this.editOrSendMessage(ctx, message, { 
+      await this.sendMessage(ctx, message, { 
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [this.getBackButton()]
@@ -813,20 +743,20 @@ export class TelegramService {
       });
     } catch (error) {
       console.error('Error showing analytics:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при получении статистики');
+      await this.sendMessage(ctx, '❌ Ошибка при получении статистики');
     }
   }
 
   private async handlePayOrder(ctx: Context, orderId?: string) {
     if (!orderId) {
-      await this.editOrSendMessage(ctx, '❌ Ошибка: не указан ID заказа');
+      await this.sendMessage(ctx, '❌ Ошибка: не указан ID заказа');
       return;
     }
     
     try {
       const order = await this.orderService.getOrder(orderId);
       if (!order) {
-        await this.editOrSendMessage(ctx, '❌ Заказ не найден');
+        await this.sendMessage(ctx, '❌ Заказ не найден');
         return;
       }
       
@@ -846,7 +776,7 @@ export class TelegramService {
 
 После оплаты бот автоматически получит уведомление и начнет обработку.`;
       
-      await this.editOrSendMessage(ctx, paymentMessage, {
+      await this.sendMessage(ctx, paymentMessage, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
@@ -858,7 +788,7 @@ export class TelegramService {
       
     } catch (error) {
       console.error('Error creating payment:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
     }
   }
 
@@ -883,7 +813,7 @@ export class TelegramService {
 ⚠️ Внимание: Это тестовый платеж для проверки интеграции с ЮKassa.
 Используйте тестовую карту для оплаты.`;
 
-      await this.editOrSendMessage(ctx, testMessage, {
+      await this.sendMessage(ctx, testMessage, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [this.getBackButton()]
@@ -892,7 +822,7 @@ export class TelegramService {
       
     } catch (error) {
       console.error('Error creating test payment:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при создании тестового платежа. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Ошибка при создании тестового платежа. Попробуйте позже.');
     }
   }
 
@@ -903,25 +833,25 @@ export class TelegramService {
       // Получаем последний заказ пользователя
       const orders = await this.orderService.getUserOrders(user.id);
       if (orders.length === 0) {
-        await this.editOrSendMessage(ctx, 'У вас нет заказов для тестирования. Сначала отправьте фото!');
+        await this.sendMessage(ctx, 'У вас нет заказов для тестирования. Сначала отправьте фото!');
         return;
       }
       
       const lastOrder = orders[0];
       
       if (lastOrder.status !== 'payment_required') {
-        await this.editOrSendMessage(ctx, `Заказ уже в статусе: ${this.getOrderStatusText(lastOrder.status)}`);
+        await this.sendMessage(ctx, `Заказ уже в статусе: ${this.getOrderStatusText(lastOrder.status)}`);
         return;
       }
       
       // Мокаем успешную оплату
       await this.mockService.mockSuccessfulPayment(lastOrder.id);
       
-      await this.editOrSendMessage(ctx, '🎭 Мок-платеж успешен! Заказ переведен в обработку.');
+      await this.sendMessage(ctx, '🎭 Мок-платеж успешен! Заказ переведен в обработку.');
       
     } catch (error) {
       console.error('Error in mock payment:', error);
-      await this.editOrSendMessage(ctx, 'Ошибка при мок-платеже. Попробуйте позже.');
+      await this.sendMessage(ctx, 'Ошибка при мок-платеже. Попробуйте позже.');
     }
   }
 
@@ -934,7 +864,7 @@ export class TelegramService {
       const completedOrders = orders.filter(order => order.status === 'completed');
       
       if (completedOrders.length === 0) {
-        await this.editOrSendMessage(ctx, '❌ У вас пока нет готовых видео. Сначала отправьте фото для обработки!');
+        await this.sendMessage(ctx, '❌ У вас пока нет готовых видео. Сначала отправьте фото для обработки!');
         return;
       }
       
@@ -942,7 +872,7 @@ export class TelegramService {
       const latestOrder = completedOrders[0];
       
       if (!latestOrder.did_job_id) {
-        await this.editOrSendMessage(ctx, '❌ Информация о видео не найдена. Попробуйте позже.');
+        await this.sendMessage(ctx, '❌ Информация о видео не найдена. Попробуйте позже.');
         return;
       }
       
@@ -953,7 +883,7 @@ export class TelegramService {
       if (status.status === 'SUCCEEDED' && status.output && status.output.length > 0) {
         const videoUrl = status.output[0];
         
-        await this.editOrSendMessage(ctx, `🎬 Ваше последнее видео готово!\n\n📹 Результат: ${this.formatLink(videoUrl, 'Ссылка')}\n\nСпасибо за использование Vividus Bot!`, {
+        await this.sendMessage(ctx, `🎬 Ваше последнее видео готово!\n\n📹 Результат: ${this.formatLink(videoUrl, 'Ссылка')}\n\nСпасибо за использование Vividus Bot!`, {
           parse_mode: 'HTML'
         });
         
@@ -964,12 +894,12 @@ export class TelegramService {
           });
         }, 2000);
       } else {
-        await this.editOrSendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
+        await this.sendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
       }
       
     } catch (error) {
       console.error('Error getting result:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при получении результата');
+      await this.sendMessage(ctx, '❌ Ошибка при получении результата');
     }
   }
 
@@ -999,7 +929,7 @@ export class TelegramService {
       
       keyboard.push(this.getBackButton());
 
-      await this.editOrSendMessage(ctx, settingsMessage, {
+      await this.sendMessage(ctx, settingsMessage, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: keyboard
@@ -1007,13 +937,13 @@ export class TelegramService {
       });
     } catch (error) {
       console.error('Error showing settings:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при открытии настроек');
+      await this.sendMessage(ctx, '❌ Ошибка при открытии настроек');
     }
   }
 
   private async handleSetEmail(ctx: Context) {
     this.waitingForEmail.add(ctx.from!.id);
-    await this.editOrSendMessage(ctx, '📧 Пожалуйста, отправьте ваш email адрес:\n\nПример: example@mail.ru', {
+    await this.sendMessage(ctx, '📧 Пожалуйста, отправьте ваш email адрес:\n\nПример: example@mail.ru', {
       reply_markup: {
         inline_keyboard: [
           [Markup.button.callback('❌ Отменить', 'cancel_email')]
@@ -1026,13 +956,13 @@ export class TelegramService {
   private async handleClearEmail(ctx: Context) {
     try {
       await this.userService.updateUserEmail(ctx.from!.id, null);
-      await this.editOrSendMessage(ctx, '✅ Email удален из настроек');
+      await this.sendMessage(ctx, '✅ Email удален из настроек');
       await ctx.answerCbQuery();
       // Обновляем меню настроек
       setTimeout(() => this.handleSettings(ctx), 500);
     } catch (error) {
       console.error('Error clearing email:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при удалении email');
+      await this.sendMessage(ctx, '❌ Ошибка при удалении email');
     }
   }
 
@@ -1042,7 +972,7 @@ export class TelegramService {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       
       if (!emailRegex.test(emailText.trim())) {
-        await this.editOrSendMessage(ctx, '❌ Некорректный формат email. Попробуйте еще раз:\n\nПример: example@mail.ru', {
+        await this.sendMessage(ctx, '❌ Некорректный формат email. Попробуйте еще раз:\n\nПример: example@mail.ru', {
           reply_markup: {
             inline_keyboard: [
               [Markup.button.callback('❌ Отменить', 'cancel_email')]
@@ -1056,8 +986,7 @@ export class TelegramService {
       await this.userService.updateUserEmail(ctx.from!.id, email);
       this.waitingForEmail.delete(ctx.from!.id);
       
-      await this.deleteUserMessage(ctx);
-      await this.editOrSendMessage(ctx, `✅ Email успешно сохранен: ${email}\n\nТеперь кассовые чеки будут приходить на этот адрес.`);
+      await this.sendMessage(ctx, `✅ Email успешно сохранен: ${email}\n\nТеперь кассовые чеки будут приходить на этот адрес.`);
       
       // Возвращаемся в меню настроек через 2 секунды
       setTimeout(() => this.handleSettings(ctx), 2000);
@@ -1065,7 +994,7 @@ export class TelegramService {
     } catch (error) {
       console.error('Error processing email:', error);
       this.waitingForEmail.delete(ctx.from!.id);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при сохранении email. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Ошибка при сохранении email. Попробуйте позже.');
     }
   }
 
@@ -1154,7 +1083,7 @@ ${packageListText}
       }, 500);
     } catch (error) {
       console.error('Error showing buy generations menu:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при загрузке меню покупки генераций');
+      await this.sendMessage(ctx, '❌ Ошибка при загрузке меню покупки генераций');
     }
   }
 
@@ -1200,7 +1129,7 @@ ${packageListText}
         this.pendingPrompts.set(user.telegram_id, `process_after_payment_${payment.id}_${fileId}`);
       }
       
-      await this.editOrSendMessage(ctx, message, {
+      await this.sendMessage(ctx, message, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
@@ -1212,7 +1141,7 @@ ${packageListText}
     } catch (error) {
       console.error('Error creating buy and process purchase:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await this.editOrSendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+      await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
     }
   }
 
@@ -1224,14 +1153,14 @@ ${packageListText}
       const fileId = this.pendingPrompts.get(user.telegram_id);
       
       if (!fileId) {
-        await this.editOrSendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
+        await this.sendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
         return;
       }
       
       // Получаем промпт (если был сохранен)
       const promptText = 'animate this image with subtle movements and breathing effect'; // Можно сохранять промпт отдельно
       
-      await this.editOrSendMessage(ctx, '📤 Загружаю фото в облако...');
+      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
       // Создаем заказ с оплатой
@@ -1253,7 +1182,7 @@ ${packageListText}
 
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
       
-      await this.editOrSendMessage(ctx, paymentMessage, {
+      await this.sendMessage(ctx, paymentMessage, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
@@ -1265,7 +1194,7 @@ ${packageListText}
       });
     } catch (error) {
       console.error('Error creating single order payment:', error);
-      await this.editOrSendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
+      await this.sendMessage(ctx, '❌ Ошибка при создании платежа. Попробуйте позже.');
     }
   }
 
@@ -1296,7 +1225,7 @@ ${packageListText}
 
 После оплаты генерации будут автоматически добавлены на ваш баланс.`;
       
-      await this.editOrSendMessage(ctx, message, {
+      await this.sendMessage(ctx, message, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
@@ -1308,7 +1237,7 @@ ${packageListText}
     } catch (error) {
       console.error('Error creating generation purchase:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await this.editOrSendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+      await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
     }
   }
 

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import fs from 'fs-extra';
 import path from 'path';
+import mime from 'mime-types';
 import { config } from 'dotenv';
 import { S3Service } from './s3';
 
@@ -23,65 +24,6 @@ export class FileService {
     await fs.ensureDir(this.storagePath);
     await fs.ensureDir(path.join(this.storagePath, 'original'));
     await fs.ensureDir(path.join(this.storagePath, 'processed'));
-  }
-
-  async downloadTelegramFile(fileId: string, type: 'original' | 'processed'): Promise<string> {
-    try {
-      // Get file info from Telegram
-      const botToken = process.env.TELEGRAM_BOT_TOKEN!;
-      const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
-      
-      if (!fileInfoResponse.data.ok) {
-        throw new Error('Failed to get file info from Telegram');
-      }
-      
-      const filePath = fileInfoResponse.data.result.file_path;
-      const fileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-      
-      // Generate unique filename
-      const timestamp = Date.now();
-      const extension = path.extname(filePath);
-      const filename = `${timestamp}_${fileId}${extension}`;
-      const localPath = path.join(this.storagePath, type, filename);
-      
-      // Download file
-      const response = await axios.get(fileUrl, {
-        responseType: 'stream'
-      });
-      
-      // Check file size
-      const contentLength = parseInt(response.headers['content-length'] || '0');
-      if (contentLength > this.maxFileSize) {
-        throw new Error('File too large');
-      }
-      
-      // Save file
-      const writer = fs.createWriteStream(localPath);
-      response.data.pipe(writer);
-      
-      return new Promise((resolve, reject) => {
-        writer.on('finish', () => resolve(localPath));
-        writer.on('error', reject);
-      });
-      
-    } catch (error) {
-      console.error('Error downloading Telegram file:', error);
-      throw new Error('Failed to download file');
-    }
-  }
-
-  async saveProcessedVideo(videoBuffer: Buffer, orderId: string): Promise<string> {
-    try {
-      const filename = `processed_${orderId}_${Date.now()}.mp4`;
-      const filePath = path.join(this.storagePath, 'processed', filename);
-      
-      await fs.writeFile(filePath, videoBuffer);
-      
-      return filePath;
-    } catch (error) {
-      console.error('Error saving processed video:', error);
-      throw new Error('Failed to save processed video');
-    }
   }
 
   async getFileStream(filePath: string): Promise<fs.ReadStream> {
@@ -178,16 +120,14 @@ export class FileService {
         throw new Error(`File too large: ${response.data.byteLength} bytes (max: ${this.maxFileSize})`);
       }
       
-      // Save to temporary file for S3 upload
-      const tempPath = path.join(this.storagePath, 'temp', filename);
-      await fs.ensureDir(path.dirname(tempPath));
-      await fs.writeFile(tempPath, response.data);
+      // Convert to Buffer
+      const buffer = Buffer.from(response.data);
       
-      // Upload to S3
-      const s3Url = await this.s3Service.uploadFile(tempPath, filename);
+      // Determine content type
+      const contentType = mime.lookup(filePath) || 'image/jpeg';
       
-      // Clean up temp file
-      await fs.remove(tempPath);
+      // Upload to S3 directly from memory
+      const s3Url = await this.s3Service.uploadFile(buffer, filename, contentType);
       
       return s3Url;
       

@@ -58,15 +58,15 @@ export class OrderService {
     }
   }
   
-  async updateOrderResult(orderId: string, resultPath: string, didJobId?: string): Promise<void> {
+  async updateOrderResult(orderId: string, didJobId?: string): Promise<void> {
     const client = await pool.connect();
     
     try {
       await client.query(
         `UPDATE orders 
-         SET result_file_path = $1, did_job_id = $2, updated_at = CURRENT_TIMESTAMP 
-         WHERE id = $3`,
-        [resultPath, didJobId, orderId]
+         SET did_job_id = $1, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = $2`,
+        [didJobId, orderId]
       );
     } finally {
       client.release();

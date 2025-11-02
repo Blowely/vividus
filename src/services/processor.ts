@@ -93,37 +93,13 @@ export class ProcessorService {
         const jobStatus = await this.runwayService.checkJobStatus(generationId);
         
         if (jobStatus.status === 'SUCCEEDED') {
-          // Удаляем сообщение о прогрессе, если оно есть
-          if (progressMessageId) {
-            try {
-              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
-            } catch (error) {
-              // Игнорируем ошибки удаления
-            }
-          }
           // Job completed successfully
           await this.handleJobSuccess(generationId, telegramId, orderId, jobStatus.output[0]);
         } else if (jobStatus.status === 'FAILED') {
-          // Удаляем сообщение о прогрессе, если оно есть
-          if (progressMessageId) {
-            try {
-              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
-            } catch (error) {
-              // Игнорируем ошибки удаления
-            }
-          }
           // Job failed - используем failure, error или fallback
           const errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
           await this.handleJobFailure(generationId, telegramId, orderId, errorMessage);
         } else if (attempts >= maxAttempts) {
-          // Удаляем сообщение о прогрессе, если оно есть
-          if (progressMessageId) {
-            try {
-              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
-            } catch (error) {
-              // Игнорируем ошибки удаления
-            }
-          }
           // Timeout
           await this.handleJobTimeout(generationId, telegramId, orderId);
         } else {
@@ -165,14 +141,6 @@ export class ProcessorService {
         console.error(`Error monitoring job ${generationId}:`, error);
         
         if (attempts >= maxAttempts) {
-          // Удаляем сообщение о прогрессе, если оно есть
-          if (progressMessageId) {
-            try {
-              await this.bot.telegram.deleteMessage(telegramId, progressMessageId);
-            } catch (error) {
-              // Игнорируем ошибки удаления
-            }
-          }
           await this.handleJobTimeout(generationId, telegramId, orderId);
         } else {
           setTimeout(checkStatus, 5000);
@@ -186,14 +154,8 @@ export class ProcessorService {
 
   private async handleJobSuccess(generationId: string, telegramId: number, orderId: string, videoUrl: string): Promise<void> {
     try {
-      // Download video
-      const videoPath = await this.fileService.saveProcessedVideo(
-        Buffer.from(''), // Will be replaced with actual video data
-        orderId
-      );
-
-      // Update order with result
-      await this.orderService.updateOrderResult(orderId, videoPath, generationId);
+      // Update order with result (videoUrl already contains the S3 link, no need to save locally)
+      await this.orderService.updateOrderResult(orderId, generationId);
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
 
       // Update job status
@@ -283,7 +245,7 @@ export class ProcessorService {
         errorLower.includes('not passed moderation') ||
         errorLower.includes('public figure') ||
         errorLower.includes('did not pass')) {
-      return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
+      return 'Картинка или промпт (текстовый запрос) не прошли модерацию.';
     }
     
     // Неподдерживаемый формат

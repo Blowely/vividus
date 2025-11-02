@@ -36,7 +36,7 @@ export class RunwayService {
         errorLower.includes('not passed moderation') ||
         errorLower.includes('public figure') ||
         errorLower.includes('did not pass')) {
-      return 'Изображение не прошло модерацию. Пожалуйста, отправьте другое фото.';
+      return 'Картинка или промпт (текстовый запрос) не прошли модерацию.';
     }
     
     // Неподдерживаемый формат

@@ -27,19 +27,38 @@ export class S3Service {
     });
   }
 
-  async uploadFile(filePath: string, key?: string): Promise<string> {
+  async uploadFile(filePath: string, key?: string): Promise<string>;
+  async uploadFile(buffer: Buffer, key: string, contentType: string): Promise<string>;
+  async uploadFile(filePathOrBuffer: string | Buffer, key?: string, contentType?: string): Promise<string> {
     try {
-      const ext = path.extname(filePath);
-      const filename = key || `${Date.now()}${ext}`;
+      let filename: string;
+      let body: Buffer;
+      let mimeType: string;
+
+      if (typeof filePathOrBuffer === 'string') {
+        // Legacy support - путь к файлу (не используется, но оставляем для совместимости)
+        const ext = path.extname(filePathOrBuffer);
+        filename = key || `${Date.now()}${ext}`;
+        body = fs.readFileSync(filePathOrBuffer);
+        mimeType = mime.lookup(filePathOrBuffer) || 'image/jpeg';
+      } else {
+        // Новый способ - Buffer напрямую
+        if (!key) {
+          throw new Error('Key is required when uploading Buffer');
+        }
+        filename = key;
+        body = filePathOrBuffer;
+        mimeType = contentType || 'application/octet-stream';
+      }
       
-      console.log(`Uploading file to S3: ${filePath} -> ${filename}`);
+      console.log(`Uploading file to S3: ${filename}`);
       
       await this.client.send(new PutObjectCommand({
         Bucket: this.bucketName,
         Key: filename,
-        Body: fs.readFileSync(filePath),
+        Body: body,
         ACL: 'public-read',
-        ContentType: mime.lookup(filePath) || 'image/jpeg',
+        ContentType: mimeType,
       }));
 
       const link = `${this.endpoint}/${this.bucketName}/${filename}`;
