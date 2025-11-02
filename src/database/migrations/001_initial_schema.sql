@@ -236,8 +236,14 @@ BEGIN
         -- Convert OLD row to JSONB
         old_json := to_jsonb(OLD);
         
-        INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data)
-        VALUES (TG_TABLE_NAME, record_id_val, user_id_val, 'DELETE', old_json);
+        -- Для DELETE операций на users явно используем NULL вместо user_id_val
+        IF TG_TABLE_NAME = 'users' THEN
+            INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data)
+            VALUES (TG_TABLE_NAME, record_id_val, NULL, 'DELETE', old_json);
+        ELSE
+            INSERT INTO activity_logs (table_name, record_id, user_id, action, old_data)
+            VALUES (TG_TABLE_NAME, record_id_val, user_id_val, 'DELETE', old_json);
+        END IF;
         
         RETURN OLD;
     END IF;
