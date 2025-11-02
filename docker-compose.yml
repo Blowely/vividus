@@ -50,15 +50,8 @@ services:
     command: npm run start:admin
     volumes:
       - ./src/admin/public:/app/dist/admin/public
-
-  nginx:
-    image: nginx:alpine
-    depends_on:
-      - admin-panel
     ports:
-      - "80:80"
-    volumes:
-      - ./nginx-admin.conf:/etc/nginx/conf.d/default.conf
+      - "3001:3001"
 
 volumes:
   postgres_data:
