@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
     first_name VARCHAR(255),
     last_name VARCHAR(255),
     start_param VARCHAR(255),
+    email VARCHAR(255),
+    generations INTEGER DEFAULT 0 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -16,7 +18,6 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     original_file_path VARCHAR(500) NOT NULL,
-    result_file_path VARCHAR(500),
     did_job_id VARCHAR(255),
     payment_id UUID,
     price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     yoomoney_payment_id VARCHAR(255),
     amount DECIMAL(10,2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -50,9 +52,12 @@ CREATE TABLE IF NOT EXISTS did_jobs (
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_generations ON users(generations);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_did_jobs_order_id ON did_jobs(order_id);
 CREATE INDEX IF NOT EXISTS idx_did_jobs_did_job_id ON did_jobs(did_job_id);
 
