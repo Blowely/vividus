@@ -121,6 +121,23 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Убеждаемся, что user_id может быть NULL
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'activity_logs') THEN
+        -- Изменяем constraint если он существует и не позволяет NULL или не является DEFERRABLE
+        IF EXISTS (SELECT FROM pg_constraint WHERE conname = 'activity_logs_user_id_fkey') THEN
+            ALTER TABLE activity_logs DROP CONSTRAINT activity_logs_user_id_fkey;
+        END IF;
+        ALTER TABLE activity_logs 
+        ADD CONSTRAINT activity_logs_user_id_fkey 
+        FOREIGN KEY (user_id) 
+        REFERENCES users(id) 
+        ON DELETE SET NULL
+        DEFERRABLE INITIALLY DEFERRED;
+    END IF;
+END $$;
+
 -- Add user_id column if table exists but column doesn't (for existing installations)
 DO $$
 BEGIN
@@ -152,9 +169,13 @@ BEGIN
     -- Determine record ID and user_id based on table
     IF TG_TABLE_NAME = 'users' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
-        -- Для BEFORE DELETE пользователь еще существует, поэтому можем сохранить реальный user_id
-        -- Для AFTER операций также сохраняем реальный user_id
-        user_id_val := COALESCE(NEW.id, OLD.id);
+        -- Для DELETE операций на users устанавливаем user_id в NULL
+        -- ID пользователя будет сохранён в old_data
+        IF TG_OP = 'DELETE' THEN
+            user_id_val := NULL;
+        ELSE
+            user_id_val := COALESCE(NEW.id, OLD.id);
+        END IF;
     ELSIF TG_TABLE_NAME = 'orders' THEN
         record_id_val := COALESCE(NEW.id::TEXT, OLD.id::TEXT);
         user_id_val := COALESCE(NEW.user_id, OLD.user_id);
