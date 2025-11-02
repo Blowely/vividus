@@ -43,13 +43,10 @@ function setSession(res: express.Response, data: any): string {
 // Проверка подписи Telegram Widget Login
 function verifyTelegramAuth(authData: any): boolean {
   if (!authData || !authData.hash) {
-    console.log('Missing hash in auth data');
     return false;
   }
 
   const { hash, ...data } = authData;
-  console.log('Hash from Telegram:', hash);
-  console.log('Data fields:', Object.keys(data));
   
   // Создаём строку для проверки подписи
   // Согласно документации Telegram: исключаем только hash, остальные поля включаем
@@ -66,11 +63,6 @@ function verifyTelegramAuth(authData: any): boolean {
   const dataCheckString = sortedKeys
     .map(key => `${key}=${filteredData[key]}`)
     .join('\n');
-  
-  console.log('Filtered data fields:', sortedKeys);
-  console.log('Data check string:', dataCheckString);
-  console.log('Data check string (escaped):', JSON.stringify(dataCheckString));
-  console.log('Data check string bytes:', Buffer.from(dataCheckString, 'utf8').length);
 
   if (!BOT_TOKEN) {
     console.error('BOT_TOKEN is missing');
@@ -79,31 +71,19 @@ function verifyTelegramAuth(authData: any): boolean {
 
   // Создаём секретный ключ из bot token
   // Согласно официальной документации Telegram: secret_key = SHA256(bot_token)
-  // НЕ HMAC-SHA256, а просто SHA256!
   const secretKey = crypto
     .createHash('sha256')
     .update(BOT_TOKEN)
     .digest(); // Buffer длиной 32 байта
 
-  console.log('BOT_TOKEN (first 20 chars):', BOT_TOKEN.substring(0, 20) + '...');
-  console.log('BOT_TOKEN length:', BOT_TOKEN.length);
-  console.log('Secret key (first 16 bytes):', secretKey.slice(0, 16).toString('hex'));
-  console.log('Secret key (full):', secretKey.toString('hex'));
-  console.log('Secret key length:', secretKey.length);
-
   // Вычисляем хеш используя secretKey (Buffer) как ключ для HMAC
   // hash = HMAC-SHA256(secret_key, data_check_string)
-  // где key = secretKey (Buffer от SHA256 токена), data = dataCheckString (string)
   const hmac = crypto.createHmac('sha256', secretKey);
   hmac.update(dataCheckString, 'utf8');
   const calculatedHash = hmac.digest('hex');
 
-  console.log('Calculated hash:', calculatedHash);
-  console.log('Hash match:', calculatedHash === hash);
-
   // Проверяем подпись
   if (calculatedHash !== hash) {
-    console.error('Hash mismatch!');
     return false;
   }
 
@@ -111,14 +91,12 @@ function verifyTelegramAuth(authData: any): boolean {
   const authDate = parseInt(data.auth_date);
   const currentTime = Math.floor(Date.now() / 1000);
   const age = currentTime - authDate;
-  console.log('Auth date age:', age, 'seconds');
   
   if (age > 86400) {
     console.error('Auth data too old:', age, 'seconds');
     return false;
   }
 
-  console.log('Telegram auth verification successful');
   return true;
 }
 
@@ -128,7 +106,6 @@ app.get('/api/auth/telegram', async (req, res) => {
   try {
     // Telegram Widget отправляет данные через query parameters при использовании data-auth-url
     const authData = req.query as any;
-    console.log('Received auth data (GET):', JSON.stringify(authData, null, 2));
     await processTelegramAuth(authData, res, req);
   } catch (error: any) {
     console.error('Error in GET /api/auth/telegram:', error);
@@ -140,7 +117,6 @@ app.post('/api/auth/telegram', async (req, res) => {
   try {
     // Telegram Widget отправляет данные через body при использовании data-onauth callback
     const authData = req.body;
-    console.log('Received auth data (POST):', JSON.stringify(authData, null, 2));
     await processTelegramAuth(authData, res, req);
   } catch (error: any) {
     console.error('Error in POST /api/auth/telegram:', error);
@@ -152,7 +128,6 @@ async function processTelegramAuth(authData: any, res: express.Response, req?: e
   try {
     // Проверяем подпись
     const isValid = verifyTelegramAuth(authData);
-    console.log('Signature verification result:', isValid);
     
     if (!isValid) {
       console.error('Invalid Telegram authentication signature');
@@ -229,56 +204,6 @@ app.get('/api/auth/check', async (req, res) => {
   res.json({ authenticated: true, user: session.user });
 });
 
-// Endpoint для ручной авторизации по username (только для админов)
-app.post('/api/auth/manual', async (req, res) => {
-  try {
-    const { username } = req.body;
-    
-    if (!username) {
-      return res.status(400).json({ error: 'Username required' });
-    }
-
-    const client = await pool.connect();
-    try {
-      const result = await client.query(
-        'SELECT * FROM users WHERE username = $1',
-        [username]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(403).json({ error: 'User not found' });
-      }
-
-      const user = result.rows[0];
-      const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
-      const isAdmin = ADMIN_USERNAMES.includes(user.username || '') || 
-                     adminIds.includes(user.telegram_id);
-
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'Forbidden - not admin' });
-      }
-
-      // Сохраняем данные пользователя в сессии
-      const sessionData = { user, telegramId: user.telegram_id, isAuthenticated: true };
-      setSession(res, sessionData);
-
-      res.json({ 
-        success: true, 
-        user: {
-          id: user.id,
-          telegram_id: user.telegram_id,
-          username: user.username,
-          first_name: user.first_name
-        }
-      });
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    console.error('Manual auth error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
 
 // Endpoint для выхода (БЕЗ requireAuth - нужен для выхода)
 app.post('/api/auth/logout', (req, res) => {
@@ -339,35 +264,26 @@ app.get('/api/bot-username', async (req, res) => {
   try {
     // Если есть кеш, используем его
     if (cachedBotUsername) {
-      console.log('Using cached bot username:', cachedBotUsername);
       return res.json({ botUsername: cachedBotUsername });
     }
 
     // Пытаемся получить из переменной окружения
     let botUsername = process.env.TELEGRAM_BOT_USERNAME;
-    console.log('TELEGRAM_BOT_USERNAME from env:', botUsername ? 'found' : 'not found');
-    console.log('BOT_TOKEN exists:', !!BOT_TOKEN);
 
     // Если нет в env, получаем автоматически через Bot API
     if (!botUsername && BOT_TOKEN) {
       try {
-        console.log('Fetching bot username from Telegram API...');
         const response = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`, {
           timeout: 5000
         });
-        console.log('Telegram API response:', response.data);
         if (response.data && response.data.ok && response.data.result && response.data.result.username) {
           botUsername = response.data.result.username;
           cachedBotUsername = botUsername || null; // Кешируем
-          console.log('Bot username from API:', botUsername);
         } else {
-          console.error('Invalid response from Telegram API:', response.data);
+          console.error('Invalid response from Telegram API');
         }
       } catch (error: any) {
         console.error('Error getting bot username from API:', error.message);
-        if (error.response) {
-          console.error('API response:', error.response.data);
-        }
       }
     }
 

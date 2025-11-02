@@ -383,11 +383,6 @@
             <h2>🚀 Админ-панель Vividus Bot</h2>
             <p>Войдите через Telegram для доступа к панели управления</p>
             <div id="telegram-login-container"></div>
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                <p style="font-size: 12px; color: #666; margin-bottom: 10px;">Или войдите по username (только для админов):</p>
-                <input type="text" id="manual-username" placeholder="Введите Telegram username" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; margin-bottom: 10px;">
-                <button class="telegram-login-button" onclick="manualLogin()">Войти</button>
-            </div>
         </div>
     </div>
 
@@ -586,38 +581,6 @@
             }
         }
 
-        // Ручная авторизация по username (для админов)
-        async function manualLogin() {
-            const username = document.getElementById('manual-username').value.trim();
-            if (!username) {
-                alert('Введите username');
-                return;
-            }
-
-            try {
-                // Создаём фейковый объект авторизации для админов
-                const response = await fetch('/api/auth/manual', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username: username })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    isAuthenticated = true;
-                    currentUser = data.user;
-                    showMainContent();
-                    loadStats();
-                    loadUsers();
-                } else {
-                    alert('Ошибка авторизации: ' + (data.error || 'Неизвестная ошибка'));
-                }
-            } catch (error) {
-                alert('Ошибка при авторизации: ' + error.message);
-            }
-        }
 
         // Выход
         async function logout() {
