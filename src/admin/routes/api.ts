@@ -381,10 +381,35 @@ router.get('/stats', async (req, res) => {
           (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'success') as total_revenue,
           (SELECT COALESCE(SUM(generations), 0) FROM users) as total_generations,
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'completed') as completed_jobs,
-          (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs
+          (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs,
+          -- Воронка флоу
+          (SELECT COUNT(DISTINCT user_id) FROM orders) as users_with_orders,
+          (SELECT COUNT(DISTINCT u.id) FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND (o.price = 0 OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.status = 'success')))) as users_paid_or_used_generations,
+          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE status = 'completed') as users_completed_orders
       `);
 
-      res.json(stats.rows[0]);
+      const result = stats.rows[0];
+      const totalUsers = parseInt(result.total_users) || 0;
+      const usersWithOrders = parseInt(result.users_with_orders) || 0;
+      const usersPaid = parseInt(result.users_paid_or_used_generations) || 0;
+      const usersCompleted = parseInt(result.users_completed_orders) || 0;
+
+      // Добавляем проценты конверсии
+      const flow = {
+        registered: totalUsers,
+        created_order: usersWithOrders,
+        paid_or_used_generations: usersPaid,
+        completed_order: usersCompleted,
+        conversion_registered_to_order: totalUsers > 0 ? ((usersWithOrders / totalUsers) * 100).toFixed(1) : '0.0',
+        conversion_order_to_paid: usersWithOrders > 0 ? ((usersPaid / usersWithOrders) * 100).toFixed(1) : '0.0',
+        conversion_paid_to_completed: usersPaid > 0 ? ((usersCompleted / usersPaid) * 100).toFixed(1) : '0.0',
+        overall_conversion: totalUsers > 0 ? ((usersCompleted / totalUsers) * 100).toFixed(1) : '0.0'
+      };
+
+      res.json({
+        ...result,
+        flow
+      });
     } finally {
       client.release();
     }

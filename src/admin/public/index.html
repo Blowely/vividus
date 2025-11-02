@@ -1636,6 +1636,26 @@
                     </div>
                 </div>
                 
+                ${stats.flow ? `
+                    <h2 style="margin-bottom: 20px; margin-top: 40px; font-size: ${window.innerWidth <= 768 ? '18px' : '20px'};">🔄 Воронка прохождения флоу</h2>
+                    <div style="background: white; padding: ${window.innerWidth <= 768 ? '15px' : '30px'}; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 40px;">
+                        <p style="font-size: ${window.innerWidth <= 768 ? '11px' : '12px'}; color: #666; margin-bottom: 20px; line-height: 1.4;">
+                            Показывает, сколько пользователей прошли каждый этап флоу: регистрация → создание заказа → оплата/использование генераций → завершение заказа.
+                        </p>
+                        <div style="display: flex; flex-direction: column; gap: 15px; max-width: 600px; margin: 0 auto;">
+                            ${getFlowStepHtml('1. Зарегистрировано', stats.flow.registered, stats.flow.registered, 100, '#667eea')}
+                            ${getFlowStepHtml('2. Создали заказ', stats.flow.created_order, stats.flow.registered, parseFloat(stats.flow.conversion_registered_to_order), '#48bb78', `↓ ${stats.flow.conversion_registered_to_order}%`)}
+                            ${getFlowStepHtml('3. Оплатили / Использовали генерации', stats.flow.paid_or_used_generations, stats.flow.created_order, parseFloat(stats.flow.conversion_order_to_paid), '#ed8936', `↓ ${stats.flow.conversion_order_to_paid}%`)}
+                            ${getFlowStepHtml('4. Завершили заказ', stats.flow.completed_order, stats.flow.paid_or_used_generations, parseFloat(stats.flow.conversion_paid_to_completed), '#38b2ac', `↓ ${stats.flow.conversion_paid_to_completed}%`)}
+                        </div>
+                        <div style="margin-top: 20px; padding: ${window.innerWidth <= 768 ? '10px' : '15px'}; background: #f8f9fa; border-radius: 6px; text-align: center;">
+                            <div style="font-size: ${window.innerWidth <= 768 ? '11px' : '12px'}; color: #666; margin-bottom: 5px;">Общая конверсия</div>
+                            <div style="font-size: ${window.innerWidth <= 768 ? '20px' : '24px'}; font-weight: bold; color: #667eea;">${stats.flow.overall_conversion}%</div>
+                            <div style="font-size: ${window.innerWidth <= 768 ? '10px' : '11px'}; color: #999; margin-top: 5px;">${stats.flow.completed_order} из ${stats.flow.registered} пользователей завершили заказ</div>
+                        </div>
+                    </div>
+                ` : ''}
+                
                 <div class="analytics-charts" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px;">
                     <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <h3 style="margin-bottom: 8px; font-size: 16px;">Статус заказов</h3>
@@ -1709,6 +1729,28 @@
                     drawCampaignsChart(campaigns);
                 }
             }, 100);
+        }
+
+        // Функция для генерации HTML шага воронки
+        function getFlowStepHtml(label, current, previous, percentage, color, conversionText = '') {
+            const width = previous > 0 ? (current / previous * 100) : 0;
+            const isMobile = window.innerWidth <= 768;
+            return `
+                <div style="position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 5px;">
+                        <span style="font-weight: 600; font-size: ${isMobile ? '12px' : '14px'}; ${isMobile ? 'flex: 1; min-width: 200px;' : ''}">${label}</span>
+                        <span style="font-size: ${isMobile ? '16px' : '18px'}; font-weight: bold; color: ${color};">${current}</span>
+                    </div>
+                    ${conversionText ? `
+                        <div style="text-align: center; margin-bottom: 5px; font-size: ${isMobile ? '10px' : '11px'}; color: #999;">${conversionText}</div>
+                    ` : ''}
+                    <div style="height: ${isMobile ? '35px' : '40px'}; background: #e9ecef; border-radius: 6px; overflow: hidden; position: relative;">
+                        <div style="height: 100%; width: ${width}%; background: linear-gradient(90deg, ${color} 0%, ${color}dd 100%); transition: width 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <span style="color: white; font-weight: bold; font-size: ${isMobile ? '11px' : '12px'}; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">${percentage.toFixed(1)}%</span>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         let ordersChart = null;
