@@ -300,8 +300,8 @@ router.get('/stats', async (req, res) => {
           (SELECT COUNT(*) FROM orders) as total_orders,
           (SELECT COUNT(*) FROM orders WHERE status = 'completed') as completed_orders,
           (SELECT COUNT(*) FROM orders WHERE status = 'failed') as failed_orders,
-          (SELECT COUNT(*) FROM payments WHERE status = 'succeeded') as successful_payments,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'succeeded') as total_revenue,
+          (SELECT COUNT(*) FROM payments WHERE status IN ('succeeded', 'success')) as successful_payments,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status IN ('succeeded', 'success')) as total_revenue,
           (SELECT COALESCE(SUM(generations), 0) FROM users) as total_generations,
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'completed') as completed_jobs,
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs
@@ -313,6 +313,40 @@ router.get('/stats', async (req, res) => {
     }
   } catch (error) {
     console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Получить аналитику по кампаниям
+router.get('/analytics/campaigns', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(`
+        SELECT 
+          c.name as campaign_name,
+          COUNT(DISTINCT cs.id) as stats_count,
+          SUM(cs.users_count) as total_users,
+          SUM(cs.total_payments_rub) as total_payments_rub,
+          SUM(cs.total_payments_stars) as total_payments_stars,
+          SUM(cs.completed_orders) as completed_orders,
+          CASE 
+            WHEN SUM(cs.users_count) > 0 
+            THEN ROUND((SUM(cs.completed_orders)::decimal / SUM(cs.users_count)) * 100, 2)
+            ELSE 0 
+          END as conversion_rate
+        FROM campaigns c
+        LEFT JOIN campaign_stats cs ON c.id = cs.campaign_id
+        GROUP BY c.id, c.name
+        ORDER BY total_payments_rub DESC NULLS LAST
+      `);
+
+      res.json(result.rows);
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching campaign analytics:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
