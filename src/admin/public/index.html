@@ -393,6 +393,108 @@
             margin-top: 20px;
         }
 
+        /* Toast уведомления */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+        }
+
+        .toast {
+            background: white;
+            border-radius: 8px;
+            padding: 16px 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideInRight 0.3s ease-out;
+            min-width: 300px;
+        }
+
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
+
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        .toast.warning {
+            border-left: 4px solid #f59e0b;
+        }
+
+        .toast.info {
+            border-left: 4px solid #3b82f6;
+        }
+
+        .toast-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .toast-message {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.4;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .toast-close:hover {
+            color: #333;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
         .pagination {
             display: flex;
             gap: 10px;
@@ -709,7 +811,212 @@
         </div>
     </div>
 
+    <!-- Modal для подтверждения удаления логов -->
+    <div class="modal" id="confirmDeleteLogsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚠️ Подтверждение удаления</h2>
+                <p>Вы уверены, что хотите удалить ВСЕ логи? Это действие нельзя отменить!</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="confirmDeleteLogs()">Удалить все</button>
+                <button class="btn" onclick="closeModal('confirmDeleteLogsModal')">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast уведомления -->
+    <div id="toast-container"></div>
+
     <script>
+        // Переменные для обработки 401 ошибок
+        let isRefreshingAuth = false;
+        let refreshQueue = [];
+
+        // Обертка для fetch с автоматическим обновлением токена при 401
+        async function fetchWithAuth(url, options = {}) {
+            // Выполняем оригинальный запрос
+            const response = await fetch(url, options);
+            
+            // Если получили 401, пытаемся обновить авторизацию
+            if (response.status === 401) {
+                // Если уже идет процесс обновления, ждем его
+                if (isRefreshingAuth) {
+                    return new Promise((resolve) => {
+                        refreshQueue.push(() => {
+                            resolve(fetchWithAuth(url, options));
+                        });
+                    });
+                }
+                
+                isRefreshingAuth = true;
+                
+                try {
+                    // Пытаемся автоматически обновить авторизацию
+                    const refreshed = await refreshAuth();
+                    
+                    if (refreshed) {
+                        // Если обновление успешно, повторяем оригинальный запрос
+                        const retryResponse = await fetch(url, options);
+                        
+                        // Выполняем все запросы из очереди
+                        refreshQueue.forEach(callback => callback());
+                        refreshQueue = [];
+                        isRefreshingAuth = false;
+                        
+                        return retryResponse;
+                    } else {
+                        // Если обновление не удалось, показываем ошибку
+                        refreshQueue.forEach(callback => callback());
+                        refreshQueue = [];
+                        isRefreshingAuth = false;
+                        
+                        showToast('Требуется повторная авторизация', 'warning', 'Сессия истекла');
+                        // Показываем модальное окно для повторной авторизации
+                        showAuthRequiredModal();
+                        
+                        return response;
+                    }
+                } catch (error) {
+                    refreshQueue.forEach(callback => callback());
+                    refreshQueue = [];
+                    isRefreshingAuth = false;
+                    
+                    showToast('Ошибка обновления авторизации', 'error');
+                    showAuthRequiredModal();
+                    
+                    return response;
+                }
+            }
+            
+            return response;
+        }
+
+        // Функция для обновления авторизации
+        async function refreshAuth() {
+            try {
+                // Проверяем, доступен ли Telegram WebApp API
+                if (window.Telegram?.WebApp?.initData) {
+                    // Используем данные из Telegram WebApp для автоматической авторизации
+                    const initData = window.Telegram.WebApp.initData;
+                    
+                    // Парсим данные из initData
+                    const params = new URLSearchParams(initData);
+                    const authData = {};
+                    params.forEach((value, key) => {
+                        authData[key] = value;
+                    });
+                    
+                    // Отправляем запрос на авторизацию
+                    const response = await fetch('/api/auth/telegram', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(authData),
+                        credentials: 'include'
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.authenticated) {
+                            return true;
+                        }
+                    }
+                }
+                
+                // Если Telegram WebApp недоступен, пытаемся проверить текущую сессию
+                const checkResponse = await fetch('/api/auth/check', {
+                    credentials: 'include'
+                });
+                
+                if (checkResponse.ok) {
+                    const checkData = await checkResponse.json();
+                    if (checkData.authenticated) {
+                        return true;
+                    }
+                }
+                
+                return false;
+            } catch (error) {
+                console.error('Error refreshing auth:', error);
+                return false;
+            }
+        }
+
+        // Модальное окно для повторной авторизации
+        function showAuthRequiredModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.id = 'authRequiredModal';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>⚠️ Требуется повторная авторизация</h2>
+                        <p>Ваша сессия истекла. Пожалуйста, войдите снова.</p>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary" onclick="reloadPage()">Обновить страницу</button>
+                        <button class="btn" onclick="closeAuthModal()">Отмена</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        function closeAuthModal() {
+            const modal = document.getElementById('authRequiredModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        function reloadPage() {
+            window.location.reload();
+        }
+
+        // Система уведомлений
+        function showToast(message, type = 'info', title = null) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icons = {
+                success: '✅',
+                error: '❌',
+                warning: '⚠️',
+                info: 'ℹ️'
+            };
+            
+            const titlesDefault = {
+                success: 'Успешно',
+                error: 'Ошибка',
+                warning: 'Внимание',
+                info: 'Информация'
+            };
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icons[type] || icons.info}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${title || titlesDefault[type]}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+                <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Автоматическое удаление через 5 секунд
+            setTimeout(() => {
+                toast.style.animation = 'slideOutRight 0.3s ease-out';
+                setTimeout(() => {
+                    if (toast.parentElement) {
+                        toast.remove();
+                    }
+                }, 300);
+            }, 5000);
+        }
+
         let currentTab = 'users';
         let currentPage = { users: 1, orders: 1, payments: 1, jobs: 1 };
         let currentData = {};
@@ -725,7 +1032,7 @@
         // Проверка авторизации
         async function checkAuth() {
             try {
-                const response = await fetch('/api/auth/check');
+                const response = await fetchWithAuth('/api/auth/check');
                 const data = await response.json();
                 if (data.authenticated) {
                     isAuthenticated = true;
@@ -764,7 +1071,7 @@
         let campaignsList = [];
         async function loadCampaigns() {
             try {
-                const response = await fetch('/api/campaigns');
+                const response = await fetchWithAuth('/api/campaigns');
                 campaignsList = await response.json();
                 
                 // Заполняем все селекты кампаний
@@ -958,10 +1265,10 @@
                     loadStats();
                     loadUsers();
                 } else {
-                    alert('Ошибка авторизации: ' + (data.error || 'Неизвестная ошибка'));
+                    showToast(data.error || 'Неизвестная ошибка', 'error', 'Ошибка авторизации');
                 }
             } catch (error) {
-                alert('Ошибка при авторизации: ' + error.message);
+                showToast(error.message, 'error', 'Ошибка при авторизации');
             }
         }
 
@@ -1021,7 +1328,7 @@
         // Загрузка статистики
         async function loadStats() {
             try {
-                const response = await fetch('/api/stats');
+                const response = await fetchWithAuth('/api/stats');
                 const stats = await response.json();
                 
                 document.getElementById('stat-users').textContent = stats.total_users || 0;
@@ -1070,7 +1377,7 @@
                 
                 switch(tab) {
                     case 'users':
-                        response = await fetch(`/api/users?page=${currentPage.users}&limit=50`);
+                        response = await fetchWithAuth(`/api/users?page=${currentPage.users}&limit=50`);
                         const usersData = await response.json();
                         currentData.users = usersData;
                         renderUsers(usersData);
@@ -1121,7 +1428,7 @@
                 if (search) params.append('search', search);
                 if (campaign) params.append('campaign', campaign);
                 
-                const response = await fetch(`/api/users?${params.toString()}`);
+                const response = await fetchWithAuth(`/api/users?${params.toString()}`);
                 const data = await response.json();
                 currentData.users = data;
                 renderUsers(data);
@@ -1145,7 +1452,7 @@
                 if (userSearch) params.append('user', userSearch);
                 if (campaign) params.append('campaign', campaign);
                 
-                const response = await fetch(`/api/orders?${params.toString()}`);
+                const response = await fetchWithAuth(`/api/orders?${params.toString()}`);
                 const data = await response.json();
                 currentData.orders = data;
                 renderOrders(data);
@@ -1169,7 +1476,7 @@
                 if (userSearch) params.append('user', userSearch);
                 if (campaign) params.append('campaign', campaign);
                 
-                const response = await fetch(`/api/payments?${params.toString()}`);
+                const response = await fetchWithAuth(`/api/payments?${params.toString()}`);
                 const data = await response.json();
                 currentData.payments = data;
                 renderPayments(data);
@@ -1193,7 +1500,7 @@
                 if (userSearch) params.append('user', userSearch);
                 if (campaign) params.append('campaign', campaign);
                 
-                const response = await fetch(`/api/did-jobs?${params.toString()}`);
+                const response = await fetchWithAuth(`/api/did-jobs?${params.toString()}`);
                 const data = await response.json();
                 currentData.jobs = data;
                 renderJobs(data);
@@ -1472,12 +1779,12 @@
             const newValue = parseInt(document.getElementById('edit-generations-input').value);
             
             if (isNaN(newValue) || newValue < 0) {
-                alert('Введите корректное число');
+                showToast('Введите корректное число', 'error', 'Ошибка валидации');
                 return;
             }
 
             try {
-                const response = await fetch(`/api/users/${editingUserId}/generations`, {
+                const response = await fetchWithAuth(`/api/users/${editingUserId}/generations`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1489,12 +1796,12 @@
                     closeModal('editGenerationsModal');
                     loadUsers();
                     loadStats();
-                    alert('Генерации успешно обновлены');
+                    showToast('Генерации успешно обновлены', 'success');
                 } else {
-                    alert('Ошибка обновления генераций');
+                    showToast('Ошибка обновления генераций', 'error');
                 }
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                showToast(error.message, 'error', 'Ошибка');
             }
         }
 
@@ -1508,7 +1815,7 @@
 
         async function confirmDeleteUser() {
             try {
-                const response = await fetch(`/api/users/${deletingUserId}`, {
+                const response = await fetchWithAuth(`/api/users/${deletingUserId}`, {
                     method: 'DELETE'
                 });
 
@@ -1516,12 +1823,13 @@
                     closeModal('deleteUserModal');
                     loadUsers();
                     loadStats();
-                    alert('Пользователь успешно удалён');
+                    showToast('Пользователь успешно удалён', 'success');
                 } else {
-                    alert('Ошибка удаления пользователя');
+                    const errorData = await response.json().catch(() => ({ error: 'Ошибка удаления пользователя' }));
+                    showToast(errorData.error || 'Ошибка удаления пользователя', 'error');
                 }
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                showToast(error.message, 'error', 'Ошибка');
             }
         }
 
@@ -1554,7 +1862,7 @@
                 const content = document.getElementById('history-content');
                 content.innerHTML = '<div class="loading">Загрузка...</div>';
                 
-                const response = await fetch(`/api/users/${userId}/history`);
+                const response = await fetchWithAuth(`/api/users/${userId}/history`);
                 const history = await response.json();
                 
                 const user = history.user;
@@ -1675,8 +1983,8 @@
                 const statsUrl = campaign ? `/api/stats?campaign=${encodeURIComponent(campaign)}` : '/api/stats';
                 
                 const [campaignsResponse, statsResponse] = await Promise.all([
-                    fetch('/api/analytics/campaigns'),
-                    fetch(statsUrl)
+                    fetchWithAuth('/api/analytics/campaigns'),
+                    fetchWithAuth(statsUrl)
                 ]);
                 
                 const campaigns = await campaignsResponse.json();
@@ -1708,7 +2016,7 @@
 
             try {
                 // Сначала находим user_id
-                const userSearchResponse = await fetch(`/api/users?search=${encodeURIComponent(search)}&limit=1`);
+                const userSearchResponse = await fetchWithAuth(`/api/users?search=${encodeURIComponent(search)}&limit=1`);
                 const userSearchData = await userSearchResponse.json();
                 
                 if (!userSearchData.users || userSearchData.users.length === 0) {
@@ -1719,7 +2027,7 @@
                 const userId = userSearchData.users[0].id;
                 
                 // Получаем статистику по пользователю
-                const analyticsResponse = await fetch(`/api/analytics/user/${userId}`);
+                const analyticsResponse = await fetchWithAuth(`/api/analytics/user/${userId}`);
                 const analytics = await analyticsResponse.json();
                 
                 renderUserAnalytics(analytics);
@@ -2210,7 +2518,7 @@
         // Загрузка списка таблиц для фильтрации логов
         async function loadLogTables() {
             try {
-                const response = await fetch('/api/logs/tables');
+                const response = await fetchWithAuth('/api/logs/tables');
                 const tables = await response.json();
                 
                 const select = document.getElementById('log-table-filter');
@@ -2251,7 +2559,7 @@
                 if (userSearch) params.append('user', userSearch);
                 if (campaign) params.append('campaign', campaign);
                 
-                const response = await fetch(`/api/logs?${params.toString()}`);
+                const response = await fetchWithAuth(`/api/logs?${params.toString()}`);
                 const data = await response.json();
                 renderLogs(data);
                 updateActiveFilters('logs');
@@ -2261,30 +2569,34 @@
         }
 
         // Очистка всех логов
-        async function clearAllLogs() {
-            if (!confirm('⚠️ Вы уверены, что хотите удалить ВСЕ логи? Это действие нельзя отменить!')) {
-                return;
-            }
-            
+        function clearAllLogs() {
+            document.getElementById('confirmDeleteLogsModal').classList.add('active');
+        }
+
+        async function confirmDeleteLogs() {
             try {
-                const response = await fetch('/api/logs', {
+                const response = await fetchWithAuth('/api/logs', {
                     method: 'DELETE'
                 });
                 
                 if (!response.ok) {
                     const error = await response.json();
-                    alert(`Ошибка: ${error.error || error.details || 'Неизвестная ошибка'}`);
+                    showToast(error.error || error.details || 'Неизвестная ошибка', 'error');
+                    closeModal('confirmDeleteLogsModal');
                     return;
                 }
                 
                 const result = await response.json();
-                alert(`✅ ${result.message}\nУдалено записей: ${result.deletedCount || 0}`);
+                showToast(`Удалено записей: ${result.deletedCount || 0}`, 'success', result.message || 'Логи удалены');
+                
+                closeModal('confirmDeleteLogsModal');
                 
                 // Перезагружаем логи
                 loadLogs(1);
             } catch (error) {
                 console.error('Error clearing logs:', error);
-                alert(`Ошибка при удалении логов: ${error.message}`);
+                showToast(error.message, 'error', 'Ошибка при удалении логов');
+                closeModal('confirmDeleteLogsModal');
             }
         }
 

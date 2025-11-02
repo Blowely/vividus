@@ -771,8 +771,7 @@ export class TelegramService {
         `💰 Сумма оплат: ${stat.total_payments_rub.toFixed(2)} ₽\n` +
         `⭐ Сумма в stars: ${stat.total_payments_stars}\n` +
         `🎬 Успешных генераций: ${stat.completed_orders}\n` +
-        `📈 Конверсия: ${stat.conversion_rate}%\n\n` +
-        `💡 Вы можете переслать это сообщение`;
+        `📈 Конверсия: ${stat.conversion_rate}%`;
 
       await ctx.answerCbQuery('✅');
       
