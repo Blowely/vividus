@@ -384,8 +384,18 @@ router.get('/stats', async (req, res) => {
           (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs,
           -- Воронка флоу
           (SELECT COUNT(DISTINCT user_id) FROM orders) as users_with_orders,
-          (SELECT COUNT(DISTINCT u.id) FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND (o.price = 0 OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.status = 'success')))) as users_paid_or_used_generations,
-          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE status = 'completed') as users_completed_orders
+          -- Пользователи, которые оплатили или использовали генерации
+          -- Учитываем заказы, которые оплачены (успешный платеж) ИЛИ используют генерации (price = 0)
+          (SELECT COUNT(DISTINCT o.user_id) 
+           FROM orders o 
+           LEFT JOIN payments p ON o.id = p.order_id
+           WHERE (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id))) as users_paid_or_used_generations,
+          -- Пользователи, которые завершили заказ (учитываем только тех, кто прошел оплату/генерации)
+          (SELECT COUNT(DISTINCT o.user_id) 
+           FROM orders o 
+           LEFT JOIN payments p ON o.id = p.order_id
+           WHERE o.status = 'completed' 
+           AND (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id))) as users_completed_orders
       `);
 
       const result = stats.rows[0];
