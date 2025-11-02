@@ -511,32 +511,57 @@ router.get('/stats', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
+      const campaign = req.query.campaign as string | undefined;
+      const params = campaign ? [campaign] : [];
+      
+      // Условие для фильтрации по кампании
+      const campaignFilter = campaign ? 'AND u.start_param = $1' : '';
+      
       const stats = await client.query(`
         SELECT 
-          (SELECT COUNT(*) FROM users) as total_users,
-          (SELECT COUNT(*) FROM orders) as total_orders,
-          (SELECT COUNT(*) FROM orders WHERE status = 'completed') as completed_orders,
-          (SELECT COUNT(*) FROM orders WHERE status = 'failed') as failed_orders,
-          (SELECT COUNT(*) FROM payments WHERE status = 'success') as successful_payments,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'success') as total_revenue,
-          (SELECT COALESCE(SUM(generations), 0) FROM users) as total_generations,
-          (SELECT COUNT(*) FROM did_jobs WHERE status = 'completed') as completed_jobs,
-          (SELECT COUNT(*) FROM did_jobs WHERE status = 'failed') as failed_jobs,
+          (SELECT COUNT(*) FROM users ${campaign ? 'WHERE start_param = $1' : ''}) as total_users,
+          (SELECT COUNT(*) FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE 1=1 ${campaignFilter}) as total_orders,
+          (SELECT COUNT(*) FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE o.status = 'completed' ${campaignFilter}) as completed_orders,
+          (SELECT COUNT(*) FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE o.status = 'failed' ${campaignFilter}) as failed_orders,
+          (SELECT COUNT(*) FROM payments p 
+           INNER JOIN users u ON u.id = p.user_id 
+           WHERE p.status = 'success' ${campaignFilter}) as successful_payments,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p 
+           INNER JOIN users u ON u.id = p.user_id 
+           WHERE p.status = 'success' ${campaignFilter}) as total_revenue,
+          (SELECT COALESCE(SUM(u.generations), 0) FROM users u ${campaign ? 'WHERE start_param = $1' : ''}) as total_generations,
+          (SELECT COUNT(*) FROM did_jobs dj 
+           INNER JOIN orders o ON o.id = dj.order_id 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE dj.status = 'completed' ${campaignFilter}) as completed_jobs,
+          (SELECT COUNT(*) FROM did_jobs dj 
+           INNER JOIN orders o ON o.id = dj.order_id 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE dj.status = 'failed' ${campaignFilter}) as failed_jobs,
           -- Воронка флоу
-          (SELECT COUNT(DISTINCT user_id) FROM orders) as users_with_orders,
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id 
+           WHERE 1=1 ${campaignFilter}) as users_with_orders,
           -- Пользователи, которые оплатили или использовали генерации
-          -- Учитываем заказы, которые оплачены (успешный платеж) ИЛИ используют генерации (price = 0)
           (SELECT COUNT(DISTINCT o.user_id) 
            FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
-           WHERE (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id))) as users_paid_or_used_generations,
-          -- Пользователи, которые завершили заказ (учитываем только тех, кто прошел оплату/генерации)
+           WHERE (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_paid_or_used_generations,
+          -- Пользователи, которые завершили заказ
           (SELECT COUNT(DISTINCT o.user_id) 
            FROM orders o 
+           INNER JOIN users u ON u.id = o.user_id
            LEFT JOIN payments p ON o.id = p.order_id
            WHERE o.status = 'completed' 
-           AND (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id))) as users_completed_orders
-      `);
+           AND (o.price = 0 OR (p.status = 'success' AND p.order_id = o.id)) ${campaignFilter}) as users_completed_orders
+      `, params);
 
       const result = stats.rows[0];
       const totalUsers = parseInt(result.total_users) || 0;

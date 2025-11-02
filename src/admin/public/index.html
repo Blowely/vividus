@@ -620,11 +620,15 @@
             </div>
 
             <div id="content-analytics" class="tab-content" style="display: none;">
-                <div class="search-box" style="margin-bottom: 20px;">
+                <div class="filters-container" style="margin-bottom: 20px;">
                     <input type="text" id="search-analytics-user" placeholder="Поиск по пользователю (username, telegram_id или id) для анализа флоу..." 
                            oninput="clearTimeout(analyticsSearchTimeout); analyticsSearchTimeout = setTimeout(() => loadUserAnalytics(), 300);"
-                           style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 100%; max-width: 400px;">
+                           style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                    <select id="filter-analytics-campaign" onchange="loadAnalytics(); updateActiveFilters('analytics')" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
+                        <option value="">Все кампании</option>
+                    </select>
                 </div>
+                <div id="active-filters-analytics" class="active-filters"></div>
                 <div id="analytics-content"></div>
                 <div id="user-analytics-content" style="display: none;"></div>
             </div>
@@ -761,7 +765,7 @@
                 campaignsList = await response.json();
                 
                 // Заполняем все селекты кампаний
-                ['users', 'orders', 'payments', 'jobs', 'logs'].forEach(tab => {
+                ['users', 'orders', 'payments', 'jobs', 'logs', 'analytics'].forEach(tab => {
                     const select = document.getElementById(`filter-${tab}-campaign`);
                     if (select) {
                         // Сохраняем текущее значение
@@ -797,6 +801,7 @@
                                                        tab === 'orders' ? 'search-orders-user' :
                                                        tab === 'payments' ? 'search-payments-user' :
                                                        tab === 'jobs' ? 'search-jobs-user' :
+                                                       tab === 'analytics' ? 'search-analytics-user' :
                                                        'log-user-search')?.value?.trim();
             if (userSearch) {
                 filters.push({ type: 'user', label: 'Пользователь', value: userSearch, clear: () => {
@@ -804,6 +809,7 @@
                                                           tab === 'orders' ? 'search-orders-user' :
                                                           tab === 'payments' ? 'search-payments-user' :
                                                           tab === 'jobs' ? 'search-jobs-user' :
+                                                          tab === 'analytics' ? 'search-analytics-user' :
                                                           'log-user-search');
                     if (input) input.value = '';
                     if (tab === 'users') searchUsers();
@@ -811,6 +817,7 @@
                     else if (tab === 'payments') loadPayments();
                     else if (tab === 'jobs') loadJobs();
                     else if (tab === 'logs') loadLogs();
+                    else if (tab === 'analytics') loadAnalytics();
                 }});
             }
             
@@ -825,6 +832,7 @@
                     else if (tab === 'payments') applyPaymentsFilters();
                     else if (tab === 'jobs') applyJobsFilters();
                     else if (tab === 'logs') applyLogsFilters();
+                    else if (tab === 'analytics') loadAnalytics();
                 }});
             }
             
@@ -1660,15 +1668,19 @@
             container.innerHTML = '<div class="loading">Загрузка аналитики...</div>';
             
             try {
+                const campaign = document.getElementById('filter-analytics-campaign')?.value || '';
+                const statsUrl = campaign ? `/api/stats?campaign=${encodeURIComponent(campaign)}` : '/api/stats';
+                
                 const [campaignsResponse, statsResponse] = await Promise.all([
                     fetch('/api/analytics/campaigns'),
-                    fetch('/api/stats')
+                    fetch(statsUrl)
                 ]);
                 
                 const campaigns = await campaignsResponse.json();
                 const stats = await statsResponse.json();
                 
                 renderAnalytics(campaigns, stats);
+                updateActiveFilters('analytics');
             } catch (error) {
                 container.innerHTML = `<div class="empty">Ошибка загрузки аналитики: ${error.message}</div>`;
             }
