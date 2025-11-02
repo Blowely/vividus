@@ -369,8 +369,6 @@ export class TelegramService {
         processedPrompt = `animate this image with ${translatedPrompt}`;
       }
       
-      await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n⏳ Создаю заказ...`);
-      
       // Проверяем баланс генераций пользователя
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
@@ -385,7 +383,8 @@ export class TelegramService {
         const order = await this.orderService.createOrder(user.id, s3Url, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
-        await this.sendMessage(ctx, `🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
+        // Объединенное сообщение о промпте, создании заказа и начале обработки
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
         
         // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
         const { ProcessorService } = await import('./processor');

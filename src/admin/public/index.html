@@ -1878,7 +1878,6 @@
                                         <tr>
                                             <th>ID</th>
                                             <th>Статус</th>
-                                            <th>Цена</th>
                                             <th>Дата</th>
                                         </tr>
                                     </thead>
@@ -1887,7 +1886,6 @@
                                             <tr>
                                                 <td>${order.id.substring(0, 8)}...</td>
                                                 <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
-                                                <td>-</td>
                                                 <td>${new Date(order.created_at).toLocaleString('ru-RU')}</td>
                                             </tr>
                                         `).join('')}
