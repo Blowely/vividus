@@ -217,35 +217,48 @@ app.get('/api/bot-username', async (req, res) => {
   try {
     // Если есть кеш, используем его
     if (cachedBotUsername) {
+      console.log('Using cached bot username:', cachedBotUsername);
       return res.json({ botUsername: cachedBotUsername });
     }
 
     // Пытаемся получить из переменной окружения
     let botUsername = process.env.TELEGRAM_BOT_USERNAME;
+    console.log('TELEGRAM_BOT_USERNAME from env:', botUsername ? 'found' : 'not found');
+    console.log('BOT_TOKEN exists:', !!BOT_TOKEN);
 
     // Если нет в env, получаем автоматически через Bot API
     if (!botUsername && BOT_TOKEN) {
       try {
+        console.log('Fetching bot username from Telegram API...');
         const response = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`, {
           timeout: 5000
         });
+        console.log('Telegram API response:', response.data);
         if (response.data && response.data.ok && response.data.result && response.data.result.username) {
           botUsername = response.data.result.username;
           cachedBotUsername = botUsername || null; // Кешируем
+          console.log('Bot username from API:', botUsername);
+        } else {
+          console.error('Invalid response from Telegram API:', response.data);
         }
-      } catch (error) {
-        console.error('Error getting bot username from API:', error);
+      } catch (error: any) {
+        console.error('Error getting bot username from API:', error.message);
+        if (error.response) {
+          console.error('API response:', error.response.data);
+        }
       }
     }
 
     if (!botUsername) {
-      return res.status(500).json({ error: 'Bot username not found. Set TELEGRAM_BOT_USERNAME in .env or ensure BOT_TOKEN is valid.' });
+      const errorMsg = 'Bot username not found. Set TELEGRAM_BOT_USERNAME in .env or ensure BOT_TOKEN is valid.';
+      console.error(errorMsg);
+      return res.status(500).json({ error: errorMsg });
     }
 
     res.json({ botUsername });
-  } catch (error) {
-    console.error('Error in /api/bot-username:', error);
-    res.status(500).json({ error: 'Failed to get bot username' });
+  } catch (error: any) {
+    console.error('Error in /api/bot-username:', error.message);
+    res.status(500).json({ error: 'Failed to get bot username: ' + error.message });
   }
 });
 
