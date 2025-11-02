@@ -50,7 +50,7 @@ export class ProcessorService {
       );
 
       // Update order with generation ID
-      await this.orderService.updateOrderResult(orderId, '', generationId);
+      await this.orderService.updateOrderResult(orderId, generationId);
 
       // Start monitoring the job
       this.monitorJob(generationId, user.telegram_id, orderId);
