@@ -65,7 +65,7 @@ export class PaymentService {
     }
   }
 
-  async createGenerationPurchase(telegramId: number, generationsCount: number, amount: number): Promise<any> {
+  async createGenerationPurchase(telegramId: number, generationsCount: number, amount: number, fileId?: string, prompt?: string): Promise<any> {
     const client = await pool.connect();
     try {
       // Получаем user_id по telegram_id
@@ -80,11 +80,36 @@ export class PaymentService {
       
       const userId = userResult.rows[0].id;
       
+      // Сохраняем file_id и prompt в metadata платежа (если они есть)
+      // Используем JSONB для хранения дополнительных данных
+      let paymentMetadata = null;
+      if (fileId || prompt) {
+        paymentMetadata = JSON.stringify({ file_id: fileId, prompt: prompt });
+      }
+      
       // Создаем платеж для покупки генераций (без order_id)
+      // Добавляем metadata через JSONB (если поле есть) или через отдельное поле
       const result = await client.query(
-        'INSERT INTO payments (order_id, user_id, amount, status, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+        `INSERT INTO payments (order_id, user_id, amount, status, created_at) 
+         VALUES ($1, $2, $3, $4, NOW()) 
+         RETURNING *`,
         [null, userId, amount, PaymentStatus.PENDING]
       );
+      
+      // Сохраняем file_id и prompt в отдельной таблице или в комментарии к платежу
+      // Временно используем подход через глобальное хранилище pendingPromptsData
+      // Но лучше сохранить в базе данных
+      if (fileId || prompt) {
+        // Сохраняем в временное хранилище, которое будет доступно в webhook
+        const paymentId = result.rows[0].id;
+        // Используем Redis или временное хранилище
+        // Для простоты используем глобальную Map
+        if (typeof (global as any).pendingGenerationPurchases === 'undefined') {
+          (global as any).pendingGenerationPurchases = new Map();
+        }
+        (global as any).pendingGenerationPurchases.set(paymentId, { fileId, prompt, telegramId });
+        console.log(`💾 Saved file_id and prompt for payment ${paymentId}`);
+      }
       
       return result.rows[0];
     } finally {
@@ -428,10 +453,33 @@ export class PaymentService {
               }
               
               // Проверяем, нужно ли автоматически обработать фото после покупки
-              if (metadata?.file_id && metadata?.prompt) {
+              // Получаем file_id и prompt из metadata (они передаются через ЮKassa)
+              // или из глобального хранилища (если metadata не вернула данные)
+              let fileId = metadata?.file_id;
+              let prompt = metadata?.prompt;
+              
+              // Если в metadata нет, пытаемся получить из глобального хранилища
+              if ((!fileId || !prompt) && typeof (global as any).pendingGenerationPurchases !== 'undefined') {
+                const pendingData = (global as any).pendingGenerationPurchases.get(paymentId);
+                if (pendingData && pendingData.telegramId === user.telegram_id) {
+                  if (!fileId) fileId = pendingData.fileId;
+                  if (!prompt) prompt = pendingData.prompt;
+                  console.log('📋 Retrieved file_id and prompt from global storage');
+                }
+              }
+              
+              console.log('🔍 Checking for auto-processing:', {
+                hasFileId: !!fileId,
+                hasPrompt: !!prompt,
+                metadataKeys: Object.keys(metadata || {}),
+                fileIdPreview: fileId?.substring(0, 30) || 'none',
+                promptPreview: prompt?.substring(0, 30) || 'none'
+              });
+              
+              if (fileId && prompt) {
                 console.log('🔄 Auto-processing photo after generation purchase...');
-                console.log('   File ID:', metadata.file_id);
-                console.log('   Prompt:', metadata.prompt);
+                console.log('   File ID:', fileId);
+                console.log('   Prompt:', prompt);
                 
                 try {
                   const { TelegramService } = await import('./telegram');
@@ -449,10 +497,10 @@ export class PaymentService {
                     const fileService = new FileService();
                     
                     // Загружаем файл из Telegram в S3
-                    const s3Url = await fileService.downloadTelegramFileToS3(metadata.file_id);
+                    const s3Url = await fileService.downloadTelegramFileToS3(fileId);
                     
                     // Обрабатываем промпт (используем ту же логику что и в TelegramService)
-                    let processedPrompt = (metadata.prompt as string).toLowerCase().trim();
+                    let processedPrompt = (prompt as string).toLowerCase().trim();
                     if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
                       processedPrompt = 'animate this image with subtle movements and breathing effect';
                     } else {
@@ -511,11 +559,32 @@ export class PaymentService {
                       user.telegram_id,
                       `🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`
                     );
+                    
+                    // Удаляем из глобального хранилища после успешной обработки
+                    if (typeof (global as any).pendingGenerationPurchases !== 'undefined') {
+                      (global as any).pendingGenerationPurchases.delete(paymentId);
+                      console.log('✅ Removed payment from global storage after successful processing');
+                    }
+                    
+                    // Также удаляем из TelegramService pendingPromptsData
+                    try {
+                      const { TelegramService } = await import('./telegram');
+                      const telegramService = new (TelegramService as any)();
+                      if ((telegramService as any).pendingPromptsData) {
+                        (telegramService as any).pendingPromptsData.delete(user.telegram_id);
+                        (telegramService as any).pendingPrompts.delete(user.telegram_id);
+                      }
+                    } catch (e) {
+                      console.log('⚠️ Could not clean TelegramService data:', e);
+                    }
                   }
                 } catch (error) {
                   console.error('Error auto-processing photo after generation purchase:', error);
                   // Не блокируем успешную покупку генераций, если обработка фото не удалась
                 }
+              } else {
+                console.log('⚠️ Auto-processing skipped: file_id or prompt missing');
+                console.log('   Metadata:', JSON.stringify(metadata || {}, null, 2));
               }
             } else {
               console.log('⚠️ Generations count is 0 or not found in metadata');

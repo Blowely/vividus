@@ -175,11 +175,7 @@ export class ProcessorService {
       // Списываем генерации только после успешной генерации
       // Используем Number() так как price может быть Decimal или строкой из PostgreSQL
       if (order && Number(order.price) === 0) {
-        const deducted = await this.userService.deductGenerations(telegramId, 1);
-        if (deducted) {
-          const remainingGenerations = await this.userService.getUserGenerations(telegramId);
-          await this.notifyUser(telegramId, `✅ Генерация использована! Осталось: ${remainingGenerations}`);
-        }
+        await this.userService.deductGenerations(telegramId, 1);
       }
 
       // Update campaign statistics
