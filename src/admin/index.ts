@@ -3,6 +3,7 @@ import path from 'path';
 import cookieParser from 'cookie-parser';
 import { config } from 'dotenv';
 import crypto from 'crypto';
+import axios from 'axios';
 import pool from '../config/database';
 
 config();
@@ -208,12 +209,44 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
 import apiRoutes from './routes/api';
 app.use('/api', requireAuth, apiRoutes);
 
+// Кеш для bot username
+let cachedBotUsername: string | null = null;
+
 // Endpoint для получения bot username (для Telegram Widget)
-app.get('/api/bot-username', (req, res) => {
-  // Извлекаем bot username из токена (формат: 123456:ABC-DEF...)
-  // Для Telegram Widget нужен @username бота, получаем через Bot API или передаём напрямую
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME || '';
-  res.json({ botUsername });
+app.get('/api/bot-username', async (req, res) => {
+  try {
+    // Если есть кеш, используем его
+    if (cachedBotUsername) {
+      return res.json({ botUsername: cachedBotUsername });
+    }
+
+    // Пытаемся получить из переменной окружения
+    let botUsername = process.env.TELEGRAM_BOT_USERNAME;
+
+    // Если нет в env, получаем автоматически через Bot API
+    if (!botUsername && BOT_TOKEN) {
+      try {
+        const response = await axios.get(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`, {
+          timeout: 5000
+        });
+        if (response.data && response.data.ok && response.data.result && response.data.result.username) {
+          botUsername = response.data.result.username;
+          cachedBotUsername = botUsername || null; // Кешируем
+        }
+      } catch (error) {
+        console.error('Error getting bot username from API:', error);
+      }
+    }
+
+    if (!botUsername) {
+      return res.status(500).json({ error: 'Bot username not found. Set TELEGRAM_BOT_USERNAME in .env or ensure BOT_TOKEN is valid.' });
+    }
+
+    res.json({ botUsername });
+  } catch (error) {
+    console.error('Error in /api/bot-username:', error);
+    res.status(500).json({ error: 'Failed to get bot username' });
+  }
 });
 
 // Serve frontend
