@@ -76,21 +76,25 @@ function verifyTelegramAuth(authData: any): boolean {
 
   // Создаём секретный ключ из bot token
   // Согласно документации Telegram: secret_key = HMAC-SHA256("WebAppData", bot_token)
-  // secret_key - это результат HMAC, который потом используется как ключ для следующего HMAC
+  // Важно: в документации это записывается как HMAC-SHA256(key="WebAppData", data=bot_token)
+  // В Node.js: createHmac('sha256', key).update(data).digest()
   const secretKey = crypto
     .createHmac('sha256', 'WebAppData')
     .update(BOT_TOKEN)
-    .digest(); // Это Buffer
+    .digest(); // Buffer длиной 32 байта
 
+  console.log('BOT_TOKEN (first 20 chars):', BOT_TOKEN.substring(0, 20) + '...');
+  console.log('BOT_TOKEN length:', BOT_TOKEN.length);
   console.log('Secret key (first 16 bytes):', secretKey.slice(0, 16).toString('hex'));
+  console.log('Secret key (full):', secretKey.toString('hex'));
   console.log('Secret key length:', secretKey.length);
 
   // Вычисляем хеш используя secretKey (Buffer) как ключ для HMAC
   // hash = HMAC-SHA256(secret_key, data_check_string)
-  const calculatedHash = crypto
-    .createHmac('sha256', secretKey)
-    .update(dataCheckString, 'utf8')
-    .digest('hex');
+  // где key = secretKey (Buffer), data = dataCheckString (string)
+  const hmac = crypto.createHmac('sha256', secretKey);
+  hmac.update(dataCheckString, 'utf8');
+  const calculatedHash = hmac.digest('hex');
 
   console.log('Calculated hash:', calculatedHash);
   console.log('Hash match:', calculatedHash === hash);
