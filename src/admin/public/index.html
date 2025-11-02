@@ -752,7 +752,18 @@
 
         // Загрузка данных вкладки
         async function loadTabData(tab) {
-            const container = document.getElementById(`${tab}-table`);
+            let container;
+            if (tab === 'analytics') {
+                container = document.getElementById('analytics-content');
+            } else {
+                container = document.getElementById(`${tab}-table`);
+            }
+            
+            if (!container) {
+                console.error(`Container not found for tab: ${tab}`);
+                return;
+            }
+            
             container.innerHTML = '<div class="loading">Загрузка...</div>';
 
             try {
@@ -788,7 +799,9 @@
                         break;
                 }
             } catch (error) {
-                container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+                if (container) {
+                    container.innerHTML = `<div class="empty">Ошибка загрузки: ${error.message}</div>`;
+                }
             }
         }
 
@@ -897,14 +910,26 @@
                         <tbody>
             `;
 
-            data.orders.forEach(order => {
+            data.orders.forEach((order, index) => {
+                const priceDisplay = order.price === 0 || order.price === null ? '1 генерация' : `${order.price} ₽`;
+                const promptId = `prompt-${order.id}-${index}`;
+                const promptText = order.custom_prompt || 'Базовая анимация';
+                const isLongPrompt = promptText.length > 30;
+                const shortPrompt = isLongPrompt ? promptText.substring(0, 30) + '...' : promptText;
+                
                 html += `
                     <tr>
                         <td><a href="#" onclick="viewOrderDetails('${order.id}')" class="link">${order.id.substring(0, 8)}...</a></td>
                         <td>@${order.username || order.telegram_id || '-'}</td>
                         <td><span class="badge ${getStatusBadge(order.status)}">${order.status}</span></td>
-                        <td>${order.price} ₽</td>
-                        <td>${(order.custom_prompt || 'Базовая анимация').substring(0, 30)}${order.custom_prompt && order.custom_prompt.length > 30 ? '...' : ''}</td>
+                        <td>${priceDisplay}</td>
+                        <td>
+                            <span id="${promptId}-short">${shortPrompt}</span>
+                            ${isLongPrompt ? `
+                                <span id="${promptId}-full" style="display: none;">${promptText}</span>
+                                <button class="btn btn-primary btn-sm" style="margin-left: 5px; padding: 2px 6px; font-size: 10px;" onclick="togglePrompt('${promptId}')">Развернуть</button>
+                            ` : ''}
+                        </td>
                         <td class="timestamp">${new Date(order.created_at).toLocaleString('ru-RU')}</td>
                     </tr>
                 `;
@@ -992,12 +1017,23 @@
                         <tbody>
             `;
 
-            data.jobs.forEach(job => {
+            data.jobs.forEach((job, index) => {
+                const promptId = `job-prompt-${job.id}-${index}`;
+                const promptText = job.custom_prompt || 'Базовая анимация';
+                const isLongPrompt = promptText.length > 30;
+                const shortPrompt = isLongPrompt ? promptText.substring(0, 30) + '...' : promptText;
+                
                 html += `
                     <tr>
                         <td>${job.id.substring(0, 8)}...</td>
                         <td>@${job.username || job.telegram_id || '-'}</td>
-                        <td>${(job.custom_prompt || 'Базовая анимация').substring(0, 30)}${job.custom_prompt && job.custom_prompt.length > 30 ? '...' : ''}</td>
+                        <td>
+                            <span id="${promptId}-short">${shortPrompt}</span>
+                            ${isLongPrompt ? `
+                                <span id="${promptId}-full" style="display: none;">${promptText}</span>
+                                <button class="btn btn-primary btn-sm" style="margin-left: 5px; padding: 2px 6px; font-size: 10px;" onclick="togglePrompt('${promptId}')">Развернуть</button>
+                            ` : ''}
+                        </td>
                         <td><span class="badge ${getStatusBadge(job.status)}">${job.status}</span></td>
                         <td>${job.result_url ? `<a href="${job.result_url}" target="_blank" class="link">Смотреть</a>` : '-'}</td>
                         <td>${job.error_message ? `<span style="color: red;">${job.error_message.substring(0, 50)}...</span>` : '-'}</td>
@@ -1111,6 +1147,25 @@
                 }
             } catch (error) {
                 alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Переключение отображения промпта
+        function togglePrompt(promptId) {
+            const shortEl = document.getElementById(`${promptId}-short`);
+            const fullEl = document.getElementById(`${promptId}-full`);
+            const button = event.target;
+            
+            if (shortEl && fullEl && button) {
+                if (shortEl.style.display === 'none') {
+                    shortEl.style.display = 'inline';
+                    fullEl.style.display = 'none';
+                    button.textContent = 'Развернуть';
+                } else {
+                    shortEl.style.display = 'none';
+                    fullEl.style.display = 'inline';
+                    button.textContent = 'Свернуть';
+                }
             }
         }
 

@@ -47,10 +47,11 @@ export class AnalyticsService {
       const today = new Date().toISOString().split('T')[0];
 
       // Подсчитываем статистику
+      // Выручка считается только из успешных платежей (status IN ('succeeded', 'success'))
       const stats = await client.query(`
         SELECT 
           COUNT(DISTINCT u.id) as users_count,
-          COALESCE(SUM(p.amount), 0) as total_payments_rub,
+          COALESCE(SUM(CASE WHEN p.status IN ('succeeded', 'success') THEN p.amount ELSE 0 END), 0) as total_payments_rub,
           COALESCE(SUM(CASE WHEN p.status = 'success' THEN p.amount * 7 ELSE 0 END), 0) as total_payments_stars,
           COUNT(CASE WHEN o.status = 'completed' THEN 1 END) as completed_orders
         FROM users u
