@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS campaign_stats (
 ALTER TABLE orders DROP COLUMN IF EXISTS price;
 ALTER TABLE orders DROP COLUMN IF EXISTS payment_id;
 
+-- Add support for merge mode (combining two images)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS second_file_path VARCHAR(500);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(50) DEFAULT 'single';
+
 -- Create trigger for campaign_stats
 CREATE TRIGGER update_campaign_stats_updated_at BEFORE UPDATE ON campaign_stats
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

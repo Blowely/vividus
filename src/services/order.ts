@@ -7,10 +7,27 @@ export class OrderService {
     
     try {
       const result = await client.query(
-        `INSERT INTO orders (user_id, original_file_path, status, custom_prompt) 
-         VALUES ($1, $2, $3, $4) 
+        `INSERT INTO orders (user_id, original_file_path, status, custom_prompt, order_type) 
+         VALUES ($1, $2, $3, $4, 'single') 
          RETURNING *`,
         [userId, filePath, OrderStatus.PAYMENT_REQUIRED, customPrompt]
+      );
+      
+      return result.rows[0];
+    } finally {
+      client.release();
+    }
+  }
+
+  async createMergeOrder(userId: number, firstFilePath: string, secondFilePath: string, customPrompt?: string): Promise<Order> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        `INSERT INTO orders (user_id, original_file_path, second_file_path, status, custom_prompt, order_type) 
+         VALUES ($1, $2, $3, $4, $5, 'merge') 
+         RETURNING *`,
+        [userId, firstFilePath, secondFilePath, OrderStatus.PAYMENT_REQUIRED, customPrompt]
       );
       
       return result.rows[0];

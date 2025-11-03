@@ -42,12 +42,24 @@ export class ProcessorService {
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
-      // Create video using RunwayML
-      const generationId = await this.runwayService.createVideoFromImage(
-        order.original_file_path,
-        orderId,
-        order.custom_prompt
-      );
+      // Create video using RunwayML - check if it's a merge order
+      let generationId: string;
+      if (order.order_type === 'merge' && order.second_file_path) {
+        // Merge order - use second image as reference for transition
+        generationId = await this.runwayService.createVideoFromTwoImages(
+          order.original_file_path,
+          order.second_file_path,
+          orderId,
+          order.custom_prompt
+        );
+      } else {
+        // Single image order
+        generationId = await this.runwayService.createVideoFromImage(
+          order.original_file_path,
+          orderId,
+          order.custom_prompt
+        );
+      }
 
       // Update order with generation ID
       await this.orderService.updateOrderResult(orderId, generationId);

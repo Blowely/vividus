@@ -58,6 +58,66 @@ export class RunwayService {
     return errorMessage;
   }
 
+  async createVideoFromTwoImages(firstImageUrl: string, secondImageUrl: string, orderId: string, customPrompt?: string): Promise<string> {
+    try {
+      console.log('🎬 Creating merge video with RunwayML API...');
+      console.log('First Image URL:', firstImageUrl);
+      console.log('Second Image URL:', secondImageUrl);
+      
+      // RunwayML не поддерживает напрямую два изображения, поэтому используем первое изображение
+      // с промптом, который описывает переход ко второму изображению
+      // В будущем можно использовать другой API (Pika Labs, Genmo и т.д.)
+      
+      const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
+      
+      // Используем первое изображение с модифицированным промптом
+      const response = await axios.post(`${this.baseUrl}/image_to_video`, {
+        promptImage: firstImageUrl,
+        seed: Math.floor(Math.random() * 1000000),
+        model: 'gen4_turbo',
+        promptText: mergePrompt,
+        duration: 3, // Увеличиваем длительность для merge видео
+        ratio: '960:960',
+        contentModeration: {
+          publicFigureThreshold: 'auto'
+        }
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'X-Runway-Version': '2024-11-06'
+        }
+      });
+
+      console.log('RunwayML merge response:', response.data);
+      const generationId = response.data.id || response.data.generationId;
+      
+      // Save job to database
+      await this.saveJob(orderId, generationId);
+      
+      // Immediately check status for debugging
+      console.log('🔍 Checking initial status for merge:', generationId);
+      try {
+        const status = await this.checkJobStatus(generationId);
+        console.log('Initial merge status:', status);
+      } catch (statusError) {
+        console.log('Status check failed, but merge generation was created');
+      }
+      
+      return generationId;
+    } catch (error: any) {
+      console.error('Error creating merge video:', error);
+      console.error('Error details:', error.response?.data);
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to create merge video';
+      const translatedError = this.translateRunwayError(errorMessage);
+      
+      const translatedErrorObj = new Error(translatedError);
+      (translatedErrorObj as any).originalError = errorMessage;
+      throw translatedErrorObj;
+    }
+  }
+
   async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string> {
     try {
       console.log('🎬 Creating video with RunwayML API...');

@@ -16,6 +16,8 @@ export interface Order {
   user_id: number;
   status: OrderStatus;
   original_file_path: string;
+  second_file_path?: string;
+  order_type?: 'single' | 'merge';
   did_job_id?: string;
   custom_prompt?: string;
   created_at: Date;

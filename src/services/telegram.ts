@@ -22,6 +22,7 @@ export class TelegramService {
   private analyticsService: AnalyticsService;
   private pendingPrompts: Map<number, string> = new Map(); // userId -> fileId
   private pendingPromptsData: Map<number, { fileId: string; prompt: string }> = new Map(); // userId -> {fileId, prompt}
+  private pendingMergeFirstPhoto: Map<number, string> = new Map(); // userId -> fileId (для режима объединения)
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
 
@@ -160,6 +161,9 @@ export class TelegramService {
     // Document handler (for other image formats)
     this.bot.on('document', this.handleDocument.bind(this));
     
+    // Media group handler (for multiple photos at once)
+    this.bot.on('media_group', this.handleMediaGroup.bind(this));
+    
     // Text handler for prompts
     this.bot.on('text', this.handleText.bind(this));
     
@@ -226,7 +230,7 @@ export class TelegramService {
     
     // Создаем reply клавиатуру (кнопки под полем ввода)
     const keyboard = [
-      [Markup.button.text('🎬 Оживить фото')],
+      [Markup.button.text('🎬 Оживить фото'), Markup.button.text('🔄 Объединить и оживить')],
       [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
     ];
 
@@ -283,6 +287,21 @@ export class TelegramService {
       // Get the highest quality photo
       const fileId = photo[photo.length - 1].file_id;
       
+      // Проверяем, находимся ли мы в режиме объединения
+      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+      if (firstPhotoId) {
+        if (firstPhotoId === 'MERGE_MODE_WAITING') {
+          // Это первое фото в режиме объединения
+          this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
+          await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
+          return;
+        } else {
+          // Это второе фото, обрабатываем объединение
+          await this.handleMergeSecondPhoto(ctx, user, fileId);
+          return;
+        }
+      }
+      
       // Проверяем наличие caption (текста, прикрепленного к фото)
       const caption = (ctx.message as any)['caption'];
       
@@ -325,6 +344,47 @@ export class TelegramService {
     }
   }
 
+  private async handleMediaGroup(ctx: Context) {
+    try {
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const messages = (ctx.update as any)['message'] ? [(ctx.update as any)['message']] : [];
+      
+      // Если это медиа-группа, получаем все сообщения из группы
+      // Telegram отправляет каждое фото отдельным сообщением, но с одинаковым media_group_id
+      const mediaGroupId = (ctx.message as any)['media_group_id'];
+      
+      if (!mediaGroupId) {
+        // Это не медиа-группа, обрабатываем как обычное фото
+        return;
+      }
+      
+      // Получаем все фото из медиа-группы
+      // Заметка: Telegram отправляет каждое фото отдельным событием, но мы можем обработать первое и второе
+      // Проще всего - обработать первое фото, сохранить его, и при получении второго - обработать оба
+      
+      const photo = (ctx.message as any)['photo'];
+      if (!photo || photo.length === 0) {
+        return;
+      }
+      
+      const fileId = photo[photo.length - 1].file_id;
+      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+      
+      if (!firstPhotoId) {
+        // Это первое фото из группы, сохраняем его
+        this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
+        await this.sendMessage(ctx, '📸 Первое фото получено! Ожидаю второе фото...');
+      } else {
+        // Это второе фото, обрабатываем объединение
+        await this.handleMergeSecondPhoto(ctx, user, fileId);
+      }
+      
+    } catch (error) {
+      console.error('Error handling media group:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке фото. Попробуйте позже.');
+    }
+  }
+
   private async handleDocument(ctx: Context) {
     const document = (ctx.message as any)['document'];
     const mimeType = document.mime_type;
@@ -333,6 +393,70 @@ export class TelegramService {
       await this.handlePhoto(ctx);
     } else {
       await this.sendMessage(ctx, '❌ Пожалуйста, отправьте изображение в формате JPG или PNG.');
+    }
+  }
+
+  private async handleMergeMode(ctx: Context): Promise<void> {
+    try {
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const message = `🔄 Режим объединения двух фото
+
+📸 Как это работает:
+1️⃣ Отправьте первое фото (или сразу два фото подряд в одном сообщении)
+2️⃣ Отправьте второе фото (если еще не отправили)
+3️⃣ Введите промпт для анимации (опционально)
+4️⃣ Получите видео с плавным переходом между фото!
+
+💡 Вы можете отправить оба фото сразу в одном сообщении (выделите оба фото при отправке).`;
+      
+      await this.sendMessage(ctx, message);
+      
+      // Сбрасываем состояние и устанавливаем флаг режима объединения
+      // Сохраняем специальный маркер, что мы в режиме merge
+      this.pendingMergeFirstPhoto.delete(user.telegram_id);
+      // Используем специальное значение для индикации режима merge без первого фото
+      this.pendingMergeFirstPhoto.set(user.telegram_id, 'MERGE_MODE_WAITING');
+      
+    } catch (error) {
+      console.error('Error handling merge mode:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка. Попробуйте позже.');
+    }
+  }
+
+  private async handleMergeSecondPhoto(ctx: Context, user: any, secondFileId: string): Promise<void> {
+    try {
+      const firstFileId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+      if (!firstFileId || firstFileId === 'MERGE_MODE_WAITING') {
+        // Если первое фото потеряно или еще не было получено, сохраняем текущее как первое
+        this.pendingMergeFirstPhoto.set(user.telegram_id, secondFileId);
+        await this.sendMessage(ctx, '📸 Первое фото сохранено! Теперь отправьте второе фото.');
+        return;
+      }
+
+      // Оба фото получены, убираем из ожидания
+      this.pendingMergeFirstPhoto.delete(user.telegram_id);
+
+      await this.sendMessage(ctx, '📸 Оба фото получены!\n\n✍️ Опишите, как вы хотите анимировать переход между фото.\n\nНапример: "плавный переход", "масштабирование", "вращение" и т.д.');
+      
+      // Сохраняем оба fileId в специальную структуру для merge заказа
+      this.pendingPromptsData.set(user.telegram_id, { 
+        fileId: firstFileId, 
+        prompt: `merge:${secondFileId}` // Используем специальный формат для merge
+      });
+      this.pendingPrompts.set(user.telegram_id, firstFileId);
+      
+      await this.sendMessage(ctx, '💡 Вы можете отправить промпт или нажать кнопку для базовой анимации.', {
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt_merge')],
+            this.getBackButton()
+          ]
+        }
+      });
+
+    } catch (error) {
+      console.error('Error handling merge second photo:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке второго фото. Попробуйте позже.');
     }
   }
 
@@ -464,6 +588,11 @@ export class TelegramService {
         return;
       }
       
+      if (text === '🔄 Объединить и оживить') {
+        await this.handleMergeMode(ctx);
+        return;
+      }
+      
       if (text === '✨ Купить генерации') {
         await this.handleBuyGenerations(ctx);
         return;
@@ -507,12 +636,124 @@ export class TelegramService {
         return;
       }
       
-      // Обрабатываем промпт
-      await this.processPrompt(ctx, user, text);
+      // Проверяем, является ли это промптом для объединения
+      const promptData = this.pendingPromptsData.get(user.telegram_id);
+      if (promptData && promptData.prompt.startsWith('merge:')) {
+        // Это промпт для объединяющего заказа
+        await this.processMergePrompt(ctx, user, text);
+      } else {
+        // Обычный промпт
+        await this.processPrompt(ctx, user, text);
+      }
       
     } catch (error) {
       console.error('Error handling text:', error);
       await this.sendMessage(ctx, '❌ Произошла ошибка при обработке промпта. Попробуйте позже.');
+    }
+  }
+
+  private async processMergePrompt(ctx: Context, user: any, promptText: string): Promise<void> {
+    try {
+      const promptData = this.pendingPromptsData.get(user.telegram_id);
+      if (!promptData || !promptData.prompt.startsWith('merge:')) {
+        await this.sendMessage(ctx, '❌ Фото для объединения не найдено. Начните заново!');
+        return;
+      }
+      
+      // Извлекаем fileId первого и второго фото
+      const firstFileId = promptData.fileId;
+      const secondFileId = promptData.prompt.replace('merge:', '');
+      
+      // Очищаем данные
+      this.pendingPromptsData.delete(user.telegram_id);
+      this.pendingPrompts.delete(user.telegram_id);
+      
+      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
+      
+      // Загружаем оба фото в S3
+      const firstS3Url = await this.fileService.downloadTelegramFileToS3(firstFileId);
+      const secondS3Url = await this.fileService.downloadTelegramFileToS3(secondFileId);
+      
+      // Обрабатываем промпт
+      let processedPrompt = promptText.toLowerCase().trim();
+      const originalPrompt = promptText;
+      
+      if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
+        processedPrompt = 'animate transition between two images with smooth morphing and movement';
+      } else {
+        let translatedPrompt = this.translatePrompt(processedPrompt);
+        translatedPrompt = translatedPrompt.replace(/^animate transition between two images with\s*/i, '');
+        processedPrompt = `animate transition between two images with ${translatedPrompt}`;
+      }
+      
+      // Проверяем баланс генераций
+      const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
+      
+      if (userGenerations >= 1) {
+        // Создаем merge заказ
+        const order = await this.orderService.createMergeOrder(user.id, firstS3Url, secondS3Url, processedPrompt);
+        await this.orderService.updateOrderStatus(order.id, 'processing' as any);
+        
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю обработку ваших фото...\n\n⏳ Это займет 2-5 минут.`);
+        
+        // Запускаем обработку заказа
+        const { ProcessorService } = await import('./processor');
+        const processorService = new ProcessorService();
+        await processorService.processOrder(order.id);
+      } else {
+        // У пользователя нет генераций - предлагаем купить
+        // Сохраняем данные для повторной обработки после покупки
+        this.pendingPromptsData.set(user.telegram_id, {
+          fileId: firstFileId,
+          prompt: `merge:${secondFileId}:${originalPrompt || 'пропустить'}`
+        });
+        this.pendingPrompts.set(user.telegram_id, firstFileId);
+        
+        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+
+📸 Ваши фото сохранены и готовы к обработке
+🎬 Промпт: "${originalPrompt ? originalPrompt : 'стандартная анимация'}"
+
+Выберите способ оплаты:`;
+        
+        // Пакеты генераций (те же, что и для обычного заказа)
+        const packages = [
+          { count: 1, originalPrice: 105 },
+          { count: 3, originalPrice: 315 },
+          { count: 5, originalPrice: 525 },
+          { count: 10, originalPrice: 950 }
+        ];
+        
+        const keyboard = packages.map(pkg => {
+          const discountedPrice = Math.round(pkg.originalPrice * 0.67);
+          const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          return [
+            Markup.button.callback(
+              buttonText,
+              `buy_and_process_merge_${pkg.count}_${discountedPrice}`
+            )
+          ];
+        });
+        
+        keyboard.push([
+          Markup.button.callback(
+            `1 ₽ → 7 ${this.getGenerationWord(7)} (тест)`,
+            `buy_and_process_merge_7_1`
+          )
+        ]);
+        
+        keyboard.push(this.getBackButton());
+        
+        await this.sendMessage(ctx, noGenerationsMessage, {
+          reply_markup: {
+            inline_keyboard: keyboard
+          }
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error processing merge prompt:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке промпта для объединения. Попробуйте позже.');
     }
   }
 
@@ -593,6 +834,10 @@ export class TelegramService {
       case 'skip_prompt':
         const user = await this.userService.getOrCreateUser(ctx.from!);
         await this.processPrompt(ctx, user, 'пропустить');
+        break;
+      case 'skip_prompt_merge':
+        const userMerge = await this.userService.getOrCreateUser(ctx.from!);
+        await this.processMergePrompt(ctx, userMerge, 'пропустить');
         break;
       case 'back_to_menu':
         // Удаляем inline клавиатуру и показываем главное меню с reply клавиатурой
