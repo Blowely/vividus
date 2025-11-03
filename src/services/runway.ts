@@ -24,10 +24,10 @@ export class RunwayService {
   private getModelParams(model: string): { ratio: string; duration: number } {
     // Модели VEO требуют другие форматы
     if (model.startsWith('veo')) {
-      // Для VEO моделей используем поддерживаемые форматы
+      // Для VEO моделей используем поддерживаемые форматы и duration: 8
       return {
         ratio: '1280:720', // Горизонтальный формат для VEO
-        duration: 5 // VEO поддерживает больше секунд
+        duration: 8 // VEO требует duration: 8
       };
     }
     

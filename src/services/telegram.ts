@@ -480,9 +480,6 @@ export class TelegramService {
       // Remove from pending prompts
       this.pendingPrompts.delete(user.telegram_id);
       
-      // Отправляем сообщение о загрузке (замена только для загрузки)
-      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
-      
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
       // Process the prompt
@@ -676,8 +673,6 @@ export class TelegramService {
       // Очищаем данные
       this.pendingPromptsData.delete(user.telegram_id);
       this.pendingPrompts.delete(user.telegram_id);
-      
-      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
       
       // Загружаем оба фото в S3
       const firstS3Url = await this.fileService.downloadTelegramFileToS3(firstFileId);
@@ -1507,7 +1502,6 @@ ${packageListText}
       // Получаем промпт (если был сохранен)
       const promptText = 'animate this image with subtle movements and breathing effect'; // Можно сохранять промпт отдельно
       
-      await this.sendMessage(ctx, '📤 Загружаю фото в облако...');
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
       // Создаем заказ с оплатой
