@@ -62,6 +62,8 @@ export class ProcessorService {
           );
         }
 
+        console.log(`📊 Получено ${generationIds.length} generation IDs для заказа ${orderId}:`, generationIds);
+
         if (generationIds.length === 0) {
           throw new Error('Не удалось создать ни одной генерации');
         }
@@ -69,6 +71,7 @@ export class ProcessorService {
         // Update order with first generation ID (для обратной совместимости)
         await this.orderService.updateOrderResult(orderId, generationIds[0]);
 
+        console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
         // Start monitoring all jobs
         this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
       } catch (error: any) {
@@ -111,6 +114,7 @@ export class ProcessorService {
   }
 
   private async monitorMultipleJobs(generationIds: string[], telegramId: number, orderId: string): Promise<void> {
+    console.log(`🔍 Мониторинг ${generationIds.length} джобов для заказа ${orderId}:`, generationIds);
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     const jobStatuses: Map<string, { status?: string; videoUrl?: string; error?: string }> = new Map();
     let attempts = 0;

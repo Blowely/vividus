@@ -12,7 +12,7 @@ export class RunwayService {
   private s3Service: S3Service;
   
   // Доступные модели для image_to_video в Runway
-  private readonly availableModels: string[] = ['gen3_turbo', 'gen4_turbo', 'gen4'];
+  private readonly availableModels: string[] = ['gen4_turbo', 'veo3.1', 'veo3.1_fast', 'veo3'];
 
   constructor() {
     this.apiKey = process.env.RUNWAY_API_KEY!;
@@ -125,17 +125,28 @@ export class RunwayService {
   async createMultipleVideosFromTwoImages(firstImageUrl: string, secondImageUrl: string, orderId: string, customPrompt?: string): Promise<string[]> {
     const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
     
-    // Запускаем генерации параллельно для всех доступных моделей
-    const promises = this.availableModels.map(model => 
-      this.createVideoFromTwoImages(firstImageUrl, secondImageUrl, orderId, mergePrompt, model)
-        .catch(error => {
-          console.error(`Error creating video with model ${model}:`, error);
-          return null; // Возвращаем null при ошибке, чтобы не прерывать другие генерации
-        })
-    );
+    console.log(`🚀 Запускаю генерации для ${this.availableModels.length} моделей: ${this.availableModels.join(', ')}`);
     
-    const generationIds = await Promise.all(promises);
-    return generationIds.filter(id => id !== null) as string[];
+    // Запускаем генерации параллельно для всех доступных моделей
+    const promises = this.availableModels.map(async (model) => {
+      try {
+        console.log(`🎬 Создаю merge видео с моделью ${model}...`);
+        const generationId = await this.createVideoFromTwoImages(firstImageUrl, secondImageUrl, orderId, mergePrompt, model);
+        console.log(`✅ Успешно создана генерация ${generationId} для модели ${model}`);
+        return { model, generationId };
+      } catch (error: any) {
+        console.error(`❌ Ошибка при создании merge видео с моделью ${model}:`, error?.message || error);
+        return { model, generationId: null };
+      }
+    });
+    
+    const results = await Promise.all(promises);
+    const generationIds = results.filter(r => r.generationId !== null).map(r => r.generationId as string);
+    
+    console.log(`📊 Создано ${generationIds.length} из ${this.availableModels.length} генераций`);
+    console.log(`📋 Список ID генераций:`, generationIds);
+    
+    return generationIds;
   }
 
   async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string, model?: string): Promise<string> {
@@ -198,17 +209,28 @@ export class RunwayService {
   async createMultipleVideosFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string[]> {
     const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
     
-    // Запускаем генерации параллельно для всех доступных моделей
-    const promises = this.availableModels.map(model => 
-      this.createVideoFromImage(imageUrl, orderId, prompt, model)
-        .catch(error => {
-          console.error(`Error creating video with model ${model}:`, error);
-          return null; // Возвращаем null при ошибке, чтобы не прерывать другие генерации
-        })
-    );
+    console.log(`🚀 Запускаю генерации для ${this.availableModels.length} моделей: ${this.availableModels.join(', ')}`);
     
-    const generationIds = await Promise.all(promises);
-    return generationIds.filter(id => id !== null) as string[];
+    // Запускаем генерации параллельно для всех доступных моделей
+    const promises = this.availableModels.map(async (model) => {
+      try {
+        console.log(`🎬 Создаю видео с моделью ${model}...`);
+        const generationId = await this.createVideoFromImage(imageUrl, orderId, prompt, model);
+        console.log(`✅ Успешно создана генерация ${generationId} для модели ${model}`);
+        return { model, generationId };
+      } catch (error: any) {
+        console.error(`❌ Ошибка при создании видео с моделью ${model}:`, error?.message || error);
+        return { model, generationId: null };
+      }
+    });
+    
+    const results = await Promise.all(promises);
+    const generationIds = results.filter(r => r.generationId !== null).map(r => r.generationId as string);
+    
+    console.log(`📊 Создано ${generationIds.length} из ${this.availableModels.length} генераций`);
+    console.log(`📋 Список ID генераций:`, generationIds);
+    
+    return generationIds;
   }
 
   private async uploadImage(imagePath: string): Promise<string> {
