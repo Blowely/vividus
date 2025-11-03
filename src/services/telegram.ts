@@ -452,7 +452,7 @@ export class TelegramService {
         fileId: firstPhotoId, 
         prompt: `merge:${secondFileId}` // Используем специальный формат для merge
       });
-      this.pendingPrompts.set(user.telegram_id, firstFileId);
+      this.pendingPrompts.set(user.telegram_id, firstPhotoId);
       
       await this.sendMessage(ctx, '💡 Вы можете отправить промпт или нажать кнопку для базовой анимации.', {
         reply_markup: {
