@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import mime from 'mime-types';
 import { config } from 'dotenv';
+import sharp from 'sharp';
 import { S3Service } from './s3';
 
 config();
@@ -92,6 +93,84 @@ export class FileService {
     }
   }
 
+  // Обрабатывает изображение для соответствия требованиям Runway API
+  // Соотношение сторон должно быть от 0.5 до 2
+  private async processImageForRunway(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      const metadata = await sharp(imageBuffer).metadata();
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Unable to read image dimensions');
+      }
+
+      const aspectRatio = metadata.width / metadata.height;
+      const minAspectRatio = 0.5;
+      const maxAspectRatio = 2.0;
+
+      // Если соотношение сторон в допустимом диапазоне, возвращаем исходное изображение
+      if (aspectRatio >= minAspectRatio && aspectRatio <= maxAspectRatio) {
+        return imageBuffer;
+      }
+
+      console.log(`📐 Изображение имеет соотношение сторон ${aspectRatio.toFixed(3)}, требуется от 0.5 до 2. Обрабатываю...`);
+
+      let newWidth = metadata.width;
+      let newHeight = metadata.height;
+
+      // Если соотношение слишком узкое (вертикальное) - обрезаем по высоте
+      if (aspectRatio < minAspectRatio) {
+        // Ограничиваем высоту так, чтобы соотношение было >= 0.5
+        newHeight = Math.round(metadata.width / minAspectRatio);
+      }
+      // Если соотношение слишком широкое (горизонтальное) - обрезаем по ширине
+      else if (aspectRatio > maxAspectRatio) {
+        // Ограничиваем ширину так, чтобы соотношение было <= 2.0
+        newWidth = Math.round(metadata.height * maxAspectRatio);
+      }
+
+      // Центрируем обрезку
+      const left = Math.round((metadata.width - newWidth) / 2);
+      const top = Math.round((metadata.height - newHeight) / 2);
+
+      // Обрабатываем изображение: обрезаем и меняем размер до максимум 2048px по большей стороне
+      const maxDimension = 2048;
+      let finalWidth = newWidth;
+      let finalHeight = newHeight;
+
+      if (finalWidth > maxDimension || finalHeight > maxDimension) {
+        if (finalWidth > finalHeight) {
+          finalWidth = maxDimension;
+          finalHeight = Math.round((finalHeight / newWidth) * maxDimension);
+        } else {
+          finalHeight = maxDimension;
+          finalWidth = Math.round((finalWidth / newHeight) * maxDimension);
+        }
+      }
+
+      const processedBuffer = await sharp(imageBuffer)
+        .extract({
+          left: Math.max(0, left),
+          top: Math.max(0, top),
+          width: newWidth,
+          height: newHeight
+        })
+        .resize(finalWidth, finalHeight, {
+          fit: 'contain',
+          withoutEnlargement: true
+        })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      const finalAspectRatio = (finalWidth / finalHeight);
+      console.log(`✅ Изображение обработано: ${finalWidth}x${finalHeight}, соотношение ${finalAspectRatio.toFixed(3)}`);
+
+      return processedBuffer;
+    } catch (error) {
+      console.error('Error processing image:', error);
+      // Если обработка не удалась, возвращаем исходное изображение
+      return imageBuffer;
+    }
+  }
+
   async downloadTelegramFileToS3(fileId: string): Promise<string> {
     try {
       // Get file info from Telegram
@@ -107,7 +186,7 @@ export class FileService {
       
       // Generate unique filename
       const timestamp = Date.now();
-      const extension = path.extname(filePath);
+      const extension = '.jpg'; // Всегда сохраняем как JPEG после обработки
       const filename = `${timestamp}_${fileId}${extension}`;
       
       // Download file directly to memory
@@ -121,10 +200,13 @@ export class FileService {
       }
       
       // Convert to Buffer
-      const buffer = Buffer.from(response.data);
+      let buffer = Buffer.from(response.data);
       
-      // Determine content type
-      const contentType = mime.lookup(filePath) || 'image/jpeg';
+      // Обрабатываем изображение для соответствия требованиям Runway API
+      buffer = await this.processImageForRunway(buffer);
+      
+      // Determine content type (всегда JPEG после обработки)
+      const contentType = 'image/jpeg';
       
       // Upload to S3 directly from memory
       const s3Url = await this.s3Service.uploadFile(buffer, filename, contentType);
