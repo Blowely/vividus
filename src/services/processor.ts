@@ -14,6 +14,7 @@ export class ProcessorService {
   private fileService: FileService;
   private userService: UserService;
   private bot: Telegraf;
+  private readonly MAX_CONCURRENT_ORDERS: number;
 
   constructor() {
     this.runwayService = new RunwayService();
@@ -21,6 +22,8 @@ export class ProcessorService {
     this.fileService = new FileService();
     this.userService = new UserService();
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
+    // Максимальное количество одновременно обрабатываемых заказов
+    this.MAX_CONCURRENT_ORDERS = parseInt(process.env.MAX_CONCURRENT_ORDERS || '10', 10);
   }
 
   async processOrder(orderId: string): Promise<void> {
@@ -37,6 +40,23 @@ export class ProcessorService {
       const user = await this.userService.getUserById(order.user_id);
       if (!user) {
         throw new Error('User not found');
+      }
+
+      // Проверяем количество активных заказов в обработке
+      const activeOrders = await this.orderService.getOrdersByStatus('processing' as any);
+      const activeOrdersCount = activeOrders.length;
+
+      if (activeOrdersCount >= this.MAX_CONCURRENT_ORDERS) {
+        // Очередь полная - ставим заказ в очередь
+        console.log(`⏸ Очередь полная (${activeOrdersCount}/${this.MAX_CONCURRENT_ORDERS}), ставим заказ ${orderId} в очередь`);
+        await this.orderService.updateOrderStatus(orderId, 'throttled' as any);
+        
+        // Уведомляем пользователя о постановке в очередь
+        await this.notifyUser(
+          user.telegram_id,
+          `⏸ Ваш заказ поставлен в очередь.\n\n📊 Сейчас обрабатывается: ${activeOrdersCount} заказов\n\n⏳ Мы начнем обработку вашего заказа, как только освободится место. Вы получите уведомление.`
+        );
+        return;
       }
 
       // Update order status to processing
@@ -120,6 +140,7 @@ export class ProcessorService {
     let attempts = 0;
     let progressMessageId: number | null = null;
     let hasNotifiedUser = false;
+    let lastProgressPercent: number | null = null;
 
     const checkStatus = async () => {
       try {
@@ -197,27 +218,32 @@ export class ProcessorService {
         } else if (!allFinished && attempts < maxAttempts) {
           // Обновляем прогресс
           const avgProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
-          const progressBar = this.createProgressBar(avgProgress);
-          const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${avgProgress}%`;
+          
+          // Обновляем сообщение только если процент изменился
+          if (lastProgressPercent !== avgProgress) {
+            lastProgressPercent = avgProgress;
+            const progressBar = this.createProgressBar(avgProgress);
+            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${avgProgress}%`;
 
-          if (progressMessageId) {
-            try {
-              await this.bot.telegram.editMessageText(
-                telegramId,
-                progressMessageId,
-                undefined,
-                progressMessage
-              );
-            } catch (error) {
+            if (progressMessageId) {
+              try {
+                await this.bot.telegram.editMessageText(
+                  telegramId,
+                  progressMessageId,
+                  undefined,
+                  progressMessage
+                );
+              } catch (error) {
+                const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+                if (message && 'message_id' in message) {
+                  progressMessageId = (message as any).message_id;
+                }
+              }
+            } else {
               const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
               if (message && 'message_id' in message) {
                 progressMessageId = (message as any).message_id;
               }
-            }
-          } else {
-            const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
-            if (message && 'message_id' in message) {
-              progressMessageId = (message as any).message_id;
             }
           }
 
@@ -273,6 +299,7 @@ export class ProcessorService {
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     let attempts = 0;
     let progressMessageId: number | null = null; // Сохраняем ID сообщения для редактирования
+    let lastProgressPercent: number | null = null;
 
     const checkStatus = async () => {
       try {
@@ -300,30 +327,35 @@ export class ProcessorService {
           // Still processing, update progress message
           if (jobStatus.progress !== undefined) {
             const progressPercent = Math.round(jobStatus.progress * 100);
-            const progressBar = this.createProgressBar(progressPercent);
-            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${progressPercent}%`;
             
-            if (progressMessageId) {
-              // Редактируем существующее сообщение
-              try {
-                await this.bot.telegram.editMessageText(
-                  telegramId,
-                  progressMessageId,
-                  undefined,
-                  progressMessage
-                );
-              } catch (error) {
-                // Если не можем отредактировать (например, сообщение удалено), создаем новое
+            // Обновляем сообщение только если процент изменился
+            if (lastProgressPercent !== progressPercent) {
+              lastProgressPercent = progressPercent;
+              const progressBar = this.createProgressBar(progressPercent);
+              const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${progressPercent}%`;
+              
+              if (progressMessageId) {
+                // Редактируем существующее сообщение
+                try {
+                  await this.bot.telegram.editMessageText(
+                    telegramId,
+                    progressMessageId,
+                    undefined,
+                    progressMessage
+                  );
+                } catch (error) {
+                  // Если не можем отредактировать (например, сообщение удалено), создаем новое
+                  const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+                  if (message && 'message_id' in message) {
+                    progressMessageId = (message as any).message_id;
+                  }
+                }
+              } else {
+                // Создаем первое сообщение о прогрессе
                 const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
                 if (message && 'message_id' in message) {
                   progressMessageId = (message as any).message_id;
                 }
-              }
-            } else {
-              // Создаем первое сообщение о прогрессе
-              const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
-              if (message && 'message_id' in message) {
-                progressMessageId = (message as any).message_id;
               }
             }
           }
@@ -688,6 +720,46 @@ export class ProcessorService {
       }
     } catch (error) {
       console.error('Error processing pending orders:', error);
+    }
+  }
+
+  async processThrottledOrders(): Promise<void> {
+    try {
+      // Проверяем количество активных заказов
+      const activeOrders = await this.orderService.getOrdersByStatus('processing' as any);
+      const activeOrdersCount = activeOrders.length;
+
+      // Если есть свободное место, обрабатываем заказы из очереди
+      if (activeOrdersCount < this.MAX_CONCURRENT_ORDERS) {
+        const availableSlots = this.MAX_CONCURRENT_ORDERS - activeOrdersCount;
+        
+        // Получаем заказы из очереди, отсортированные по дате создания (FIFO)
+        const throttledOrders = await this.orderService.getOrdersByStatus('throttled' as any);
+        const ordersToProcess = throttledOrders.slice(0, availableSlots);
+
+        console.log(`🔄 Обрабатываю ${ordersToProcess.length} заказов из очереди (свободно мест: ${availableSlots})`);
+
+        for (const order of ordersToProcess) {
+          const user = await this.userService.getUserById(order.user_id);
+          if (user) {
+            // Уведомляем пользователя, что обработка началась
+            await this.notifyUser(
+              user.telegram_id,
+              `✅ Ваш заказ начал обрабатываться!\n\n🎬 Генерация видео началась.`
+            );
+          }
+          
+          // Запускаем обработку заказа
+          // Используем setTimeout чтобы не блокировать основной поток
+          setTimeout(() => {
+            this.processOrder(order.id).catch(error => {
+              console.error(`Error processing throttled order ${order.id}:`, error);
+            });
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      console.error('Error processing throttled orders:', error);
     }
   }
 }
