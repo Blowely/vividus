@@ -20,6 +20,24 @@ export class RunwayService {
     this.s3Service = new S3Service();
   }
 
+  // Получаем параметры для конкретной модели
+  private getModelParams(model: string): { ratio: string; duration: number } {
+    // Модели VEO требуют другие форматы
+    if (model.startsWith('veo')) {
+      // Для VEO моделей используем поддерживаемые форматы
+      return {
+        ratio: '1280:720', // Горизонтальный формат для VEO
+        duration: 5 // VEO поддерживает больше секунд
+      };
+    }
+    
+    // Для gen4_turbo используем квадратный формат
+    return {
+      ratio: '960:960',
+      duration: 2
+    };
+  }
+
   private translateRunwayError(errorMessage: string | undefined | null): string {
     // Если ошибка не передана, возвращаем общее сообщение
     if (!errorMessage || typeof errorMessage !== 'string') {
@@ -73,6 +91,7 @@ export class RunwayService {
       
       const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
       const selectedModel = model || 'gen4_turbo';
+      const modelParams = this.getModelParams(selectedModel);
       
       // Используем первое изображение с модифицированным промптом
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
@@ -80,8 +99,8 @@ export class RunwayService {
         seed: Math.floor(Math.random() * 1000000),
         model: selectedModel,
         promptText: mergePrompt,
-        duration: 3, // Увеличиваем длительность для merge видео
-        ratio: '960:960',
+        duration: modelParams.duration,
+        ratio: modelParams.ratio,
         contentModeration: {
           publicFigureThreshold: 'auto'
         }
@@ -155,6 +174,7 @@ export class RunwayService {
       console.log('Image URL:', imageUrl);
       
       const selectedModel = model || 'gen4_turbo';
+      const modelParams = this.getModelParams(selectedModel);
       
       // Create video generation request using playground API
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
@@ -162,8 +182,8 @@ export class RunwayService {
         seed: Math.floor(Math.random() * 1000000),
         model: selectedModel,
         promptText: customPrompt || 'animate this image with subtle movements and breathing effect',
-        duration: 2,
-        ratio: '960:960',
+        duration: modelParams.duration,
+        ratio: modelParams.ratio,
         contentModeration: {
           publicFigureThreshold: 'auto'
         }
