@@ -42,30 +42,46 @@ export class ProcessorService {
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
-      // Create video using RunwayML - check if it's a merge order
-      let generationId: string;
-      if (order.order_type === 'merge' && order.second_file_path) {
-        // Merge order - use second image as reference for transition
-        generationId = await this.runwayService.createVideoFromTwoImages(
-          order.original_file_path,
-          order.second_file_path,
-          orderId,
-          order.custom_prompt
-        );
-      } else {
-        // Single image order
-        generationId = await this.runwayService.createVideoFromImage(
-          order.original_file_path,
-          orderId,
-          order.custom_prompt
-        );
+      // Create videos using RunwayML with all available models - check if it's a merge order
+      let generationIds: string[];
+      try {
+        if (order.order_type === 'merge' && order.second_file_path) {
+          // Merge order - use second image as reference for transition
+          generationIds = await this.runwayService.createMultipleVideosFromTwoImages(
+            order.original_file_path,
+            order.second_file_path,
+            orderId,
+            order.custom_prompt
+          );
+        } else {
+          // Single image order - создаем генерации для всех доступных моделей
+          generationIds = await this.runwayService.createMultipleVideosFromImage(
+            order.original_file_path,
+            orderId,
+            order.custom_prompt
+          );
+        }
+
+        if (generationIds.length === 0) {
+          throw new Error('Не удалось создать ни одной генерации');
+        }
+
+        // Update order with first generation ID (для обратной совместимости)
+        await this.orderService.updateOrderResult(orderId, generationIds[0]);
+
+        // Start monitoring all jobs
+        this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+      } catch (error: any) {
+        // Если хотя бы одна генерация создана, продолжаем мониторинг
+        const jobs = await this.runwayService.getJobsByOrderId(orderId);
+        if (jobs.length > 0) {
+          generationIds = jobs.map(job => job.did_job_id);
+          await this.orderService.updateOrderResult(orderId, generationIds[0]);
+          this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+        } else {
+          throw error; // Если не создано ни одной генерации, пробрасываем ошибку
+        }
       }
-
-      // Update order with generation ID
-      await this.orderService.updateOrderResult(orderId, generationId);
-
-      // Start monitoring the job
-      this.monitorJob(generationId, user.telegram_id, orderId);
 
     } catch (error: any) {
       console.error(`Error processing order ${orderId}:`, error);
@@ -92,6 +108,161 @@ export class ProcessorService {
         }
       }
     }
+  }
+
+  private async monitorMultipleJobs(generationIds: string[], telegramId: number, orderId: string): Promise<void> {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    const jobStatuses: Map<string, { status?: string; videoUrl?: string; error?: string }> = new Map();
+    let attempts = 0;
+    let progressMessageId: number | null = null;
+    let hasNotifiedUser = false;
+
+    const checkStatus = async () => {
+      try {
+        attempts++;
+
+        // Проверяем статус всех джобов
+        const statusPromises = generationIds.map(async (generationId) => {
+          try {
+            const jobStatus = await this.runwayService.checkJobStatus(generationId);
+            return { generationId, jobStatus };
+          } catch (error) {
+            console.error(`Error checking status for ${generationId}:`, error);
+            return { generationId, jobStatus: null };
+          }
+        });
+
+        const statusResults = await Promise.all(statusPromises);
+
+        let completedCount = 0;
+        let failedCount = 0;
+        let processingCount = 0;
+        let totalProgress = 0;
+
+        for (const { generationId, jobStatus } of statusResults) {
+          if (!jobStatus) continue;
+
+          const status = jobStatus.status;
+          jobStatuses.set(generationId, {
+            status,
+            videoUrl: status === 'SUCCEEDED' ? jobStatus.output?.[0] : undefined,
+            error: status === 'FAILED' ? (jobStatus.failure || jobStatus.error || 'Job failed') : undefined
+          });
+
+          if (status === 'SUCCEEDED') {
+            completedCount++;
+            // Обновляем статус джоба в БД
+            await this.runwayService.updateJobStatus(generationId, 'completed' as any, jobStatus.output?.[0]);
+          } else if (status === 'FAILED') {
+            failedCount++;
+            let errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+            if ((jobStatus as any).failureCode) {
+              errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
+            }
+            await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+          } else {
+            processingCount++;
+            if (jobStatus.progress !== undefined) {
+              totalProgress += jobStatus.progress;
+            }
+          }
+        }
+
+        // Проверяем, завершены ли все джобы (успешно или с ошибкой)
+        const allFinished = completedCount + failedCount === generationIds.length;
+
+        if (allFinished && !hasNotifiedUser) {
+          hasNotifiedUser = true;
+          
+          // Собираем все успешные результаты
+          const successfulVideos: Array<{ url: string; model?: string }> = [];
+          for (const generationId of generationIds) {
+            const jobInfo = jobStatuses.get(generationId);
+            if (jobInfo?.videoUrl) {
+              const job = await this.runwayService.getJobByGenerationId(generationId);
+              successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
+            }
+          }
+
+          if (successfulVideos.length > 0) {
+            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+          } else {
+            // Все джобы провалились
+            await this.handleAllJobsFailed(telegramId, orderId);
+          }
+        } else if (!allFinished && attempts < maxAttempts) {
+          // Обновляем прогресс
+          const avgProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
+          const progressBar = this.createProgressBar(avgProgress);
+          const progressMessage = `🔄 Обработка ${generationIds.length} видео...\n\n${progressBar} ${avgProgress}%\n\nГотово: ${completedCount}/${generationIds.length}`;
+
+          if (progressMessageId) {
+            try {
+              await this.bot.telegram.editMessageText(
+                telegramId,
+                progressMessageId,
+                undefined,
+                progressMessage
+              );
+            } catch (error) {
+              const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+              if (message && 'message_id' in message) {
+                progressMessageId = (message as any).message_id;
+              }
+            }
+          } else {
+            const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+            if (message && 'message_id' in message) {
+              progressMessageId = (message as any).message_id;
+            }
+          }
+
+          setTimeout(checkStatus, 5000);
+        } else if (attempts >= maxAttempts && !hasNotifiedUser) {
+          hasNotifiedUser = true;
+          // Таймаут - отправляем то, что готово
+          const successfulVideos: Array<{ url: string; model?: string }> = [];
+          for (const generationId of generationIds) {
+            const jobInfo = jobStatuses.get(generationId);
+            if (jobInfo?.videoUrl) {
+              const job = await this.runwayService.getJobByGenerationId(generationId);
+              successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
+            }
+          }
+
+          if (successfulVideos.length > 0) {
+            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+          } else {
+            await this.handleJobTimeout(generationIds[0], telegramId, orderId);
+          }
+        }
+      } catch (error) {
+        console.error(`Error monitoring multiple jobs for order ${orderId}:`, error);
+        
+        if (attempts >= maxAttempts && !hasNotifiedUser) {
+          hasNotifiedUser = true;
+          const successfulVideos: Array<{ url: string; model?: string }> = [];
+          for (const generationId of generationIds) {
+            const jobInfo = jobStatuses.get(generationId);
+            if (jobInfo?.videoUrl) {
+              const job = await this.runwayService.getJobByGenerationId(generationId);
+              successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
+            }
+          }
+
+          if (successfulVideos.length > 0) {
+            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+          } else {
+            await this.handleAllJobsFailed(telegramId, orderId);
+          }
+        } else if (!hasNotifiedUser) {
+          setTimeout(checkStatus, 5000);
+        }
+      }
+    };
+
+    // Start monitoring
+    setTimeout(checkStatus, 5000);
   }
 
   private async monitorJob(generationId: string, telegramId: number, orderId: string): Promise<void> {
@@ -169,6 +340,80 @@ export class ProcessorService {
 
     // Start monitoring
     setTimeout(checkStatus, 5000);
+  }
+
+  private async handleMultipleJobsSuccess(generationIds: string[], telegramId: number, orderId: string, videos: Array<{ url: string; model?: string }>): Promise<void> {
+    try {
+      // Получаем заказ для проверки способа оплаты
+      const order = await this.orderService.getOrder(orderId);
+      
+      // Update order status
+      await this.orderService.updateOrderStatus(orderId, 'completed' as any);
+
+      // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
+      // Списываем генерации только после успешной генерации
+      if (order) {
+        const hasPayment = await this.orderService.hasPayment(order.id);
+        if (!hasPayment) {
+          await this.userService.deductGenerations(telegramId, 1);
+        }
+      }
+
+      // Update campaign statistics
+      try {
+        const { AnalyticsService } = await import('./analytics');
+        const analyticsService = new AnalyticsService();
+        
+        // Get user's start_param to update campaign stats
+        const client = await pool.connect();
+        try {
+          const result = await client.query(`
+            SELECT u.start_param 
+            FROM orders o
+            JOIN users u ON o.user_id = u.id
+            WHERE o.id = $1 AND u.start_param IS NOT NULL
+          `, [orderId]);
+          
+          if (result.rows[0]?.start_param) {
+            await analyticsService.updateCampaignStats(result.rows[0].start_param);
+          }
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Error updating campaign stats:', error);
+      }
+
+      // Notify user
+      await this.notifyUser(telegramId, `✅ Готово ${videos.length} варианта(ов) видео! Отправляю...`);
+      
+      // Send all videos to user
+      await this.sendMultipleVideosToUser(telegramId, videos);
+
+    } catch (error) {
+      console.error(`Error handling multiple jobs success for order ${orderId}:`, error);
+      await this.handleAllJobsFailed(telegramId, orderId);
+    }
+  }
+
+  private async handleAllJobsFailed(telegramId: number, orderId: string): Promise<void> {
+    try {
+      const order = await this.orderService.getOrder(orderId);
+      if (!order) return;
+
+      await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+
+      const hasPayment = await this.orderService.hasPayment(orderId);
+      if (!hasPayment) {
+        await this.userService.returnGenerations(telegramId, 1);
+        const newBalance = await this.userService.getUserGenerations(telegramId);
+        await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+      }
+
+      await this.notifyUser(telegramId, '❌ Не удалось создать видео. Попробуйте другое изображение.');
+    } catch (error) {
+      console.error(`Error handling all jobs failed for order ${orderId}:`, error);
+    }
   }
 
   private async handleJobSuccess(generationId: string, telegramId: number, orderId: string, videoUrl: string): Promise<void> {
@@ -333,6 +578,42 @@ export class ProcessorService {
       await this.bot.telegram.sendMessage(telegramId, message);
     } catch (error) {
       console.error(`Error notifying user ${telegramId}:`, error);
+    }
+  }
+
+  private async sendMultipleVideosToUser(telegramId: number, videos: Array<{ url: string; model?: string }>): Promise<void> {
+    try {
+      // Формируем сообщение со всеми вариантами
+      let message = `🎬 Готово ${videos.length} варианта(ов) видео от разных нейросетей:\n\n`;
+      
+      videos.forEach((video, index) => {
+        const modelName = video.model || `Вариант ${index + 1}`;
+        message += `${index + 1}. ${modelName}: <a href="${video.url}">Скачать</a>\n`;
+      });
+      
+      message += '\nСпасибо за использование Vividus Bot!';
+      
+      await this.bot.telegram.sendMessage(
+        telegramId,
+        message,
+        { parse_mode: 'HTML' }
+      );
+
+      // Сообщение о возможности отправить следующее фото (через 2 секунды)
+      setTimeout(async () => {
+        try {
+          await this.bot.telegram.sendMessage(
+            telegramId,
+            '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
+          );
+        } catch (error) {
+          console.error(`Error sending next photo message to user ${telegramId}:`, error);
+        }
+      }, 2000);
+
+    } catch (error) {
+      console.error(`Error sending videos to user ${telegramId}:`, error);
+      await this.notifyUser(telegramId, '❌ Ошибка при отправке видео. Попробуйте позже.');
     }
   }
 

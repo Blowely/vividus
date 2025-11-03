@@ -292,3 +292,6 @@ DROP TRIGGER IF EXISTS log_campaign_stats_activity ON campaign_stats;
 CREATE TRIGGER log_campaign_stats_activity
     AFTER INSERT OR UPDATE OR DELETE ON campaign_stats
     FOR EACH ROW EXECUTE FUNCTION log_activity();
+
+-- Add model column to did_jobs table for tracking which Runway model was used
+ALTER TABLE did_jobs ADD COLUMN IF NOT EXISTS model VARCHAR(50);

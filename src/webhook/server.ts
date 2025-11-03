@@ -29,7 +29,7 @@ export function startWebhookServer(): void {
   const port = typeof PORT === 'string' ? parseInt(PORT, 10) : PORT;
   app.listen(port, '0.0.0.0', () => {
     console.log(`Webhook server running on port ${port}`);
-  });
+});
 }
 
 export default app;

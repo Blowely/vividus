@@ -10,6 +10,9 @@ export class RunwayService {
   private apiKey: string;
   private baseUrl: string;
   private s3Service: S3Service;
+  
+  // Доступные модели для image_to_video в Runway
+  private readonly availableModels: string[] = ['gen3_turbo', 'gen4_turbo', 'gen4'];
 
   constructor() {
     this.apiKey = process.env.RUNWAY_API_KEY!;
@@ -58,7 +61,7 @@ export class RunwayService {
     return errorMessage;
   }
 
-  async createVideoFromTwoImages(firstImageUrl: string, secondImageUrl: string, orderId: string, customPrompt?: string): Promise<string> {
+  async createVideoFromTwoImages(firstImageUrl: string, secondImageUrl: string, orderId: string, customPrompt?: string, model?: string): Promise<string> {
     try {
       console.log('🎬 Creating merge video with RunwayML API...');
       console.log('First Image URL:', firstImageUrl);
@@ -69,12 +72,13 @@ export class RunwayService {
       // В будущем можно использовать другой API (Pika Labs, Genmo и т.д.)
       
       const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
+      const selectedModel = model || 'gen4_turbo';
       
       // Используем первое изображение с модифицированным промптом
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
         promptImage: firstImageUrl,
         seed: Math.floor(Math.random() * 1000000),
-        model: 'gen4_turbo',
+        model: selectedModel,
         promptText: mergePrompt,
         duration: 3, // Увеличиваем длительность для merge видео
         ratio: '960:960',
@@ -92,8 +96,8 @@ export class RunwayService {
       console.log('RunwayML merge response:', response.data);
       const generationId = response.data.id || response.data.generationId;
       
-      // Save job to database
-      await this.saveJob(orderId, generationId);
+      // Save job to database with model
+      await this.saveJob(orderId, generationId, selectedModel);
       
       // Immediately check status for debugging
       console.log('🔍 Checking initial status for merge:', generationId);
@@ -118,16 +122,34 @@ export class RunwayService {
     }
   }
 
-  async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string> {
+  async createMultipleVideosFromTwoImages(firstImageUrl: string, secondImageUrl: string, orderId: string, customPrompt?: string): Promise<string[]> {
+    const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
+    
+    // Запускаем генерации параллельно для всех доступных моделей
+    const promises = this.availableModels.map(model => 
+      this.createVideoFromTwoImages(firstImageUrl, secondImageUrl, orderId, mergePrompt, model)
+        .catch(error => {
+          console.error(`Error creating video with model ${model}:`, error);
+          return null; // Возвращаем null при ошибке, чтобы не прерывать другие генерации
+        })
+    );
+    
+    const generationIds = await Promise.all(promises);
+    return generationIds.filter(id => id !== null) as string[];
+  }
+
+  async createVideoFromImage(imageUrl: string, orderId: string, customPrompt?: string, model?: string): Promise<string> {
     try {
       console.log('🎬 Creating video with RunwayML API...');
       console.log('Image URL:', imageUrl);
+      
+      const selectedModel = model || 'gen4_turbo';
       
       // Create video generation request using playground API
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
         promptImage: imageUrl,
         seed: Math.floor(Math.random() * 1000000),
-        model: 'gen4_turbo',
+        model: selectedModel,
         promptText: customPrompt || 'animate this image with subtle movements and breathing effect',
         duration: 2,
         ratio: '960:960',
@@ -145,8 +167,8 @@ export class RunwayService {
       console.log('RunwayML response:', response.data);
       const generationId = response.data.id || response.data.generationId;
       
-      // Save job to database
-      await this.saveJob(orderId, generationId);
+      // Save job to database with model
+      await this.saveJob(orderId, generationId, selectedModel);
       
       // Immediately check status for debugging
       console.log('🔍 Checking initial status for:', generationId);
@@ -171,6 +193,22 @@ export class RunwayService {
       (translatedErrorObj as any).originalError = errorMessage;
       throw translatedErrorObj;
     }
+  }
+
+  async createMultipleVideosFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string[]> {
+    const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
+    
+    // Запускаем генерации параллельно для всех доступных моделей
+    const promises = this.availableModels.map(model => 
+      this.createVideoFromImage(imageUrl, orderId, prompt, model)
+        .catch(error => {
+          console.error(`Error creating video with model ${model}:`, error);
+          return null; // Возвращаем null при ошибке, чтобы не прерывать другие генерации
+        })
+    );
+    
+    const generationIds = await Promise.all(promises);
+    return generationIds.filter(id => id !== null) as string[];
   }
 
   private async uploadImage(imagePath: string): Promise<string> {
@@ -232,14 +270,14 @@ export class RunwayService {
     }
   }
 
-  private async saveJob(orderId: string, generationId: string): Promise<void> {
+  private async saveJob(orderId: string, generationId: string, model?: string): Promise<void> {
     const client = await pool.connect();
     
     try {
       await client.query(
-        `INSERT INTO did_jobs (order_id, did_job_id, status) 
-         VALUES ($1, $2, $3)`,
-        [orderId, generationId, DidJobStatus.PENDING]
+        `INSERT INTO did_jobs (order_id, did_job_id, status, model) 
+         VALUES ($1, $2, $3, $4)`,
+        [orderId, generationId, DidJobStatus.PENDING, model]
       );
     } finally {
       client.release();
@@ -283,6 +321,21 @@ export class RunwayService {
       const result = await client.query(
         'SELECT * FROM did_jobs WHERE status = $1 ORDER BY created_at ASC',
         [DidJobStatus.PENDING]
+      );
+      
+      return result.rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getJobsByOrderId(orderId: string): Promise<DidJob[]> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        'SELECT * FROM did_jobs WHERE order_id = $1 ORDER BY created_at ASC',
+        [orderId]
       );
       
       return result.rows;

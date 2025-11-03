@@ -226,23 +226,23 @@ export class TelegramService {
     const generations = await this.userService.getUserGenerations(ctx.from!.id);
     
     // Создаем reply клавиатуру (кнопки под полем ввода)
-    const keyboard = [
+      const keyboard = [
       [Markup.button.text('🎬 Оживить фото'), Markup.button.text('🔄 Объединить и оживить')],
       [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
-    ];
+      ];
 
     // Добавляем кнопки для админов
-    if (this.isAdmin(ctx.from!.id)) {
+      if (this.isAdmin(ctx.from!.id)) {
       keyboard.push([Markup.button.text('📊 Статистика')]);
-    }
+      }
 
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
     const message = await ctx.reply(welcomeMessage, {
-      reply_markup: {
+        reply_markup: {
         keyboard: keyboard,
         resize_keyboard: true
-      }
-    });
+        }
+      });
     // Сохраняем message_id для последующих сообщений
     if (message && 'message_id' in message) {
       this.userMessages.set(ctx.from!.id, {
@@ -312,7 +312,7 @@ export class TelegramService {
       
       if (caption) {
         // Если есть caption, сразу обрабатываем его как промпт
-        this.pendingPrompts.set(user.telegram_id, fileId);
+      this.pendingPrompts.set(user.telegram_id, fileId);
         await this.processPrompt(ctx, user, caption);
       } else {
         // Если нет caption, просим ввести промпт
@@ -518,7 +518,7 @@ export class TelegramService {
         
         // Объединенное сообщение о промпте, создании заказа и начале обработки
         await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
-        
+      
         // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
@@ -834,12 +834,12 @@ export class TelegramService {
       case 'mock_payment':
         await this.handleMockPayment(ctx);
         break;
-      case 'get_result':
-        await this.handleGetResult(ctx);
-        break;
-      case 'pay_order':
-        await this.handlePayOrder(ctx);
-        break;
+        case 'get_result':
+          await this.handleGetResult(ctx);
+          break;
+        case 'pay_order':
+          await this.handlePayOrder(ctx);
+          break;
       case 'skip_prompt':
         const user = await this.userService.getOrCreateUser(ctx.from!);
         await this.processPrompt(ctx, user, 'пропустить');

@@ -57,6 +57,7 @@ export interface DidJob {
   status: DidJobStatus;
   result_url?: string;
   error_message?: string;
+  model?: string;
   created_at: Date;
   updated_at: Date;
 }

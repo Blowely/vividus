@@ -323,10 +323,10 @@ export class PaymentService {
     try {
       if (yoomoneyId) {
         // Обновляем и статус, и yoomoney_payment_id
-        await client.query(
+      await client.query(
           'UPDATE payments SET status = $1, yoomoney_payment_id = $2, updated_at = NOW() WHERE id = $3',
-          [status, yoomoneyId, paymentId]
-        );
+        [status, yoomoneyId, paymentId]
+      );
       } else {
         // Обновляем только статус
         await client.query(
