@@ -12,7 +12,7 @@ export class RunwayService {
   private s3Service: S3Service;
   
   // Доступные модели для image_to_video в Runway
-  private readonly availableModels: string[] = ['gen4_turbo', 'veo3.1', 'veo3.1_fast', 'veo3'];
+  private readonly availableModels: string[] = ['gen4_turbo'];
 
   constructor() {
     this.apiKey = process.env.RUNWAY_API_KEY!;
