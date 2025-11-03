@@ -513,8 +513,8 @@ export class TelegramService {
         const order = await this.orderService.createOrder(user.id, s3Url, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
-        // Объединенное сообщение о промпте, создании заказа и начале обработки
-        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю обработку вашего фото...\n\n⏳ Это займет 2-5 минут.`);
+        // Объединенное сообщение о промпте, создании заказа и начале генерации
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
       
         // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
         const { ProcessorService } = await import('./processor');
@@ -698,7 +698,7 @@ export class TelegramService {
         const order = await this.orderService.createMergeOrder(user.id, firstS3Url, secondS3Url, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
-        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю обработку ваших фото...\n\n⏳ Это займет 2-5 минут.`);
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${originalPrompt}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
         
         // Запускаем обработку заказа
         const { ProcessorService } = await import('./processor');

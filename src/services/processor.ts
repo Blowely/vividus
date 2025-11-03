@@ -198,7 +198,7 @@ export class ProcessorService {
           // Обновляем прогресс
           const avgProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
           const progressBar = this.createProgressBar(avgProgress);
-          const progressMessage = `🔄 Обработка видео...\n\n${progressBar} ${avgProgress}%`;
+          const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${avgProgress}%`;
 
           if (progressMessageId) {
             try {
@@ -301,7 +301,7 @@ export class ProcessorService {
           if (jobStatus.progress !== undefined) {
             const progressPercent = Math.round(jobStatus.progress * 100);
             const progressBar = this.createProgressBar(progressPercent);
-            const progressMessage = `🔄 Обработка видео...\n\n${progressBar} ${progressPercent}%`;
+            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${progressPercent}%`;
             
             if (progressMessageId) {
               // Редактируем существующее сообщение
