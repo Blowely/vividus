@@ -1024,11 +1024,12 @@ router.get('/analytics/user/:userId', async (req, res) => {
         WHERE o.user_id = $1
       `, [userId]);
 
-      // Заказы, оплаченные генерациями (price = 0)
+      // Заказы, оплаченные генерациями (нет платежа в таблице payments)
       const generationsOrders = await client.query(`
         SELECT COUNT(*) as generations_orders
-        FROM orders
-        WHERE user_id = $1 AND price = 0
+        FROM orders o
+        WHERE o.user_id = $1 
+          AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id)
       `, [userId]);
 
       const stats = {
