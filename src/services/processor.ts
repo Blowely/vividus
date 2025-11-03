@@ -198,7 +198,7 @@ export class ProcessorService {
           // Обновляем прогресс
           const avgProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
           const progressBar = this.createProgressBar(avgProgress);
-          const progressMessage = `🔄 Обработка ${generationIds.length} видео...\n\n${progressBar} ${avgProgress}%\n\nГотово: ${completedCount}/${generationIds.length}`;
+          const progressMessage = `🔄 Обработка видео...\n\n${progressBar} ${avgProgress}%`;
 
           if (progressMessageId) {
             try {
@@ -389,7 +389,7 @@ export class ProcessorService {
       }
 
       // Notify user
-      await this.notifyUser(telegramId, `✅ Готово ${videos.length} варианта(ов) видео! Отправляю...`);
+      await this.notifyUser(telegramId, '✅ Ваше видео готово! Отправляю...');
       
       // Send all videos to user
       await this.sendMultipleVideosToUser(telegramId, videos);
@@ -587,21 +587,30 @@ export class ProcessorService {
 
   private async sendMultipleVideosToUser(telegramId: number, videos: Array<{ url: string; model?: string }>): Promise<void> {
     try {
-      // Формируем сообщение со всеми вариантами
-      let message = `🎬 Готово ${videos.length} варианта(ов) видео от разных нейросетей:\n\n`;
-      
-      videos.forEach((video, index) => {
-        const modelName = video.model || `Вариант ${index + 1}`;
-        message += `${index + 1}. ${modelName}: <a href="${video.url}">Скачать</a>\n`;
-      });
-      
-      message += '\nСпасибо за использование Vividus Bot!';
-      
-      await this.bot.telegram.sendMessage(
-        telegramId,
-        message,
-        { parse_mode: 'HTML' }
-      );
+      // Если только одно видео, используем простой формат
+      if (videos.length === 1) {
+        await this.bot.telegram.sendMessage(
+          telegramId,
+          `🎬 Ваше видео готово!\n\n📹 Результат: <a href="${videos[0].url}">Скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+          { parse_mode: 'HTML' }
+        );
+      } else {
+        // Если несколько видео (для будущего использования)
+        let message = `🎬 Готово ${videos.length} варианта(ов) видео:\n\n`;
+        
+        videos.forEach((video, index) => {
+          const modelName = video.model || `Вариант ${index + 1}`;
+          message += `${index + 1}. ${modelName}: <a href="${video.url}">Скачать</a>\n`;
+        });
+        
+        message += '\nСпасибо за использование Vividus Bot!';
+        
+        await this.bot.telegram.sendMessage(
+          telegramId,
+          message,
+          { parse_mode: 'HTML' }
+        );
+      }
 
       // Сообщение о возможности отправить следующее фото (через 2 секунды)
       setTimeout(async () => {
