@@ -161,9 +161,6 @@ export class TelegramService {
     // Document handler (for other image formats)
     this.bot.on('document', this.handleDocument.bind(this));
     
-    // Media group handler (for multiple photos at once)
-    this.bot.on('media_group', this.handleMediaGroup.bind(this));
-    
     // Text handler for prompts
     this.bot.on('text', this.handleText.bind(this));
     
@@ -287,6 +284,14 @@ export class TelegramService {
       // Get the highest quality photo
       const fileId = photo[photo.length - 1].file_id;
       
+      // Проверяем, является ли это частью медиа-группы
+      const mediaGroupId = (ctx.message as any)['media_group_id'];
+      if (mediaGroupId) {
+        // Это медиа-группа - обрабатываем через handleMediaGroup логику
+        await this.handleMediaGroupPhoto(ctx, user, fileId, mediaGroupId);
+        return;
+      }
+      
       // Проверяем, находимся ли мы в режиме объединения
       const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
       if (firstPhotoId) {
@@ -344,44 +349,32 @@ export class TelegramService {
     }
   }
 
-  private async handleMediaGroup(ctx: Context) {
+  private async handleMediaGroupPhoto(ctx: Context, user: any, fileId: string, mediaGroupId: string): Promise<void> {
     try {
-      const user = await this.userService.getOrCreateUser(ctx.from!);
-      const messages = (ctx.update as any)['message'] ? [(ctx.update as any)['message']] : [];
+      // Для медиа-групп используем специальный ключ с mediaGroupId
+      const mergeKey = `merge_${user.telegram_id}_${mediaGroupId}`;
+      const storedData = this.pendingMergeFirstPhoto.get(user.telegram_id);
       
-      // Если это медиа-группа, получаем все сообщения из группы
-      // Telegram отправляет каждое фото отдельным сообщением, но с одинаковым media_group_id
-      const mediaGroupId = (ctx.message as any)['media_group_id'];
-      
-      if (!mediaGroupId) {
-        // Это не медиа-группа, обрабатываем как обычное фото
-        return;
-      }
-      
-      // Получаем все фото из медиа-группы
-      // Заметка: Telegram отправляет каждое фото отдельным событием, но мы можем обработать первое и второе
-      // Проще всего - обработать первое фото, сохранить его, и при получении второго - обработать оба
-      
-      const photo = (ctx.message as any)['photo'];
-      if (!photo || photo.length === 0) {
-        return;
-      }
-      
-      const fileId = photo[photo.length - 1].file_id;
-      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
-      
-      if (!firstPhotoId) {
-        // Это первое фото из группы, сохраняем его
-        this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
-        await this.sendMessage(ctx, '📸 Первое фото получено! Ожидаю второе фото...');
+      // Проверяем, сохранили ли мы уже первое фото из этой группы
+      // Используем простую логику: если нет сохраненного фото или это маркер ожидания, сохраняем первое
+      if (!storedData || storedData === 'MERGE_MODE_WAITING' || !storedData.toString().includes(mediaGroupId)) {
+        // Это первое фото из группы, сохраняем его с привязкой к mediaGroupId
+        this.pendingMergeFirstPhoto.set(user.telegram_id, `${mediaGroupId}:${fileId}`);
+        // Не отправляем сообщение сразу, ждем второе фото
+      } else if (storedData.toString().startsWith(mediaGroupId + ':')) {
+        // Это второе фото из группы - извлекаем первое и обрабатываем объединение
+        const firstFileId = storedData.toString().replace(`${mediaGroupId}:`, '');
+        this.pendingMergeFirstPhoto.delete(user.telegram_id);
+        
+        // Обрабатываем объединение
+        await this.handleMergeSecondPhoto(ctx, user, fileId, firstFileId);
       } else {
-        // Это второе фото, обрабатываем объединение
-        await this.handleMergeSecondPhoto(ctx, user, fileId);
+        // Неожиданная ситуация, сохраняем текущее как первое
+        this.pendingMergeFirstPhoto.set(user.telegram_id, `${mediaGroupId}:${fileId}`);
       }
-      
     } catch (error) {
-      console.error('Error handling media group:', error);
-      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке фото. Попробуйте позже.');
+      console.error('Error handling media group photo:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке медиа-группы. Попробуйте позже.');
     }
   }
 
@@ -423,10 +416,26 @@ export class TelegramService {
     }
   }
 
-  private async handleMergeSecondPhoto(ctx: Context, user: any, secondFileId: string): Promise<void> {
+  private async handleMergeSecondPhoto(ctx: Context, user: any, secondFileId: string, providedFirstFileId?: string): Promise<void> {
     try {
-      const firstFileId = this.pendingMergeFirstPhoto.get(user.telegram_id);
-      if (!firstFileId || firstFileId === 'MERGE_MODE_WAITING') {
+      // Если firstFileId передан напрямую (из медиа-группы), используем его
+      // Иначе получаем из pendingMergeFirstPhoto
+      let firstPhotoId = providedFirstFileId;
+      
+      if (!firstPhotoId) {
+        const storedData = this.pendingMergeFirstPhoto.get(user.telegram_id);
+        
+        if (storedData) {
+          // Очищаем mediaGroupId префикс если есть
+          if (storedData.toString().includes(':')) {
+            firstPhotoId = storedData.toString().split(':').slice(1).join(':');
+          } else {
+            firstPhotoId = storedData as string;
+          }
+        }
+      }
+      
+      if (!firstPhotoId || firstPhotoId === 'MERGE_MODE_WAITING') {
         // Если первое фото потеряно или еще не было получено, сохраняем текущее как первое
         this.pendingMergeFirstPhoto.set(user.telegram_id, secondFileId);
         await this.sendMessage(ctx, '📸 Первое фото сохранено! Теперь отправьте второе фото.');
@@ -440,7 +449,7 @@ export class TelegramService {
       
       // Сохраняем оба fileId в специальную структуру для merge заказа
       this.pendingPromptsData.set(user.telegram_id, { 
-        fileId: firstFileId, 
+        fileId: firstPhotoId, 
         prompt: `merge:${secondFileId}` // Используем специальный формат для merge
       });
       this.pendingPrompts.set(user.telegram_id, firstFileId);
