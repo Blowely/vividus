@@ -675,7 +675,7 @@
                            oninput="searchUsers()"
                            style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                     <select id="filter-users-campaign" onchange="applyUsersFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                 </div>
                 <div id="active-filters-users" class="active-filters"></div>
@@ -688,7 +688,7 @@
                            oninput="clearTimeout(orderSearchTimeout); orderSearchTimeout = setTimeout(() => loadOrders(), 300);"
                            style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                     <select id="filter-orders-campaign" onchange="applyOrdersFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                 </div>
                 <div id="active-filters-orders" class="active-filters"></div>
@@ -701,7 +701,7 @@
                            oninput="clearTimeout(paymentSearchTimeout); paymentSearchTimeout = setTimeout(() => loadPayments(), 300);"
                            style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                     <select id="filter-payments-campaign" onchange="applyPaymentsFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                 </div>
                 <div id="active-filters-payments" class="active-filters"></div>
@@ -714,7 +714,7 @@
                            oninput="clearTimeout(jobSearchTimeout); jobSearchTimeout = setTimeout(() => loadJobs(), 300);"
                            style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                     <select id="filter-jobs-campaign" onchange="applyJobsFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                 </div>
                 <div id="active-filters-jobs" class="active-filters"></div>
@@ -727,7 +727,7 @@
                            oninput="clearTimeout(analyticsSearchTimeout); analyticsSearchTimeout = setTimeout(() => loadUserAnalytics(), 300);"
                            style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                     <select id="filter-analytics-campaign" onchange="loadAnalytics(); updateActiveFilters('analytics')" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                 </div>
                 <div id="active-filters-analytics" class="active-filters"></div>
@@ -750,7 +750,7 @@
                         <option value="DELETE">Удаление (DELETE)</option>
                     </select>
                     <select id="filter-logs-campaign" onchange="applyLogsFilters()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; min-width: 200px;">
-                        <option value="">Все кампании</option>
+                        <option value="">Все данные</option>
                     </select>
                     <button onclick="clearAllLogs()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap;">
                         🗑️ Очистить все логи
@@ -1088,7 +1088,7 @@
                         // Сохраняем текущее значение
                         const currentValue = select.value;
                         // Очищаем и добавляем опции
-                        select.innerHTML = '<option value="">Все кампании</option>';
+                        select.innerHTML = '<option value="">Все данные</option>';
                         campaignsList.forEach(campaign => {
                             const option = document.createElement('option');
                             option.value = campaign;
