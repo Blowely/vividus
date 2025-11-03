@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 import pool from '../config/database';
 import { DidJob, DidJobStatus } from '../types';
 import { S3Service } from './s3';
+import sharp from 'sharp';
 
 config();
 
@@ -20,8 +21,63 @@ export class RunwayService {
     this.s3Service = new S3Service();
   }
 
+  // Получаем метаданные изображения из URL
+  private async getImageMetadata(imageUrl: string): Promise<{ width: number; height: number; aspectRatio: number } | null> {
+    try {
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000
+      });
+      
+      const buffer = Buffer.from(response.data);
+      const metadata = await sharp(buffer).metadata();
+      
+      if (!metadata.width || !metadata.height) {
+        return null;
+      }
+      
+      const aspectRatio = metadata.width / metadata.height;
+      
+      return {
+        width: metadata.width,
+        height: metadata.height,
+        aspectRatio
+      };
+    } catch (error) {
+      console.error('Error getting image metadata:', error);
+      return null;
+    }
+  }
+
+  // Определяет наиболее подходящий формат для gen4_turbo на основе соотношения сторон
+  private getBestRatioForGen4Turbo(aspectRatio: number): string {
+    // Доступные форматы для gen4_turbo
+    const availableRatios = [
+      { ratio: '960:960', value: 1.0 },      // Квадрат
+      { ratio: '1280:720', value: 1280/720 }, // Горизонтальный 16:9
+      { ratio: '720:1280', value: 720/1280 }, // Вертикальный 9:16
+      { ratio: '1920:1080', value: 1920/1080 }, // Горизонтальный Full HD
+      { ratio: '1080:1920', value: 1080/1920 }  // Вертикальный Full HD
+    ];
+
+    // Находим формат с наиболее близким соотношением сторон
+    let bestRatio = availableRatios[0];
+    let minDiff = Math.abs(aspectRatio - bestRatio.value);
+
+    for (const format of availableRatios) {
+      const diff = Math.abs(aspectRatio - format.value);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestRatio = format;
+      }
+    }
+
+    console.log(`📐 Соотношение сторон изображения: ${aspectRatio.toFixed(3)}, выбран формат: ${bestRatio.ratio}`);
+    return bestRatio.ratio;
+  }
+
   // Получаем параметры для конкретной модели
-  private getModelParams(model: string): { ratio: string; duration: number } {
+  private async getModelParams(model: string, imageUrl?: string): Promise<{ ratio: string; duration: number }> {
     // Модели VEO требуют другие форматы
     if (model.startsWith('veo')) {
       // Для VEO моделей используем поддерживаемые форматы и duration: 8
@@ -31,7 +87,19 @@ export class RunwayService {
       };
     }
     
-    // Для gen4_turbo используем квадратный формат
+    // Для gen4_turbo выбираем наиболее подходящий формат на основе изображения
+    if (model === 'gen4_turbo' && imageUrl) {
+      const metadata = await this.getImageMetadata(imageUrl);
+      if (metadata) {
+        const bestRatio = this.getBestRatioForGen4Turbo(metadata.aspectRatio);
+        return {
+          ratio: bestRatio,
+          duration: 2
+        };
+      }
+    }
+    
+    // Fallback: используем квадратный формат по умолчанию
     return {
       ratio: '960:960',
       duration: 2
@@ -91,7 +159,7 @@ export class RunwayService {
       
       const mergePrompt = customPrompt || 'animate transition between two images with smooth morphing and movement, transform from first image to second image';
       const selectedModel = model || 'gen4_turbo';
-      const modelParams = this.getModelParams(selectedModel);
+      const modelParams = await this.getModelParams(selectedModel, firstImageUrl);
       
       // Используем первое изображение с модифицированным промптом
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
@@ -174,7 +242,7 @@ export class RunwayService {
       console.log('Image URL:', imageUrl);
       
       const selectedModel = model || 'gen4_turbo';
-      const modelParams = this.getModelParams(selectedModel);
+      const modelParams = await this.getModelParams(selectedModel, imageUrl);
       
       // Create video generation request using playground API
       const response = await axios.post(`${this.baseUrl}/image_to_video`, {
