@@ -227,7 +227,7 @@ export class TelegramService {
     
     // Создаем reply клавиатуру (кнопки под полем ввода)
       const keyboard = [
-      [Markup.button.text('🎬 Оживить фото'), Markup.button.text('🔄 Объединить и оживить')],
+      [Markup.button.text('🎬 Оживить фото')],
       [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
       ];
 
@@ -554,14 +554,6 @@ export class TelegramService {
           ];
         });
         
-        // Добавляем тестовую кнопку: 1 ₽ → 7 генераций
-        keyboard.push([
-          Markup.button.callback(
-            `1 ₽ → 7 ${this.getGenerationWord(7)} (тест)`,
-            `buy_and_process_7_1`
-          )
-        ]);
-        
         keyboard.push(this.getBackButton());
         
         await this.sendMessage(ctx, noGenerationsMessage, {
@@ -591,11 +583,6 @@ export class TelegramService {
       // Обрабатываем команды от reply кнопок
       if (text === '🎬 Оживить фото') {
         await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
-        return;
-      }
-      
-      if (text === '🔄 Объединить и оживить') {
-        await this.handleMergeMode(ctx);
         return;
       }
       
@@ -738,13 +725,6 @@ export class TelegramService {
             )
           ];
         });
-        
-        keyboard.push([
-          Markup.button.callback(
-            `1 ₽ → 7 ${this.getGenerationWord(7)} (тест)`,
-            `buy_and_process_merge_7_1`
-          )
-        ]);
         
         keyboard.push(this.getBackButton());
         
@@ -1348,7 +1328,6 @@ export class TelegramService {
       // Пакеты генераций со скидкой 33%
       // Текущие цены - это оригинальные, вычисляем цены со скидкой
       const packages = [
-        { count: 7, price: 1, isTest: true }, // Тестовый пакет
         { count: 1, originalPrice: 105 },
         { count: 3, originalPrice: 315 },
         { count: 5, originalPrice: 525 },
@@ -1358,19 +1337,15 @@ export class TelegramService {
       // Формируем список пакетов с зачеркиванием и скидкой в тексте сообщения
       let packageListText = '';
       packages.forEach(pkg => {
-        if (pkg.isTest) {
-          packageListText += `🧪 ${pkg.count} ${this.getGenerationWord(pkg.count)}: ${pkg.price} ₽ (тест)\n`;
-        } else {
-          const originalPrice = pkg.originalPrice as number;
-          const discountedPrice = Math.round(originalPrice * 0.67);
-          const discountPercent = Math.round((1 - discountedPrice / originalPrice) * 100);
-          // Используем combining strikethrough для зачеркивания в тексте сообщения
-          // Финальная цена только в кнопках, в тексте только зачеркнутая оригинальная
-          // Делаем процент скидки и зачеркнутую цену жирными
-          const originalPriceStr = `${originalPrice}₽`;
-          const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
-          packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: <b>-${discountPercent}%</b> ${strikethroughPrice}\n`;
-        }
+        const originalPrice = pkg.originalPrice as number;
+        const discountedPrice = Math.round(originalPrice * 0.67);
+        const discountPercent = Math.round((1 - discountedPrice / originalPrice) * 100);
+        // Используем combining strikethrough для зачеркивания в тексте сообщения
+        // Финальная цена только в кнопках, в тексте только зачеркнутая оригинальная
+        // Делаем процент скидки и зачеркнутую цену жирными
+        const originalPriceStr = `${originalPrice}₽`;
+        const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
+        packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: <b>-${discountPercent}%</b> ${strikethroughPrice}\n`;
       });
       
       const message = `💼 У вас осталось генераций: ${currentGenerations}
@@ -1379,19 +1354,11 @@ ${packageListText}
 Выберите пакет 👇`;
       
       const keyboard = packages.map(pkg => {
-        let buttonText: string;
-        let actualPrice: number;
-        
-        if (pkg.isTest) {
-          actualPrice = pkg.price;
-          buttonText = `🧪 ${pkg.count} ${this.getGenerationWord(pkg.count)} → ${actualPrice} ₽ (тест)`;
-        } else {
-          // Используем цену со скидкой 33% как финальную цену (оригинальная * 0.67)
-          // В кнопках форматирование недоступно, но можно визуально выделить цену
-          actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
-          // Используем эмодзи или символы для визуального выделения цены
-          buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → 💰 ${actualPrice}₽`;
-        }
+        // Используем цену со скидкой 33% как финальную цену (оригинальная * 0.67)
+        // В кнопках форматирование недоступно, но можно визуально выделить цену
+        const actualPrice = Math.round((pkg.originalPrice as number) * 0.67);
+        // Используем эмодзи или символы для визуального выделения цены
+        const buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → 💰 ${actualPrice}₽`;
         return [
           Markup.button.callback(
             buttonText,
