@@ -269,28 +269,17 @@ export class TelegramService {
       keyboard.push([Markup.button.text('📊 Статистика')]);
       }
 
-    // Сначала отправляем пример работы бота с видео
+    // Отправляем приветственное сообщение с видео в одном сообщении
     try {
-      await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/1101_2.mp4', {
-        caption: '🎬 Пример обработки старого фото:'
-      });
-    } catch (error: any) {
-      if (this.isBlockedError(error)) {
-        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping example video`);
-        return;
-      }
-      // Игнорируем ошибки отправки видео, но продолжаем отправку приветствия
-      console.error('Error sending example video:', error);
-    }
-
-    // Для приветствия всегда отправляем новое сообщение (не редактируем)
-    try {
-      const message = await ctx.reply(welcomeMessage, {
-          reply_markup: {
+      const videoCaption = `🎬 Пример обработки старого фото:\n\n${welcomeMessage}`;
+      const message = await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/1101_2.mp4', {
+        caption: videoCaption,
+        reply_markup: {
           keyboard: keyboard,
           resize_keyboard: true
-          }
-        });
+        },
+        supports_streaming: true
+      });
       // Сохраняем message_id для последующих сообщений
       if (ctx.from) {
         this.userMessages.set(ctx.from.id, { messageId: message.message_id, chatId: message.chat.id });
