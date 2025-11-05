@@ -301,8 +301,6 @@ export class TelegramService {
 
 ⏱️ Время обработки: 2-5 минут
 
-📞 Поддержка: @in_a_state_of_flux
-
 Для начала отправьте фото!`;
     
         await this.sendMessage(ctx, helpMessage, {
