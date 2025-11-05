@@ -39,10 +39,25 @@ export class TelegramService {
     this.setupHandlers();
   }
 
+  // Проверяет, является ли ошибка ошибкой блокировки бота
+  private isBlockedError(error: any): boolean {
+    return error?.response?.error_code === 403 && 
+           (error?.response?.description?.includes('bot was blocked') || 
+            error?.response?.description?.includes('Forbidden: bot was blocked'));
+  }
+
   // Простой метод для отправки сообщений (без редактирования)
   private async sendMessage(ctx: Context, text: string, extra?: any): Promise<void> {
-    const extraWithKeyboard = this.ensureReplyKeyboard(ctx, extra);
-    await ctx.reply(text, extraWithKeyboard);
+    try {
+      const extraWithKeyboard = this.ensureReplyKeyboard(ctx, extra);
+      await ctx.reply(text, extraWithKeyboard);
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping message`);
+        return;
+      }
+      throw error;
+    }
   }
 
   private ensureReplyKeyboard(ctx: Context, extra?: any): any {
@@ -120,7 +135,11 @@ export class TelegramService {
       } finally {
         client.release();
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${telegramId}, skipping message`);
+        return;
+      }
       console.error(`Error sending message to user ${telegramId}:`, error);
       throw error;
     }
@@ -170,8 +189,20 @@ export class TelegramService {
     // Error handler
     this.bot.catch(async (err, ctx) => {
       console.error('Bot error:', err);
+      // Не пытаемся отправить сообщение, если бот заблокирован пользователем
+      if (this.isBlockedError(err)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping error message`);
+        return;
+      }
       if (ctx.from && ctx.chat) {
-        await this.sendMessage(ctx, 'Произошла ошибка. Попробуйте позже.');
+        try {
+          await this.sendMessage(ctx, 'Произошла ошибка. Попробуйте позже.');
+        } catch (error: any) {
+          // Игнорируем ошибки отправки в обработчике ошибок
+          if (!this.isBlockedError(error)) {
+            console.error('Error sending error message:', error);
+          }
+        }
       }
     });
   }
@@ -239,18 +270,23 @@ export class TelegramService {
       }
 
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
-    const message = await ctx.reply(welcomeMessage, {
-        reply_markup: {
-        keyboard: keyboard,
-        resize_keyboard: true
-        }
-      });
-    // Сохраняем message_id для последующих сообщений
-    if (message && 'message_id' in message) {
-      this.userMessages.set(ctx.from!.id, {
-        messageId: (message as any).message_id,
-        chatId: ctx.chat!.id
-      });
+    try {
+      const message = await ctx.reply(welcomeMessage, {
+          reply_markup: {
+          keyboard: keyboard,
+          resize_keyboard: true
+          }
+        });
+      // Сохраняем message_id для последующих сообщений
+      if (ctx.from) {
+        this.userMessages.set(ctx.from.id, { messageId: message.message_id, chatId: message.chat.id });
+      }
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping welcome message`);
+        return;
+      }
+      throw error;
     }
   }
 
@@ -334,8 +370,11 @@ export class TelegramService {
             await ctx.reply('\u200B', {
               reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
             });
-          } catch (e) {
-            // Игнорируем ошибки (клавиатура уже может быть видна)
+          } catch (e: any) {
+            // Игнорируем ошибки (клавиатура уже может быть видна или бот заблокирован)
+            if (this.isBlockedError(e)) {
+              console.log(`Bot is blocked by user ${ctx.from?.id}, skipping keyboard message`);
+            }
           }
         }, 500);
         
@@ -835,8 +874,11 @@ export class TelegramService {
           await ctx.reply('◀️ Возвращаюсь в главное меню...', {
             reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
           });
-        } catch (e) {
-          // Игнорируем ошибки
+        } catch (e: any) {
+          // Игнорируем ошибки (бот может быть заблокирован)
+          if (this.isBlockedError(e)) {
+            console.log(`Bot is blocked by user ${ctx.from?.id}, skipping back to menu message`);
+          }
         }
         await this.showMainMenu(ctx);
         break;
@@ -1217,9 +1259,15 @@ export class TelegramService {
         
         // Сообщение о возможности отправить следующее фото (отправляем новое сообщение, не редактируем)
         setTimeout(async () => {
-          await ctx.reply('📸 Вы можете сразу отправить следующее фото для создания нового видео!', {
-            reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
-          });
+          try {
+            await ctx.reply('📸 Вы можете сразу отправить следующее фото для создания нового видео!', {
+              reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+            });
+          } catch (e: any) {
+            if (this.isBlockedError(e)) {
+              console.log(`Bot is blocked by user ${ctx.from?.id}, skipping next photo message`);
+            }
+          }
         }, 2000);
       } else {
         await this.sendMessage(ctx, `⏳ Статус обработки: ${status.status}\n\nПопробуйте позже.`);
@@ -1381,12 +1429,20 @@ ${packageListText}
       keyboard.push(this.getBackButton());
       
       // Отправляем новое сообщение вместо редактирования
-      await ctx.reply(message, {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: keyboard
+      try {
+        await ctx.reply(message, {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: keyboard
+          }
+        });
+      } catch (error: any) {
+        if (this.isBlockedError(error)) {
+          console.log(`Bot is blocked by user ${ctx.from?.id}, skipping buy generations menu`);
+          return;
         }
-      });
+        throw error;
+      }
       
       // Отправляем невидимое сообщение с reply-клавиатурой, чтобы она всегда была видна
       // (после inline-сообщений reply-клавиатура может пропасть)
@@ -1395,8 +1451,11 @@ ${packageListText}
           await ctx.reply('\u200B', {
             reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
           });
-        } catch (e) {
-          // Игнорируем ошибки (клавиатура уже может быть видна)
+        } catch (e: any) {
+          // Игнорируем ошибки (клавиатура уже может быть видна или бот заблокирован)
+          if (this.isBlockedError(e)) {
+            console.log(`Bot is blocked by user ${ctx.from?.id}, skipping keyboard message`);
+          }
         }
       }, 500);
     } catch (error) {
