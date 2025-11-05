@@ -269,6 +269,20 @@ export class TelegramService {
       keyboard.push([Markup.button.text('📊 Статистика')]);
       }
 
+    // Сначала отправляем приветственное видео
+    try {
+      await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/IMG_2187.mp4', {
+        caption: '🎬 Пример обработки старого фото'
+      });
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping welcome video`);
+        return;
+      }
+      // Игнорируем ошибки отправки видео, но продолжаем отправку приветствия
+      console.error('Error sending welcome video:', error);
+    }
+
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
     try {
       const message = await ctx.reply(welcomeMessage, {
@@ -1063,20 +1077,6 @@ export class TelegramService {
     if (!this.isAdmin(ctx.from!.id)) {
       await this.sendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
       return;
-    }
-
-    // Отправляем приветственное сообщение с видео
-    try {
-      await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/IMG_2187.mp4', {
-        caption: 'Привет'
-      });
-    } catch (error: any) {
-      if (this.isBlockedError(error)) {
-        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping welcome video`);
-        return;
-      }
-      // Игнорируем ошибки отправки видео, но продолжаем показ статистики
-      console.error('Error sending welcome video:', error);
     }
 
     try {
