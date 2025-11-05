@@ -269,16 +269,14 @@ export class TelegramService {
       keyboard.push([Markup.button.text('📊 Статистика')]);
       }
 
-    // Отправляем приветственное сообщение с GIF в одном сообщении
+    // Для приветствия всегда отправляем новое сообщение (не редактируем)
     try {
-      const gifCaption = `🎬 Пример обработки старого фото:\n\n${welcomeMessage}`;
-      const message = await ctx.replyWithAnimation('https://storage.yandexcloud.net/vividus/service/IMG_2180.gif', {
-        caption: gifCaption,
-        reply_markup: {
+      const message = await ctx.reply(welcomeMessage, {
+          reply_markup: {
           keyboard: keyboard,
           resize_keyboard: true
-        }
-      });
+          }
+        });
       // Сохраняем message_id для последующих сообщений
       if (ctx.from) {
         this.userMessages.set(ctx.from.id, { messageId: message.message_id, chatId: message.chat.id });
