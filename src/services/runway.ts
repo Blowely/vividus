@@ -94,7 +94,7 @@ export class RunwayService {
         const bestRatio = this.getBestRatioForGen4Turbo(metadata.aspectRatio);
         return {
           ratio: bestRatio,
-          duration: 2
+          duration: 5
         };
       }
     }
@@ -102,7 +102,7 @@ export class RunwayService {
     // Fallback: используем квадратный формат по умолчанию
     return {
       ratio: '960:960',
-      duration: 2
+      duration: 5
     };
   }
 
