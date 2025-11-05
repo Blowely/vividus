@@ -587,17 +587,17 @@ export class TelegramService {
         
         // Пакеты генераций (оригинальные цены)
         const packages = [
-          { count: 1, originalPrice: 105 },
-          { count: 3, originalPrice: 315 },
-          { count: 5, originalPrice: 525 },
-          { count: 10, originalPrice: 950 }
+          { count: 1, originalPrice: 129 },
+          { count: 3, originalPrice: 387 },
+          { count: 5, originalPrice: 645 },
+          { count: 10, originalPrice: 1290 }
         ];
         
-        // Коэффициент скидки: 59/105 ≈ 0.5619 (скидка ~43.81%)
-        const discountCoefficient = 59 / 105;
+        // Коэффициент скидки: 69/129 ≈ 0.5349 (скидка ~46.51%)
+        const discountCoefficient = 69 / 129;
         
         const keyboard = packages.map(pkg => {
-          // Используем цену со скидкой как финальную цену (оригинальная * 59/105)
+          // Используем цену со скидкой как финальную цену (оригинальная * 69/129)
           const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
           const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
@@ -763,14 +763,14 @@ export class TelegramService {
         
         // Пакеты генераций (оригинальные цены)
         const packages = [
-          { count: 1, originalPrice: 105 },
-          { count: 3, originalPrice: 315 },
-          { count: 5, originalPrice: 525 },
-          { count: 10, originalPrice: 950 }
+          { count: 1, originalPrice: 129 },
+          { count: 3, originalPrice: 387 },
+          { count: 5, originalPrice: 645 },
+          { count: 10, originalPrice: 1290 }
         ];
         
-        // Коэффициент скидки: 59/105 ≈ 0.5619 (скидка ~43.81%)
-        const discountCoefficient = 59 / 105;
+        // Коэффициент скидки: 69/129 ≈ 0.5349 (скидка ~46.51%)
+        const discountCoefficient = 69 / 129;
         
         const keyboard = packages.map(pkg => {
           const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
@@ -1391,17 +1391,17 @@ export class TelegramService {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       const currentGenerations = await this.userService.getUserGenerations(ctx.from!.id);
       
-      // Пакеты генераций со скидкой ~44% (финальная цена за 1 генерацию: 59 руб)
+      // Пакеты генераций со скидкой ~46.51% (финальная цена за 1 генерацию: 69 руб)
       // Текущие цены - это оригинальные, вычисляем цены со скидкой
       const packages = [
-        { count: 1, originalPrice: 105 },
-        { count: 3, originalPrice: 315 },
-        { count: 5, originalPrice: 525 },
-        { count: 10, originalPrice: 950 }
+        { count: 1, originalPrice: 129 },
+        { count: 3, originalPrice: 387 },
+        { count: 5, originalPrice: 645 },
+        { count: 10, originalPrice: 1290 }
       ];
       
-      // Коэффициент скидки: 59/105 ≈ 0.5619 (скидка ~43.81%)
-      const discountCoefficient = 59 / 105;
+      // Коэффициент скидки: 69/129 ≈ 0.5349 (скидка ~46.51%)
+      const discountCoefficient = 69 / 129;
       
       // Формируем список пакетов с зачеркиванием и скидкой в тексте сообщения
       let packageListText = '';
@@ -1423,7 +1423,7 @@ ${packageListText}
 Выберите пакет 👇`;
       
       const keyboard = packages.map(pkg => {
-        // Используем цену со скидкой как финальную цену (оригинальная * 59/105)
+        // Используем цену со скидкой как финальную цену (оригинальная * 69/129)
         // В кнопках форматирование недоступно, но можно визуально выделить цену
         const actualPrice = Math.round((pkg.originalPrice as number) * discountCoefficient);
         // Используем эмодзи или символы для визуального выделения цены
