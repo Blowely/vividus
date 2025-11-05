@@ -1065,6 +1065,20 @@ export class TelegramService {
       return;
     }
 
+    // Отправляем приветственное сообщение с видео
+    try {
+      await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/IMG_2187.mp4', {
+        caption: 'Привет'
+      });
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping welcome video`);
+        return;
+      }
+      // Игнорируем ошибки отправки видео, но продолжаем показ статистики
+      console.error('Error sending welcome video:', error);
+    }
+
     try {
       const analytics = await this.analyticsService.getCampaignAnalytics();
       
