@@ -269,16 +269,15 @@ export class TelegramService {
       keyboard.push([Markup.button.text('📊 Статистика')]);
       }
 
-    // Отправляем приветственное сообщение с видео в одном сообщении
+    // Отправляем приветственное сообщение с GIF в одном сообщении
     try {
-      const videoCaption = `🎬 Пример обработки старого фото:\n\n${welcomeMessage}`;
-      const message = await ctx.replyWithVideo('https://storage.yandexcloud.net/vividus/service/1101_2.mp4', {
-        caption: videoCaption,
+      const gifCaption = `🎬 Пример обработки старого фото:\n\n${welcomeMessage}`;
+      const message = await ctx.replyWithAnimation('https://storage.yandexcloud.net/vividus/service/IMG_2180.gif', {
+        caption: gifCaption,
         reply_markup: {
           keyboard: keyboard,
           resize_keyboard: true
-        },
-        supports_streaming: true
+        }
       });
       // Сохраняем message_id для последующих сообщений
       if (ctx.from) {
