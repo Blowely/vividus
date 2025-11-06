@@ -608,20 +608,47 @@ router.get('/analytics/campaigns', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
-      // Выручка (total_payments_rub) берется из campaign_stats,
-      // где данные записываются через updateCampaignStats() с фильтром status = 'success'
+      // Выручка считается напрямую из таблицы payments с фильтром status = 'success'
+      // чтобы избежать проблем со старыми данными в campaign_stats
       const result = await client.query(`
         SELECT 
           c.id as campaign_id,
           c.name as campaign_name,
           COUNT(DISTINCT cs.id) as stats_count,
-          SUM(cs.users_count) as total_users,
-          SUM(cs.total_payments_rub) as total_payments_rub,
-          SUM(cs.total_payments_stars) as total_payments_stars,
-          SUM(cs.completed_orders) as completed_orders,
+          (SELECT COUNT(DISTINCT u.id)::INTEGER 
+           FROM users u 
+           WHERE u.start_param = c.name) as total_users,
+          (
+            SELECT COALESCE(SUM(p.amount), 0)::DECIMAL(12,2)
+            FROM payments p
+            WHERE p.status = 'success'
+              AND (
+                p.order_id IN (
+                  SELECT o.id FROM orders o 
+                  INNER JOIN users u ON o.user_id = u.id 
+                  WHERE u.start_param = c.name
+                )
+                OR (p.order_id IS NULL AND p.user_id IN (
+                  SELECT u.id FROM users u WHERE u.start_param = c.name
+                ))
+              )
+          ) as total_payments_rub,
+          0::INTEGER as total_payments_stars,
+          (
+            SELECT COUNT(DISTINCT o.id)::INTEGER
+            FROM orders o
+            INNER JOIN users u ON o.user_id = u.id
+            WHERE o.status = 'completed'
+              AND u.start_param = c.name
+          ) as completed_orders,
           CASE 
-            WHEN SUM(cs.users_count) > 0 
-            THEN ROUND((SUM(cs.completed_orders)::decimal / SUM(cs.users_count)) * 100, 2)
+            WHEN (SELECT COUNT(DISTINCT u.id) FROM users u WHERE u.start_param = c.name) > 0 
+            THEN ROUND((
+              (SELECT COUNT(DISTINCT o.id) FROM orders o 
+               INNER JOIN users u ON o.user_id = u.id 
+               WHERE o.status = 'completed' AND u.start_param = c.name)::decimal / 
+              (SELECT COUNT(DISTINCT u.id) FROM users u WHERE u.start_param = c.name)
+            ) * 100, 2)
             ELSE 0 
           END as conversion_rate
         FROM campaigns c
