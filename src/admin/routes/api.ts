@@ -536,6 +536,7 @@ router.get('/stats', async (req, res) => {
            WHERE p.status = 'success' 
              AND u.id IS NOT NULL
              ${campaign ? 'AND u.start_param = $1' : ''}) as successful_payments,
+          -- Выручка считается только из успешно оплаченных платежей (status = 'success')
           (SELECT COALESCE(SUM(p.amount), 0) 
            FROM payments p 
            LEFT JOIN orders o ON p.order_id = o.id
@@ -607,6 +608,8 @@ router.get('/analytics/campaigns', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
+      // Выручка (total_payments_rub) берется из campaign_stats,
+      // где данные записываются через updateCampaignStats() с фильтром status = 'success'
       const result = await client.query(`
         SELECT 
           c.id as campaign_id,
@@ -1002,6 +1005,7 @@ router.get('/analytics/user/:userId', async (req, res) => {
       `, [userId]);
 
       // Статистика по платежам
+      // Выручка (total_spent) считается только из успешно оплаченных платежей (status = 'success')
       const paymentsStats = await client.query(`
         SELECT 
           COUNT(*) as total_payments,

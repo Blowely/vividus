@@ -95,20 +95,38 @@ export class AnalyticsService {
     const client = await pool.connect();
     
     try {
+      // Выручка считается напрямую из таблицы payments с фильтром status = 'success'
+      // чтобы избежать проблем со старыми данными в campaign_stats
       let query = `
         SELECT 
           c.name as campaign_name,
-          SUM(cs.users_count) as total_users,
-          SUM(cs.total_payments_rub) as total_payments_rub,
-          SUM(cs.total_payments_stars) as total_payments_stars,
-          SUM(cs.completed_orders) as completed_orders,
-          CASE 
-            WHEN SUM(cs.users_count) > 0 
-            THEN ROUND((SUM(cs.completed_orders) / SUM(cs.users_count)) * 100, 2)
-            ELSE 0 
-          END as conversion_rate
+          (SELECT COUNT(DISTINCT u.id)::INTEGER 
+           FROM users u 
+           WHERE u.start_param = c.name) as total_users,
+          (
+            SELECT COALESCE(SUM(p.amount), 0)::DECIMAL(12,2)
+            FROM payments p
+            WHERE p.status = 'success'
+              AND (
+                p.order_id IN (
+                  SELECT o.id FROM orders o 
+                  INNER JOIN users u ON o.user_id = u.id 
+                  WHERE u.start_param = c.name
+                )
+                OR (p.order_id IS NULL AND p.user_id IN (
+                  SELECT u.id FROM users u WHERE u.start_param = c.name
+                ))
+              )
+          ) as total_payments_rub,
+          0::INTEGER as total_payments_stars,
+          (
+            SELECT COUNT(DISTINCT o.id)::INTEGER
+            FROM orders o
+            INNER JOIN users u ON o.user_id = u.id
+            WHERE o.status = 'completed'
+              AND u.start_param = c.name
+          ) as completed_orders
         FROM campaigns c
-        LEFT JOIN campaign_stats cs ON c.id = cs.campaign_id
       `;
 
       const params: any[] = [];
@@ -118,18 +136,26 @@ export class AnalyticsService {
         params.push(campaignName);
       }
 
-      query += ' GROUP BY c.id, c.name ORDER BY total_payments_rub DESC';
+      query += ' ORDER BY total_payments_rub DESC';
 
       const result = await client.query(query, params);
       
-      return result.rows.map(row => ({
-        campaign_name: row.campaign_name,
-        total_users: parseInt(row.total_users) || 0,
-        total_payments_rub: parseFloat(row.total_payments_rub) || 0,
-        total_payments_stars: parseInt(row.total_payments_stars) || 0,
-        completed_orders: parseInt(row.completed_orders) || 0,
-        conversion_rate: parseFloat(row.conversion_rate) || 0
-      }));
+      return result.rows.map(row => {
+        const totalUsers = parseInt(row.total_users) || 0;
+        const completedOrders = parseInt(row.completed_orders) || 0;
+        const conversionRate = totalUsers > 0 
+          ? parseFloat(((completedOrders / totalUsers) * 100).toFixed(2))
+          : 0;
+        
+        return {
+          campaign_name: row.campaign_name,
+          total_users: totalUsers,
+          total_payments_rub: parseFloat(row.total_payments_rub) || 0,
+          total_payments_stars: parseInt(row.total_payments_stars) || 0,
+          completed_orders: completedOrders,
+          conversion_rate: conversionRate
+        };
+      });
     } finally {
       client.release();
     }
