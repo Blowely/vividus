@@ -315,6 +315,8 @@ export class TelegramService {
 
 ⏱️ Время обработки: 2-5 минут
 
+💬 По вопросам обращайтесь: @vividusgosupp
+
 Для начала отправьте фото!`;
     
         await this.sendMessage(ctx, helpMessage, {
