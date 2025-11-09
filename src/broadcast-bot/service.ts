@@ -86,13 +86,13 @@ export class BroadcastService {
     await this.sendBroadcast(broadcastData, adminChatId);
   }
 
-  // Проверка статуса бота у пользователя (без отправки сообщения и без уведомлений)
+  // Проверка статуса бота у пользователя через sendChatAction
   private async checkUserStatus(userId: number): Promise<{ active: boolean; reason?: string }> {
     try {
-      // Используем getChat - это просто получает информацию о чате
-      // НЕ показывает никаких уведомлений пользователю и невидимо для него
+      // Используем sendChatAction с 'typing' - это показывает индикатор "печатает..."
+      // но это самый надежный способ определить блокировку
       // Если бот заблокирован, вернет ошибку 403
-      await this.bot.telegram.getChat(userId);
+      await this.bot.telegram.sendChatAction(userId, 'typing');
       return { active: true };
     } catch (error: any) {
       if (this.isBlockedError(error)) {
