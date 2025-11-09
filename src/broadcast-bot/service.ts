@@ -19,11 +19,14 @@ interface BroadcastResult {
 }
 
 export class BroadcastService {
-  private bot: Telegraf;
+  private bot: Telegraf; // Основной бот для отправки сообщений пользователям
+  private adminBot: Telegraf; // Broadcast-бот для отправки статистики админу
 
   constructor() {
     // Используем токен ОСНОВНОГО бота для отправки сообщений пользователям
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
+    // Используем токен BROADCAST-бота для отправки статистики админу
+    this.adminBot = new Telegraf(process.env.BROADCAST_BOT_TOKEN!);
   }
 
   private isBlockedError(error: any): boolean {
@@ -112,7 +115,7 @@ export class BroadcastService {
           `🚫 Заблокировали: 0\n` +
           `❌ Ошибки: 0`;
         
-        const msg = await this.bot.telegram.sendMessage(adminChatId, initialProgress);
+        const msg = await this.adminBot.telegram.sendMessage(adminChatId, initialProgress);
         progressMessageId = msg.message_id;
       } catch (error) {
         console.error('Error creating initial progress message:', error);
@@ -147,7 +150,7 @@ export class BroadcastService {
               `🚫 Заблокировали: ${blockedCount}\n` +
               `❌ Ошибки: ${errorCount}`;
             
-            await this.bot.telegram.editMessageText(
+            await this.adminBot.telegram.editMessageText(
               adminChatId,
               progressMessageId,
               undefined,
@@ -181,14 +184,14 @@ export class BroadcastService {
           `❌ Ошибки отправки: ${errorCount} (${Math.round(errorCount / totalUsers * 100)}%)`;
         
         try {
-          await this.bot.telegram.editMessageText(
+          await this.adminBot.telegram.editMessageText(
             adminChatId,
             progressMessageId,
             undefined,
             finalMessage
           );
         } catch (error) {
-          await this.bot.telegram.sendMessage(adminChatId, finalMessage);
+          await this.adminBot.telegram.sendMessage(adminChatId, finalMessage);
         }
       }
       

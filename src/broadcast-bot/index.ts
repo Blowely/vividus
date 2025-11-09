@@ -116,6 +116,28 @@ bot.on('animation', async (ctx) => {
 
 // Показать предпросмотр рассылки
 async function showBroadcastPreview(ctx: Context, data: BroadcastData) {
+  let previewText = '✅ Сообщение получено и обработано!\n\n';
+  
+  // Добавляем информацию о медиа
+  if (data.mediaType && data.mediaFileId) {
+    const mediaTypeNames: { [key: string]: string } = {
+      'photo': '📷 Фото',
+      'video': '🎥 Видео',
+      'animation': '🎬 GIF/Анимация'
+    };
+    previewText += `${mediaTypeNames[data.mediaType] || '📎 Медиа'}\n`;
+  }
+  
+  // Добавляем текст (если есть)
+  if (data.text) {
+    previewText += `\n📝 Текст:\n${data.text}\n`;
+  } else if (!data.mediaType) {
+    previewText += `\n📝 Текст: (пусто)\n`;
+  }
+  
+  previewText += '\n━━━━━━━━━━━━━━━━━━━━\n';
+  previewText += 'Выберите действие:';
+  
   const keyboard = Markup.inlineKeyboard([
     [
       Markup.button.callback('✅ Разослать всем', 'broadcast_all'),
@@ -124,7 +146,7 @@ async function showBroadcastPreview(ctx: Context, data: BroadcastData) {
     [Markup.button.callback('❌ Отменить', 'broadcast_cancel')]
   ]);
 
-  await ctx.reply('✅ Сообщение получено!\n\nВыберите действие:', keyboard);
+  await ctx.reply(previewText, keyboard);
 }
 
 // Обработка кнопок
