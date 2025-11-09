@@ -106,7 +106,7 @@ export class TelegramService {
 
     // Добавляем кнопки для админов
     if (this.isAdmin(userId)) {
-      keyboard.push([Markup.button.text('📊 Статистика')]);
+      keyboard.push([Markup.button.text('📊 Статистика'), Markup.button.text('Тест рассылки')]);
     }
 
     return {
@@ -273,7 +273,7 @@ export class TelegramService {
 
     // Добавляем кнопки для админов
       if (this.isAdmin(ctx.from!.id)) {
-      keyboard.push([Markup.button.text('📊 Статистика')]);
+      keyboard.push([Markup.button.text('📊 Статистика'), Markup.button.text('Тест рассылки')]);
       }
 
     // Сначала отправляем приветственное видео
@@ -696,6 +696,11 @@ export class TelegramService {
         return;
       }
       
+      if (text === 'Тест рассылки' && this.isAdmin(ctx.from!.id)) {
+        await this.sendTestMessage(ctx);
+        return;
+      }
+      
       // Check if user has pending photo
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
@@ -1093,6 +1098,28 @@ export class TelegramService {
     } catch (error) {
       console.error('Error showing campaign stats:', error);
       await ctx.answerCbQuery('❌ Ошибка при получении статистики');
+    }
+  }
+
+  private async sendTestMessage(ctx: Context) {
+    if (!this.isAdmin(ctx.from!.id)) {
+      await this.sendMessage(ctx, '❌ У вас нет прав для этой команды');
+      return;
+    }
+    
+    try {
+      const targetUserId = 6303475609;
+      const testMessage = 'тест. только для 6303475609';
+      
+      await this.bot.telegram.sendMessage(targetUserId, testMessage);
+      await this.sendMessage(ctx, `✅ Сообщение отправлено пользователю ${targetUserId}`);
+    } catch (error: any) {
+      console.error('Error sending test message:', error);
+      if (this.isBlockedError(error)) {
+        await this.sendMessage(ctx, '❌ Пользователь заблокировал бота');
+      } else {
+        await this.sendMessage(ctx, `❌ Ошибка при отправке сообщения: ${error.message}`);
+      }
     }
   }
 
