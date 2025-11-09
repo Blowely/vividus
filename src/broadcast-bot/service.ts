@@ -86,6 +86,126 @@ export class BroadcastService {
     await this.sendBroadcast(broadcastData, adminChatId);
   }
 
+  // Проверка статуса бота у пользователя (без отправки сообщения и без уведомлений)
+  private async checkUserStatus(userId: number): Promise<{ active: boolean; reason?: string }> {
+    try {
+      // Используем getChat - это просто получает информацию о чате
+      // НЕ показывает никаких уведомлений пользователю и невидимо для него
+      // Если бот заблокирован, вернет ошибку 403
+      await this.bot.telegram.getChat(userId);
+      return { active: true };
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        return { active: false, reason: 'blocked' };
+      } else {
+        // Другие ошибки (например, пользователь не существует) тоже считаем неактивными
+        return { active: false, reason: 'error' };
+      }
+    }
+  }
+
+  // Проверка всех пользователей без рассылки
+  async checkAllUsersStatus(adminChatId: number): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
+      const users = result.rows;
+      const totalUsers = users.length;
+      
+      let activeCount = 0;
+      let blockedCount = 0;
+      let errorCount = 0;
+      let processedCount = 0;
+      
+      // Отправляем начальное сообщение
+      const initialMessage = `🔍 Проверка статуса пользователей...\n\n` +
+        `📊 Прогресс: 0/${totalUsers}\n` +
+        `${this.getProgressBar(0, totalUsers)}\n\n` +
+        `✅ Активны: 0\n` +
+        `🚫 Заблокировали: 0\n` +
+        `❌ Ошибки: 0`;
+      
+      const progressMsg = await this.adminBot.telegram.sendMessage(adminChatId, initialMessage);
+      const progressMessageId = progressMsg.message_id;
+      
+      // Проверяем каждого пользователя
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const status = await this.checkUserStatus(user.telegram_id);
+        
+        processedCount++;
+        
+        if (status.active) {
+          activeCount++;
+        } else if (status.reason === 'blocked') {
+          blockedCount++;
+        } else {
+          errorCount++;
+        }
+        
+        // Обновляем прогресс
+        const shouldUpdate = totalUsers <= 10 
+          ? true 
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
+        
+        if (shouldUpdate) {
+          try {
+            const progressText = `🔍 Проверка статуса пользователей...\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Активны: ${activeCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
+            // Игнорируем ошибки обновления
+          }
+        }
+        
+        // Небольшая задержка чтобы не получить rate limit
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      // Финальная статистика
+      const finalMessage = `✅ Проверка завершена!\n\n` +
+        `📊 Статистика:\n` +
+        `👥 Всего пользователей: ${totalUsers}\n` +
+        `📤 Обработано: ${processedCount}\n\n` +
+        `✅ Активны (бот не заблокирован): ${activeCount} (${Math.round(activeCount / totalUsers * 100)}%)\n` +
+        `🚫 Заблокировали бота: ${blockedCount} (${Math.round(blockedCount / totalUsers * 100)}%)\n` +
+        `❌ Ошибки проверки: ${errorCount} (${Math.round(errorCount / totalUsers * 100)}%)`;
+      
+      try {
+        await this.adminBot.telegram.editMessageText(
+          adminChatId,
+          progressMessageId,
+          undefined,
+          finalMessage
+        );
+      } catch (error) {
+        await this.adminBot.telegram.sendMessage(adminChatId, finalMessage);
+      }
+      
+      console.log(`Status check completed: ${activeCount}/${totalUsers} active, ${blockedCount} blocked`);
+      
+    } catch (error) {
+      console.error('Error during status check:', error);
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        '❌ Ошибка при проверке статуса пользователей'
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   private async sendBroadcast(
     broadcastData: BroadcastData, 
     adminChatId: number,
