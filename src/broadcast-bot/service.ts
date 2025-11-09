@@ -91,12 +91,13 @@ export class BroadcastService {
     adminChatId: number,
     onProgress?: (current: number, total: number, stats: { success: number; blocked: number; error: number }) => void
   ): Promise<BroadcastResult> {
-    // ВРЕМЕННО: Рассылаем только тестовым пользователям
-    const testUserIds = [6303475609, 664687823];
-    const users = testUserIds.map(id => ({ telegram_id: id }));
-    const totalUsers = users.length;
+    const client = await pool.connect();
     
     try {
+      // Получаем всех пользователей из базы данных
+      const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
+      const users = result.rows;
+      const totalUsers = users.length;
       
       let successCount = 0;
       let blockedCount = 0;
@@ -207,6 +208,8 @@ export class BroadcastService {
     } catch (error) {
       console.error('Error during broadcast:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
