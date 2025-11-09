@@ -5,7 +5,7 @@ import { BroadcastService } from './service';
 config();
 
 const BROADCAST_BOT_TOKEN = process.env.BROADCAST_BOT_TOKEN || '7283880953:AAF3dUcktQOoe6zHurL9xpEPA8ImBc-MZGk';
-const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
 
 interface BroadcastData {
   text?: string;
@@ -17,9 +17,9 @@ const bot = new Telegraf(BROADCAST_BOT_TOKEN);
 const broadcastService = new BroadcastService();
 const waitingForBroadcast = new Map<number, BroadcastData>();
 
-// Проверка админа
+// Проверка админа (такая же как в основном боте)
 function isAdmin(userId: number): boolean {
-  return ADMIN_IDS.includes(userId);
+  return ADMIN_TELEGRAM_IDS.includes(userId);
 }
 
 // Команда /start
@@ -194,7 +194,7 @@ bot.catch((err, ctx) => {
 bot.launch()
   .then(() => {
     console.log('✅ Broadcast Bot запущен и готов к работе!');
-    console.log(`👤 Админы: ${ADMIN_IDS.join(', ')}`);
+    console.log(`👤 Админы: ${ADMIN_TELEGRAM_IDS.join(', ')}`);
   })
   .catch((error) => {
     console.error('❌ Ошибка запуска бота:', error);
