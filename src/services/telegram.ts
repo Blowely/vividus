@@ -25,6 +25,7 @@ export class TelegramService {
   private pendingMergeFirstPhoto: Map<number, string> = new Map(); // userId -> fileId (для режима объединения)
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
+  private waitingForBroadcast: Map<number, { text?: string; mediaType?: string; mediaFileId?: string }> = new Map(); // adminId -> broadcast content
 
   constructor() {
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
@@ -176,6 +177,12 @@ export class TelegramService {
     
     // Photo handler
     this.bot.on('photo', this.handlePhoto.bind(this));
+    
+    // Video handler
+    this.bot.on('video', this.handleVideo.bind(this));
+    
+    // Animation handler (GIF)
+    this.bot.on('animation', this.handleAnimation.bind(this));
     
     // Document handler (for other image formats)
     this.bot.on('document', this.handleDocument.bind(this));
@@ -336,6 +343,13 @@ export class TelegramService {
   private async handlePhoto(ctx: Context) {
     try {
       const user = await this.userService.getOrCreateUser(ctx.from!);
+      
+      // Проверяем режим рассылки для админа
+      if (this.isAdmin(ctx.from!.id) && this.waitingForBroadcast.has(ctx.from!.id)) {
+        await this.handleBroadcastContent(ctx);
+        return;
+      }
+      
       const photo = (ctx.message as any)['photo'];
       const document = (ctx.message as any)['document'];
       
@@ -450,7 +464,51 @@ export class TelegramService {
     }
   }
 
+  private async handleVideo(ctx: Context) {
+    try {
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      
+      // Проверяем режим рассылки для админа
+      if (this.isAdmin(ctx.from!.id) && this.waitingForBroadcast.has(ctx.from!.id)) {
+        await this.handleBroadcastContent(ctx);
+        return;
+      }
+      
+      // Для обычных пользователей видео не обрабатываются
+      await this.sendMessage(ctx, '❌ Пожалуйста, отправьте фото (не видео) для создания анимации.');
+    } catch (error) {
+      console.error('Error handling video:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке видео.');
+    }
+  }
+
+  private async handleAnimation(ctx: Context) {
+    try {
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      
+      // Проверяем режим рассылки для админа
+      if (this.isAdmin(ctx.from!.id) && this.waitingForBroadcast.has(ctx.from!.id)) {
+        await this.handleBroadcastContent(ctx);
+        return;
+      }
+      
+      // Для обычных пользователей GIF не обрабатываются
+      await this.sendMessage(ctx, '❌ Пожалуйста, отправьте фото (не GIF) для создания анимации.');
+    } catch (error) {
+      console.error('Error handling animation:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при обработке GIF.');
+    }
+  }
+
   private async handleDocument(ctx: Context) {
+    const user = await this.userService.getOrCreateUser(ctx.from!);
+    
+    // Проверяем режим рассылки для админа
+    if (this.isAdmin(ctx.from!.id) && this.waitingForBroadcast.has(ctx.from!.id)) {
+      await this.handleBroadcastContent(ctx);
+      return;
+    }
+    
     const document = (ctx.message as any)['document'];
     const mimeType = document.mime_type;
     
@@ -652,6 +710,12 @@ export class TelegramService {
       // Проверяем, ожидает ли пользователь ввода email
       if (this.waitingForEmail.has(ctx.from!.id)) {
         await this.processEmailInput(ctx, text);
+        return;
+      }
+      
+      // Проверяем режим рассылки для админа
+      if (this.isAdmin(ctx.from!.id) && this.waitingForBroadcast.has(ctx.from!.id)) {
+        await this.handleBroadcastContent(ctx);
         return;
       }
       
@@ -943,6 +1007,38 @@ export class TelegramService {
         await ctx.answerCbQuery('◀️');
         await this.showAnalytics(ctx);
         break;
+      case 'cancel_broadcast':
+        if (this.isAdmin(ctx.from!.id)) {
+          this.waitingForBroadcast.delete(ctx.from!.id);
+          await ctx.answerCbQuery('❌ Рассылка отменена');
+          await this.sendMessage(ctx, '❌ Режим рассылки отменен');
+        }
+        break;
+      case 'broadcast_test':
+        if (this.isAdmin(ctx.from!.id)) {
+          const broadcastData = this.waitingForBroadcast.get(ctx.from!.id);
+          if (broadcastData && (broadcastData.text || broadcastData.mediaFileId)) {
+            await ctx.answerCbQuery('🧪 Отправляю тестовому пользователю...');
+            
+            const targetUserId = 6303475609;
+            const success = await this.sendBroadcastToUser(targetUserId, broadcastData);
+            
+            if (success) {
+              await this.sendMessage(ctx, `✅ Сообщение успешно отправлено тестовому пользователю (${targetUserId})`);
+            } else {
+              await this.sendMessage(ctx, `❌ Не удалось отправить сообщение тестовому пользователю`);
+            }
+            
+            // Очищаем режим рассылки
+            this.waitingForBroadcast.delete(ctx.from!.id);
+          } else {
+            await ctx.answerCbQuery('❌ Контент не найден');
+          }
+        }
+        break;
+      case 'broadcast_all_disabled':
+        await ctx.answerCbQuery('📢 Функция массовой рассылки пока в разработке');
+        break;
       default:
         if (callbackData.startsWith('buy_and_process_')) {
           // Формат: buy_and_process_{count}_{price}
@@ -1107,19 +1203,132 @@ export class TelegramService {
       return;
     }
     
-    try {
-      const targetUserId = 6303475609;
-      const testMessage = 'тест. только для 6303475609';
-      
-      await this.bot.telegram.sendMessage(targetUserId, testMessage);
-      await this.sendMessage(ctx, `✅ Сообщение отправлено пользователю ${targetUserId}`);
-    } catch (error: any) {
-      console.error('Error sending test message:', error);
-      if (this.isBlockedError(error)) {
-        await this.sendMessage(ctx, '❌ Пользователь заблокировал бота');
-      } else {
-        await this.sendMessage(ctx, `❌ Ошибка при отправке сообщения: ${error.message}`);
+    // Устанавливаем режим ожидания контента для рассылки
+    this.waitingForBroadcast.set(ctx.from!.id, {});
+    
+    await this.sendMessage(ctx, 
+      '📨 Режим тестовой рассылки\n\n' +
+      'Отправьте сообщение с текстом и/или медиа (фото/видео), которое нужно разослать.\n\n' +
+      'Сообщение будет отправлено тестовому пользователю (ID: 6303475609).',
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.callback('❌ Отменить', 'cancel_broadcast')]
+          ]
+        }
       }
+    );
+  }
+
+  private async handleBroadcastContent(ctx: Context) {
+    const adminId = ctx.from!.id;
+    const broadcastData = this.waitingForBroadcast.get(adminId);
+    
+    if (!broadcastData) return false;
+    
+    const message = ctx.message as any;
+    let text = message.text || message.caption || '';
+    let mediaType: string | undefined;
+    let mediaFileId: string | undefined;
+    
+    // Определяем тип медиа
+    if (message.photo && message.photo.length > 0) {
+      mediaType = 'photo';
+      mediaFileId = message.photo[message.photo.length - 1].file_id;
+    } else if (message.video) {
+      mediaType = 'video';
+      mediaFileId = message.video.file_id;
+    } else if (message.animation) {
+      mediaType = 'animation';
+      mediaFileId = message.animation.file_id;
+    }
+    
+    // Сохраняем контент
+    this.waitingForBroadcast.set(adminId, {
+      text: text || undefined,
+      mediaType,
+      mediaFileId
+    });
+    
+    // Показываем превью и кнопки
+    let preview = '📋 Контент для рассылки:\n\n';
+    if (mediaType) {
+      preview += `📎 Медиа: ${mediaType}\n`;
+    }
+    if (text) {
+      preview += `📝 Текст: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}\n`;
+    }
+    preview += '\nВыберите действие:';
+    
+    await this.sendMessage(ctx, preview, {
+      reply_markup: {
+        inline_keyboard: [
+          [Markup.button.callback('🧪 Отправить тестовому', 'broadcast_test')],
+          [Markup.button.callback('📢 Отправить всем (скоро)', 'broadcast_all_disabled')],
+          [Markup.button.callback('❌ Отменить', 'cancel_broadcast')]
+        ]
+      }
+    });
+    
+    return true;
+  }
+
+  private async sendBroadcastToUser(userId: number, broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }) {
+    try {
+      if (broadcastData.mediaType && broadcastData.mediaFileId) {
+        // Отправляем медиа с текстом
+        const options: any = {};
+        if (broadcastData.text) {
+          options.caption = broadcastData.text;
+        }
+        
+        if (broadcastData.mediaType === 'photo') {
+          await this.bot.telegram.sendPhoto(userId, broadcastData.mediaFileId, options);
+        } else if (broadcastData.mediaType === 'video') {
+          await this.bot.telegram.sendVideo(userId, broadcastData.mediaFileId, options);
+        } else if (broadcastData.mediaType === 'animation') {
+          await this.bot.telegram.sendAnimation(userId, broadcastData.mediaFileId, options);
+        }
+      } else if (broadcastData.text) {
+        // Отправляем только текст
+        await this.bot.telegram.sendMessage(userId, broadcastData.text);
+      }
+      return true;
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`User ${userId} blocked the bot`);
+      } else {
+        console.error(`Error sending to user ${userId}:`, error);
+      }
+      return false;
+    }
+  }
+
+  private async sendBroadcastToAll(broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }) {
+    const client = await pool.connect();
+    try {
+      // Получаем всех пользователей
+      const result = await client.query('SELECT telegram_id FROM users');
+      const users = result.rows;
+      
+      let successCount = 0;
+      let failedCount = 0;
+      
+      for (const user of users) {
+        const success = await this.sendBroadcastToUser(user.telegram_id, broadcastData);
+        if (success) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+        
+        // Задержка между отправками для избежания rate limit
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      return { successCount, failedCount, totalUsers: users.length };
+    } finally {
+      client.release();
     }
   }
 
