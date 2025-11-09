@@ -133,8 +133,12 @@ export class BroadcastService {
           errorCount++;
         }
         
-        // Обновляем прогресс каждые 10 пользователей или на последнем
-        if ((processedCount % 10 === 0 || processedCount === totalUsers) && progressMessageId) {
+        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 10
+        const shouldUpdate = totalUsers <= 10 
+          ? true // Обновляем после каждого для малого количества
+          : (processedCount % 10 === 0 || processedCount === totalUsers); // Для большого - каждые 10
+        
+        if (shouldUpdate && progressMessageId) {
           try {
             const progressText = `📢 Рассылка в процессе...\n\n` +
               `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
