@@ -5,14 +5,17 @@ WORKDIR /app
 # Копируем package files
 COPY package*.json ./
 
-# Устанавливаем зависимости
-RUN npm ci --only=production
+# Устанавливаем ВСЕ зависимости (включая dev) для сборки
+RUN npm ci
 
 # Копируем исходный код
 COPY . .
 
 # Компилируем TypeScript
 RUN npm run build
+
+# Удаляем dev-зависимости для уменьшения размера образа
+RUN npm prune --production
 
 # Открываем порт
 EXPOSE 3002
