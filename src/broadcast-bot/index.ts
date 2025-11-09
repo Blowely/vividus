@@ -4,7 +4,7 @@ import { BroadcastService } from './service';
 
 config();
 
-const BROADCAST_BOT_TOKEN = process.env.BROADCAST_BOT_TOKEN || '7283880953:AAF3dUcktQOoe6zHurL9xpEPA8ImBc-MZGk';
+const BROADCAST_BOT_TOKEN = process.env.BROADCAST_BOT_TOKEN || '';
 const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
 
 interface BroadcastData {
