@@ -1021,12 +1021,12 @@ export class TelegramService {
             await ctx.answerCbQuery('🧪 Отправляю тестовому пользователю...');
             
             const targetUserId = 6303475609;
-            const success = await this.sendBroadcastToUser(targetUserId, broadcastData);
+            const result = await this.sendBroadcastToUser(targetUserId, broadcastData);
             
-            if (success) {
+            if (result.success) {
               await this.sendMessage(ctx, `✅ Сообщение успешно отправлено тестовому пользователю (${targetUserId})`);
             } else {
-              await this.sendMessage(ctx, `❌ Не удалось отправить сообщение тестовому пользователю`);
+              await this.sendMessage(ctx, `❌ Не удалось отправить сообщение: ${result.reason === 'blocked' ? 'пользователь заблокировал бота' : 'ошибка отправки'}`);
             }
             
             // Очищаем режим рассылки
@@ -1036,8 +1036,49 @@ export class TelegramService {
           }
         }
         break;
-      case 'broadcast_all_disabled':
-        await ctx.answerCbQuery('📢 Функция массовой рассылки пока в разработке');
+      case 'broadcast_all':
+        if (this.isAdmin(ctx.from!.id)) {
+          const broadcastData = this.waitingForBroadcast.get(ctx.from!.id);
+          if (broadcastData && (broadcastData.text || broadcastData.mediaFileId)) {
+            await ctx.answerCbQuery('📢 Начинаю массовую рассылку...');
+            
+            // Отправляем начальное сообщение с прогрессом
+            const progressMsg = await this.sendMessage(ctx, '📢 Подготовка к рассылке...');
+            
+            // Запускаем рассылку с обновлением прогресса
+            const stats = await this.sendBroadcastToAll(
+              broadcastData, 
+              ctx.from!.id,
+              (progressMsg as any)?.message_id,
+              ctx.chat?.id
+            );
+            
+            // Отправляем финальную статистику
+            const finalMessage = `✅ Рассылка завершена!\n\n` +
+              `📊 Статистика:\n` +
+              `👥 Всего пользователей: ${stats.totalUsers}\n` +
+              `📤 Обработано: ${stats.processedCount}\n\n` +
+              `✅ Успешно доставлено: ${stats.successCount} (${Math.round(stats.successCount / stats.totalUsers * 100)}%)\n` +
+              `🚫 Заблокировали бота: ${stats.blockedCount} (${Math.round(stats.blockedCount / stats.totalUsers * 100)}%)\n` +
+              `❌ Ошибки отправки: ${stats.errorCount} (${Math.round(stats.errorCount / stats.totalUsers * 100)}%)`;
+            
+            try {
+              await this.bot.telegram.editMessageText(
+                ctx.chat!.id,
+                (progressMsg as any)?.message_id,
+                undefined,
+                finalMessage
+              );
+            } catch (error) {
+              await this.sendMessage(ctx, finalMessage);
+            }
+            
+            // Очищаем режим рассылки
+            this.waitingForBroadcast.delete(ctx.from!.id);
+          } else {
+            await ctx.answerCbQuery('❌ Контент не найден');
+          }
+        }
         break;
       default:
         if (callbackData.startsWith('buy_and_process_')) {
@@ -1264,7 +1305,7 @@ export class TelegramService {
       reply_markup: {
         inline_keyboard: [
           [Markup.button.callback('🧪 Отправить тестовому', 'broadcast_test')],
-          [Markup.button.callback('📢 Отправить всем (скоро)', 'broadcast_all_disabled')],
+          [Markup.button.callback('📢 Отправить всем', 'broadcast_all')],
           [Markup.button.callback('❌ Отменить', 'cancel_broadcast')]
         ]
       }
@@ -1273,7 +1314,7 @@ export class TelegramService {
     return true;
   }
 
-  private async sendBroadcastToUser(userId: number, broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }) {
+  private async sendBroadcastToUser(userId: number, broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }): Promise<{ success: boolean; reason?: string }> {
     try {
       if (broadcastData.mediaType && broadcastData.mediaFileId) {
         // Отправляем медиа с текстом
@@ -1293,40 +1334,113 @@ export class TelegramService {
         // Отправляем только текст
         await this.bot.telegram.sendMessage(userId, broadcastData.text);
       }
-      return true;
+      return { success: true };
     } catch (error: any) {
       if (this.isBlockedError(error)) {
         console.log(`User ${userId} blocked the bot`);
+        return { success: false, reason: 'blocked' };
       } else {
         console.error(`Error sending to user ${userId}:`, error);
+        return { success: false, reason: 'error' };
       }
-      return false;
     }
   }
 
-  private async sendBroadcastToAll(broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }) {
+  private getProgressBar(current: number, total: number, width: number = 20): string {
+    const percentage = Math.round((current / total) * 100);
+    const filledWidth = Math.round((current / total) * width);
+    const emptyWidth = width - filledWidth;
+    
+    const filledBar = '█'.repeat(filledWidth);
+    const emptyBar = '░'.repeat(emptyWidth);
+    
+    return `${filledBar}${emptyBar} ${percentage}%`;
+  }
+
+  private async sendBroadcastToAll(broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }, adminId: number, progressMessageId?: number, progressChatId?: number) {
     const client = await pool.connect();
     try {
       // Получаем всех пользователей
-      const result = await client.query('SELECT telegram_id FROM users');
+      const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
       const users = result.rows;
+      const totalUsers = users.length;
       
       let successCount = 0;
-      let failedCount = 0;
+      let blockedCount = 0;
+      let errorCount = 0;
+      let processedCount = 0;
       
-      for (const user of users) {
-        const success = await this.sendBroadcastToUser(user.telegram_id, broadcastData);
-        if (success) {
+      // Отправляем начальное сообщение с прогрессом
+      let progressMessage: any;
+      if (progressMessageId && progressChatId) {
+        try {
+          const initialProgress = `📢 Рассылка началась...\n\n` +
+            `📊 Прогресс: 0/${totalUsers}\n` +
+            `${this.getProgressBar(0, totalUsers)}\n\n` +
+            `✅ Успешно: 0\n` +
+            `🚫 Заблокировали: 0\n` +
+            `❌ Ошибки: 0`;
+          
+          progressMessage = await this.bot.telegram.editMessageText(
+            progressChatId,
+            progressMessageId,
+            undefined,
+            initialProgress
+          );
+        } catch (error) {
+          console.error('Error creating initial progress message:', error);
+        }
+      }
+      
+      // Рассылаем сообщения
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const result = await this.sendBroadcastToUser(user.telegram_id, broadcastData);
+        
+        processedCount++;
+        
+        if (result.success) {
           successCount++;
+        } else if (result.reason === 'blocked') {
+          blockedCount++;
         } else {
-          failedCount++;
+          errorCount++;
+        }
+        
+        // Обновляем прогресс каждые 10 пользователей или на последнем
+        if (processedCount % 10 === 0 || processedCount === totalUsers) {
+          if (progressMessageId && progressChatId) {
+            try {
+              const progressText = `📢 Рассылка в процессе...\n\n` +
+                `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+                `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+                `✅ Успешно: ${successCount}\n` +
+                `🚫 Заблокировали: ${blockedCount}\n` +
+                `❌ Ошибки: ${errorCount}`;
+              
+              await this.bot.telegram.editMessageText(
+                progressChatId,
+                progressMessageId,
+                undefined,
+                progressText
+              );
+            } catch (error) {
+              // Игнорируем ошибки обновления прогресса
+            }
+          }
         }
         
         // Задержка между отправками для избежания rate limit
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       
-      return { successCount, failedCount, totalUsers: users.length };
+      return { 
+        successCount, 
+        blockedCount, 
+        errorCount, 
+        totalUsers,
+        processedCount
+      };
     } finally {
       client.release();
     }
