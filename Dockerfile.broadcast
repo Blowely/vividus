@@ -1,0 +1,22 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Копируем package files
+COPY package*.json ./
+
+# Устанавливаем зависимости
+RUN npm ci --only=production
+
+# Копируем исходный код
+COPY . .
+
+# Компилируем TypeScript
+RUN npm run build
+
+# Открываем порт
+EXPOSE 3002
+
+# Запускаем broadcast bot
+CMD ["node", "dist/broadcast-bot/index.js"]
+
