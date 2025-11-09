@@ -1360,15 +1360,10 @@ export class TelegramService {
   private async sendBroadcastToAll(broadcastData: { text?: string; mediaType?: string; mediaFileId?: string }, adminId: number, progressMessageId?: number, progressChatId?: number) {
     const client = await pool.connect();
     try {
-      // ВРЕМЕННО: Отправляем только тестовым пользователям
-      const testUserIds = [6303475609, 664687823];
-      const users = testUserIds.map(id => ({ telegram_id: id }));
+      // Получаем всех пользователей
+      const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
+      const users = result.rows;
       const totalUsers = users.length;
-      
-      // Для полной рассылки используйте:
-      // const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
-      // const users = result.rows;
-      // const totalUsers = users.length;
       
       let successCount = 0;
       let blockedCount = 0;
