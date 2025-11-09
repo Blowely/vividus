@@ -186,6 +186,12 @@ export class TelegramService {
     // Callback query handler
     this.bot.on('callback_query', this.handleCallbackQuery.bind(this));
     
+    // Pre-checkout query handler (для оплаты звездами)
+    this.bot.on('pre_checkout_query', this.handlePreCheckoutQuery.bind(this));
+    
+    // Successful payment handler (для оплаты звездами)
+    this.bot.on('successful_payment', this.handleSuccessfulPayment.bind(this));
+    
     // Error handler
     this.bot.catch(async (err, ctx) => {
       console.error('Bot error:', err);
@@ -331,9 +337,21 @@ export class TelegramService {
     try {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       const photo = (ctx.message as any)['photo'];
+      const document = (ctx.message as any)['document'];
       
-      // Get the highest quality photo
-      const fileId = photo[photo.length - 1].file_id;
+      let fileId: string;
+      
+      // Если это фото, получаем file_id из массива фото
+      if (photo && Array.isArray(photo) && photo.length > 0) {
+        // Get the highest quality photo
+        fileId = photo[photo.length - 1].file_id;
+      } else if (document && document.file_id) {
+        // Если это документ (изображение), получаем file_id из документа
+        fileId = document.file_id;
+      } else {
+        await this.sendMessage(ctx, '❌ Не удалось получить изображение. Пожалуйста, отправьте фото заново.');
+        return;
+      }
       
       // Проверяем, является ли это частью медиа-группы
       const mediaGroupId = (ctx.message as any)['media_group_id'];
@@ -944,6 +962,8 @@ export class TelegramService {
         } else if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
           await this.handlePayOrder(ctx, orderId);
+        } else if (callbackData.startsWith('buy_generations_stars_')) {
+          await ctx.answerCbQuery('Оплата звёздами пока не доступна');
         } else if (callbackData.startsWith('buy_generations_')) {
           // Формат: buy_generations_{count}_{price}
           const parts = callbackData.replace('buy_generations_', '').split('_');
@@ -1692,6 +1712,273 @@ ${packageListText}
       console.error('Error creating generation purchase:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+    }
+  }
+
+  private async handleBuyGenerationsStars(ctx: Context) {
+    try {
+      await ctx.answerCbQuery();
+      
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      const currentGenerations = await this.userService.getUserGenerations(ctx.from!.id);
+      
+      // Пакеты генераций (те же цены, но в звездах)
+      // Конвертация: 1 рубль ≈ 1 звезда
+      const packages = [
+        { count: 1, price: 69 },
+        { count: 3, price: 207 },
+        { count: 5, price: 345 },
+        { count: 10, price: 690 }
+      ];
+      
+      const message = `⭐ Оплата звёздами Telegram
+
+💼 У вас осталось генераций: ${currentGenerations}
+
+Выберите пакет:`;
+      
+      const keyboard = packages.map(pkg => {
+        const buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → ⭐ ${pkg.price} звёзд`;
+        return [
+          Markup.button.callback(
+            buttonText,
+            `buy_generations_stars_${pkg.count}_${pkg.price}`
+          )
+        ];
+      });
+      
+      keyboard.push(this.getBackButton());
+      
+      await this.sendMessage(ctx, message, {
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    } catch (error) {
+      console.error('Error showing buy generations stars menu:', error);
+      await this.sendMessage(ctx, '❌ Ошибка при загрузке меню оплаты звёздами');
+    }
+  }
+
+  private async handlePurchaseGenerationsStars(ctx: Context, generationsCount: number, stars: number) {
+    try {
+      await ctx.answerCbQuery();
+      
+      console.log(`⭐ Creating stars payment: ${generationsCount} generations for ${stars} stars, user: ${ctx.from!.id}`);
+      
+      // Создаем платеж в БД (сохраняем сумму в рублях для совместимости, но помечаем как оплату звездами)
+      const payment = await this.paymentService.createGenerationPurchase(ctx.from!.id, generationsCount, stars);
+      console.log(`✅ Payment created: ${payment.id}`);
+      
+      // Создаем инвойс со звездами
+      const invoicePayload = `stars_${payment.id}_${generationsCount}`;
+      
+      try {
+        await ctx.replyWithInvoice({
+          title: `Покупка ${generationsCount} ${this.getGenerationWord(generationsCount)}`,
+          description: `Пополнение баланса генераций для обработки фотографий`,
+          payload: invoicePayload,
+          provider_token: '', // Не требуется для звезд
+          currency: 'XTR', // Код валюты для звезд Telegram
+          prices: [
+            {
+              label: `${generationsCount} ${this.getGenerationWord(generationsCount)}`,
+              amount: stars * 100 // Telegram требует сумму в минимальных единицах (для звезд это сотые)
+            }
+          ],
+          start_parameter: invoicePayload,
+          need_name: false,
+          need_phone_number: false,
+          need_email: false,
+          need_shipping_address: false,
+          send_phone_number_to_provider: false,
+          send_email_to_provider: false,
+          is_flexible: false
+        });
+      } catch (error: any) {
+        console.error('Error sending invoice:', error);
+        if (this.isBlockedError(error)) {
+          console.log(`Bot is blocked by user ${ctx.from?.id}, skipping invoice`);
+          return;
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error creating stars payment:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+    }
+  }
+
+  private async handlePreCheckoutQuery(ctx: any) {
+    try {
+      const query = ctx.preCheckoutQuery || ctx.update?.pre_checkout_query;
+      if (!query) {
+        console.error('Pre-checkout query not found in context');
+        return;
+      }
+      const payload = query.invoice_payload;
+      
+      console.log(`🔍 Pre-checkout query received: ${payload}`);
+      
+      // Проверяем формат payload: stars_{paymentId}_{generationsCount}
+      if (!payload.startsWith('stars_')) {
+        await ctx.answerPreCheckoutQuery(false, {
+          error_message: 'Неверный формат платежа'
+        });
+        return;
+      }
+      
+      const parts = payload.replace('stars_', '').split('_');
+      if (parts.length !== 2) {
+        await ctx.answerPreCheckoutQuery(false, {
+          error_message: 'Неверный формат данных платежа'
+        });
+        return;
+      }
+      
+      const paymentId = parts[0];
+      const generationsCount = parseInt(parts[1], 10);
+      
+      // Проверяем, что платеж существует
+      const client = await pool.connect();
+      try {
+        const paymentResult = await client.query(
+          'SELECT * FROM payments WHERE id = $1',
+          [paymentId]
+        );
+        
+        if (!paymentResult.rows[0]) {
+          await ctx.answerPreCheckoutQuery(false, {
+            error_message: 'Платеж не найден'
+          });
+          return;
+        }
+        
+        // Подтверждаем оплату
+        await ctx.answerPreCheckoutQuery(true);
+        console.log(`✅ Pre-checkout query approved for payment ${paymentId}`);
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error('Error handling pre-checkout query:', error);
+      try {
+        await ctx.answerPreCheckoutQuery(false, {
+          error_message: 'Ошибка при обработке запроса'
+        });
+      } catch (e) {
+        console.error('Error answering pre-checkout query:', e);
+      }
+    }
+  }
+
+  private async handleSuccessfulPayment(ctx: any) {
+    try {
+      const payment = ctx.message?.successful_payment || ctx.update?.message?.successful_payment;
+      if (!payment) {
+        console.error('Successful payment not found in context');
+        return;
+      }
+      const payload = payment.invoice_payload;
+      
+      console.log(`✅ Successful payment received: ${payload}, amount: ${payment.total_amount} ${payment.currency}`);
+      
+      // Проверяем формат payload: stars_{paymentId}_{generationsCount}
+      if (!payload.startsWith('stars_')) {
+        console.error(`Invalid payload format: ${payload}`);
+        return;
+      }
+      
+      const parts = payload.replace('stars_', '').split('_');
+      if (parts.length !== 2) {
+        console.error(`Invalid payload parts: ${payload}`);
+        return;
+      }
+      
+      const paymentId = parts[0];
+      const generationsCount = parseInt(parts[1], 10);
+      const starsAmount = payment.total_amount / 100; // Конвертируем из минимальных единиц
+      
+      console.log(`📦 Processing stars payment: paymentId=${paymentId}, generations=${generationsCount}, stars=${starsAmount}`);
+      
+      // Обновляем статус платежа
+      await this.paymentService.updatePaymentStatus(paymentId, 'success' as any);
+      
+      // Получаем информацию о платеже
+      const client = await pool.connect();
+      try {
+        const paymentResult = await client.query(
+          'SELECT user_id FROM payments WHERE id = $1',
+          [paymentId]
+        );
+        
+        if (!paymentResult.rows[0]) {
+          console.error(`Payment ${paymentId} not found`);
+          return;
+        }
+        
+        const userId = paymentResult.rows[0].user_id;
+        
+        // Получаем telegram_id пользователя
+        const userResult = await client.query(
+          'SELECT telegram_id, start_param FROM users WHERE id = $1',
+          [userId]
+        );
+        
+        if (!userResult.rows[0]) {
+          console.error(`User not found for payment ${paymentId}`);
+          return;
+        }
+        
+        const telegramId = userResult.rows[0].telegram_id;
+        const startParam = userResult.rows[0].start_param;
+        
+        // Добавляем генерации пользователю
+        const { UserService } = await import('./user');
+        const userService = new UserService();
+        
+        console.log(`➕ Adding ${generationsCount} generations to user ${telegramId}`);
+        await userService.addGenerations(telegramId, generationsCount);
+        
+        const newBalance = await userService.getUserGenerations(telegramId);
+        console.log(`✅ New balance: ${newBalance} generations`);
+        
+        // Отправляем уведомление пользователю
+        try {
+          await this.bot.telegram.sendMessage(
+            telegramId,
+            `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций\n⭐ Оплачено: ${starsAmount} звёзд`
+          );
+        } catch (error: any) {
+          if (this.isBlockedError(error)) {
+            console.log(`Bot is blocked by user ${telegramId}, skipping notification`);
+          } else {
+            throw error;
+          }
+        }
+        
+        // Обновляем статистику кампании
+        if (startParam) {
+          try {
+            const { AnalyticsService } = await import('./analytics');
+            const analyticsService = new AnalyticsService();
+            await analyticsService.updateCampaignStats(startParam);
+          } catch (error) {
+            console.error('Error updating campaign stats after stars payment:', error);
+          }
+        }
+        
+        // Сохраняем информацию о методе оплаты (можно добавить отдельное поле в будущем)
+        // Пока просто логируем
+        console.log(`💾 Stars payment saved: paymentId=${paymentId}, stars=${starsAmount}`);
+        
+      } finally {
+        client.release();
+      }
+      
+    } catch (error) {
+      console.error('Error handling successful payment:', error);
     }
   }
 

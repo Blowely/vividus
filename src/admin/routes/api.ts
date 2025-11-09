@@ -1113,5 +1113,75 @@ router.get('/analytics/user/:userId', async (req, res) => {
   }
 });
 
+// Получить данные о росте пользователей (общий рост)
+router.get('/analytics/users-growth', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      
+      const result = await client.query(`
+        SELECT 
+          DATE(created_at) as date,
+          COUNT(*) as new_users,
+          SUM(COUNT(*)) OVER (ORDER BY DATE(created_at)) as total_users
+        FROM users
+        WHERE created_at >= NOW() - INTERVAL '${days} days'
+        GROUP BY DATE(created_at)
+        ORDER BY date
+      `);
+      
+      res.json(result.rows);
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching users growth:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Получить данные о росте пользователей по кампаниям
+router.get('/analytics/users-growth-by-campaign', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const campaign = req.query.campaign as string;
+      
+      let query = `
+        SELECT 
+          DATE(created_at) as date,
+          start_param as campaign,
+          COUNT(*) as new_users,
+          SUM(COUNT(*)) OVER (PARTITION BY start_param ORDER BY DATE(created_at)) as total_users
+        FROM users
+        WHERE created_at >= NOW() - INTERVAL '${days} days'
+          AND start_param IS NOT NULL AND start_param != ''
+      `;
+      
+      if (campaign) {
+        query += ` AND start_param = $1`;
+      }
+      
+      query += `
+        GROUP BY DATE(created_at), start_param
+        ORDER BY date, start_param
+      `;
+      
+      const result = campaign 
+        ? await client.query(query, [campaign])
+        : await client.query(query);
+      
+      res.json(result.rows);
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching users growth by campaign:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
 
