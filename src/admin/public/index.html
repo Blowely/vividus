@@ -2231,9 +2231,17 @@
                 
                 <div class="analytics-charts" style="display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 40px;">
                     <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 8px; font-size: 16px;">📈 Рост пользователей</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                            <h3 style="margin: 0; font-size: 16px;">📈 Рост пользователей</h3>
+                            <div style="display: flex; gap: 5px;">
+                                <button class="range-btn" data-range="3h" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">3ч</button>
+                                <button class="range-btn" data-range="24h" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">24ч</button>
+                                <button class="range-btn" data-range="7d" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">7д</button>
+                                <button class="range-btn active" data-range="30d" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #667eea; background: #667eea; color: white; border-radius: 4px;">30д</button>
+                            </div>
+                        </div>
                         <p style="font-size: 12px; color: #666; margin-bottom: 15px; line-height: 1.4;">
-                            Показывает динамику роста общего количества пользователей за последние 30 дней.
+                            Показывает динамику роста общего количества пользователей.
                         </p>
                         <div style="position: relative; height: 300px;">
                             <canvas id="usersGrowthChart"></canvas>
@@ -2241,9 +2249,17 @@
                     </div>
                     
                     <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 8px; font-size: 16px;">📊 Рост пользователей по кампаниям</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                            <h3 style="margin: 0; font-size: 16px;">📊 Рост пользователей по кампаниям</h3>
+                            <div style="display: flex; gap: 5px;">
+                                <button class="range-btn-campaigns" data-range="3h" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">3ч</button>
+                                <button class="range-btn-campaigns" data-range="24h" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">24ч</button>
+                                <button class="range-btn-campaigns" data-range="7d" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px;">7д</button>
+                                <button class="range-btn-campaigns active" data-range="30d" style="padding: 5px 10px; font-size: 11px; cursor: pointer; border: 1px solid #667eea; background: #667eea; color: white; border-radius: 4px;">30д</button>
+                            </div>
+                        </div>
                         <p style="font-size: 12px; color: #666; margin-bottom: 15px; line-height: 1.4;">
-                            Показывает динамику роста пользователей в разрезе рекламных кампаний за последние 30 дней.
+                            Показывает динамику роста пользователей в разрезе рекламных кампаний.
                         </p>
                         <div style="position: relative; height: 300px;">
                             <canvas id="campaignsGrowthChart"></canvas>
@@ -2331,11 +2347,54 @@
             setTimeout(() => {
                 drawOrdersChart(stats);
                 drawJobsChart(stats);
-                drawUsersGrowthChart();
-                drawCampaignsGrowthChart();
+                drawUsersGrowthChart(currentUsersRange);
+                drawCampaignsGrowthChart(currentCampaignsRange);
                 if (campaigns.length > 0) {
                     drawCampaignsChart(campaigns);
                 }
+                
+                // Добавляем обработчики кнопок переключения диапазона
+                document.querySelectorAll('.range-btn').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        const range = e.target.dataset.range;
+                        
+                        // Обновляем активную кнопку
+                        document.querySelectorAll('.range-btn').forEach(b => {
+                            b.style.background = 'white';
+                            b.style.color = '#333';
+                            b.style.border = '1px solid #ddd';
+                            b.classList.remove('active');
+                        });
+                        e.target.style.background = '#667eea';
+                        e.target.style.color = 'white';
+                        e.target.style.border = '1px solid #667eea';
+                        e.target.classList.add('active');
+                        
+                        // Перерисовываем график
+                        await drawUsersGrowthChart(range);
+                    });
+                });
+                
+                document.querySelectorAll('.range-btn-campaigns').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        const range = e.target.dataset.range;
+                        
+                        // Обновляем активную кнопку
+                        document.querySelectorAll('.range-btn-campaigns').forEach(b => {
+                            b.style.background = 'white';
+                            b.style.color = '#333';
+                            b.style.border = '1px solid #ddd';
+                            b.classList.remove('active');
+                        });
+                        e.target.style.background = '#667eea';
+                        e.target.style.color = 'white';
+                        e.target.style.border = '1px solid #667eea';
+                        e.target.classList.add('active');
+                        
+                        // Перерисовываем график
+                        await drawCampaignsGrowthChart(range);
+                    });
+                });
             }, 100);
         }
 
@@ -2485,13 +2544,20 @@
             });
         }
 
-        async function drawUsersGrowthChart() {
+        let currentUsersRange = '30d';
+        let currentCampaignsRange = '30d';
+
+        async function drawUsersGrowthChart(range = '30d') {
             const canvas = document.getElementById('usersGrowthChart');
             if (!canvas) return;
             
+            currentUsersRange = range;
+            
             try {
-                const response = await fetch('/api/analytics/users-growth?days=30');
-                const data = await response.json();
+                const response = await fetch(`/api/analytics/users-growth?range=${range}`);
+                const result = await response.json();
+                const data = result.data;
+                const format = result.format;
                 
                 // Уничтожаем предыдущий график если есть
                 if (usersGrowthChart) {
@@ -2500,6 +2566,14 @@
                 
                 const labels = data.map(d => {
                     const date = new Date(d.date);
+                    if (format === 'datetime') {
+                        return date.toLocaleString('ru-RU', { 
+                            day: '2-digit', 
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    }
                     return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
                 });
                 const newUsers = data.map(d => parseInt(d.new_users));
@@ -2595,13 +2669,17 @@
             }
         }
 
-        async function drawCampaignsGrowthChart() {
+        async function drawCampaignsGrowthChart(range = '30d') {
             const canvas = document.getElementById('campaignsGrowthChart');
             if (!canvas) return;
             
+            currentCampaignsRange = range;
+            
             try {
-                const response = await fetch('/api/analytics/users-growth-by-campaign?days=30');
-                const data = await response.json();
+                const response = await fetch(`/api/analytics/users-growth-by-campaign?range=${range}`);
+                const result = await response.json();
+                const data = result.data;
+                const format = result.format;
                 
                 // Уничтожаем предыдущий график если есть
                 if (campaignsGrowthChart) {
@@ -2625,6 +2703,14 @@
                 const allDates = [...new Set(data.map(d => d.date))].sort();
                 const labels = allDates.map(date => {
                     const d = new Date(date);
+                    if (format === 'datetime') {
+                        return d.toLocaleString('ru-RU', { 
+                            day: '2-digit', 
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    }
                     return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
                 });
                 

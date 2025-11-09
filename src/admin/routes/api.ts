@@ -1118,20 +1118,43 @@ router.get('/analytics/users-growth', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
-      const days = parseInt(req.query.days as string) || 30;
+      const range = req.query.range as string || '30d';
+      
+      // Определяем интервал и группировку
+      let interval = '30 days';
+      let groupBy = 'DATE(created_at)';
+      let dateFormat = 'date';
+      
+      if (range === '3h') {
+        interval = '3 hours';
+        groupBy = "DATE_TRUNC('minute', created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM created_at)::int / 5)";
+        dateFormat = 'datetime';
+      } else if (range === '24h') {
+        interval = '24 hours';
+        groupBy = "DATE_TRUNC('hour', created_at)";
+        dateFormat = 'datetime';
+      } else if (range === '7d') {
+        interval = '7 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      } else if (range === '30d') {
+        interval = '30 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      }
       
       const result = await client.query(`
         SELECT 
-          DATE(created_at) as date,
+          ${groupBy} as date,
           COUNT(*) as new_users,
-          SUM(COUNT(*)) OVER (ORDER BY DATE(created_at)) as total_users
+          SUM(COUNT(*)) OVER (ORDER BY ${groupBy}) as total_users
         FROM users
-        WHERE created_at >= NOW() - INTERVAL '${days} days'
-        GROUP BY DATE(created_at)
+        WHERE created_at >= NOW() - INTERVAL '${interval}'
+        GROUP BY ${groupBy}
         ORDER BY date
       `);
       
-      res.json(result.rows);
+      res.json({ data: result.rows, format: dateFormat });
     } finally {
       client.release();
     }
@@ -1146,17 +1169,40 @@ router.get('/analytics/users-growth-by-campaign', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
-      const days = parseInt(req.query.days as string) || 30;
+      const range = req.query.range as string || '30d';
       const campaign = req.query.campaign as string;
+      
+      // Определяем интервал и группировку
+      let interval = '30 days';
+      let groupBy = 'DATE(created_at)';
+      let dateFormat = 'date';
+      
+      if (range === '3h') {
+        interval = '3 hours';
+        groupBy = "DATE_TRUNC('minute', created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM created_at)::int / 5)";
+        dateFormat = 'datetime';
+      } else if (range === '24h') {
+        interval = '24 hours';
+        groupBy = "DATE_TRUNC('hour', created_at)";
+        dateFormat = 'datetime';
+      } else if (range === '7d') {
+        interval = '7 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      } else if (range === '30d') {
+        interval = '30 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      }
       
       let query = `
         SELECT 
-          DATE(created_at) as date,
+          ${groupBy} as date,
           start_param as campaign,
           COUNT(*) as new_users,
-          SUM(COUNT(*)) OVER (PARTITION BY start_param ORDER BY DATE(created_at)) as total_users
+          SUM(COUNT(*)) OVER (PARTITION BY start_param ORDER BY ${groupBy}) as total_users
         FROM users
-        WHERE created_at >= NOW() - INTERVAL '${days} days'
+        WHERE created_at >= NOW() - INTERVAL '${interval}'
           AND start_param IS NOT NULL AND start_param != ''
       `;
       
@@ -1165,7 +1211,7 @@ router.get('/analytics/users-growth-by-campaign', async (req, res) => {
       }
       
       query += `
-        GROUP BY DATE(created_at), start_param
+        GROUP BY ${groupBy}, start_param
         ORDER BY date, start_param
       `;
       
@@ -1173,7 +1219,7 @@ router.get('/analytics/users-growth-by-campaign', async (req, res) => {
         ? await client.query(query, [campaign])
         : await client.query(query);
       
-      res.json(result.rows);
+      res.json({ data: result.rows, format: dateFormat });
     } finally {
       client.release();
     }
