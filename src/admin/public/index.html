@@ -2917,7 +2917,9 @@
                             backgroundColor: 'rgba(54, 162, 235, 0.2)',
                             borderColor: 'rgba(54, 162, 235, 1)',
                             borderWidth: 2,
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 4,
+                            pointHoverRadius: 6
                         },
                         {
                             label: 'Заказы',
@@ -2925,7 +2927,9 @@
                             backgroundColor: 'rgba(255, 206, 86, 0.2)',
                             borderColor: 'rgba(255, 206, 86, 1)',
                             borderWidth: 2,
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 4,
+                            pointHoverRadius: 6
                         },
                         {
                             label: 'Генерации',
@@ -2933,7 +2937,9 @@
                             backgroundColor: 'rgba(155, 89, 182, 0.2)',
                             borderColor: 'rgba(155, 89, 182, 1)',
                             borderWidth: 2,
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 4,
+                            pointHoverRadius: 6
                         },
                         {
                             label: 'Платежи',
@@ -2941,7 +2947,9 @@
                             backgroundColor: 'rgba(75, 192, 192, 0.2)',
                             borderColor: 'rgba(75, 192, 192, 1)',
                             borderWidth: 2,
-                            tension: 0.4
+                            tension: 0.4,
+                            pointRadius: 4,
+                            pointHoverRadius: 6
                         }
                     ];
                 } else if (metric === 'users') {
@@ -2952,7 +2960,9 @@
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
                     }];
                 } else if (metric === 'orders') {
                     datasets = [{
@@ -2962,7 +2972,9 @@
                         borderColor: 'rgba(255, 206, 86, 1)',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
                     }];
                 } else if (metric === 'generations') {
                     datasets = [{
@@ -2972,7 +2984,9 @@
                         borderColor: 'rgba(155, 89, 182, 1)',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
                     }];
                 } else if (metric === 'payments') {
                     datasets = [{
@@ -2982,7 +2996,9 @@
                         borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
                     }];
                 } else if (metric === 'revenue') {
                     datasets = [{
@@ -2992,7 +3008,9 @@
                         borderColor: 'rgba(39, 174, 96, 1)',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
                     }];
                 }
                 
@@ -3007,7 +3025,7 @@
                         maintainAspectRatio: false,
                         plugins: {
                             legend: {
-                                display: true,
+                                display: metric === 'all',
                                 position: 'top'
                             },
                             title: {

@@ -220,6 +220,116 @@ export class BroadcastService {
     }
   }
 
+  // Проверка только органических пользователей (исключая кампанию "unu")
+  async checkOrganicUsersStatus(adminChatId: number): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      // Получаем только органических пользователей (исключаем кампанию "unu")
+      const result = await client.query(
+        `SELECT telegram_id FROM users 
+         WHERE start_param IS NULL OR start_param != 'unu' 
+         ORDER BY telegram_id`
+      );
+      const users = result.rows;
+      const totalUsers = users.length;
+      
+      let activeCount = 0;
+      let blockedCount = 0;
+      let errorCount = 0;
+      let processedCount = 0;
+      
+      // Отправляем начальное сообщение
+      const initialMessage = `🔍 Проверка статуса органических пользователей...\n\n` +
+        `📊 Прогресс: 0/${totalUsers}\n` +
+        `${this.getProgressBar(0, totalUsers)}\n\n` +
+        `✅ Активны: 0\n` +
+        `🚫 Заблокировали: 0\n` +
+        `❌ Ошибки: 0\n\n` +
+        `ℹ️ Исключены пользователи из кампании "unu"`;
+      
+      const progressMsg = await this.adminBot.telegram.sendMessage(adminChatId, initialMessage);
+      const progressMessageId = progressMsg.message_id;
+      
+      // Проверяем каждого пользователя
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const status = await this.checkUserStatus(user.telegram_id);
+        
+        processedCount++;
+        
+        if (status.active) {
+          activeCount++;
+        } else if (status.reason === 'blocked') {
+          blockedCount++;
+        } else {
+          errorCount++;
+        }
+        
+        // Обновляем прогресс
+        const shouldUpdate = totalUsers <= 10 
+          ? true 
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
+        
+        if (shouldUpdate) {
+          try {
+            const progressText = `🔍 Проверка статуса органических пользователей...\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Активны: ${activeCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}\n\n` +
+              `ℹ️ Исключены пользователи из кампании "unu"`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
+            // Игнорируем ошибки обновления
+          }
+        }
+        
+        // Небольшая задержка чтобы не получить rate limit
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      // Финальная статистика
+      const finalMessage = `✅ Проверка органических пользователей завершена!\n\n` +
+        `📊 Статистика на ${this.getCurrentDateTime()}:\n\n` +
+        `👥 Всего органических пользователей: ${totalUsers}\n` +
+        `📤 Обработано: ${processedCount}\n\n` +
+        `✅ Активны (бот не заблокирован): ${activeCount} (${totalUsers > 0 ? Math.round(activeCount / totalUsers * 100) : 0}%)\n` +
+        `🚫 Заблокировали бота: ${blockedCount} (${totalUsers > 0 ? Math.round(blockedCount / totalUsers * 100) : 0}%)\n` +
+        `❌ Ошибки проверки: ${errorCount} (${totalUsers > 0 ? Math.round(errorCount / totalUsers * 100) : 0}%)\n\n` +
+        `ℹ️ Исключены пользователи из кампании "unu"`;
+      
+      try {
+        await this.adminBot.telegram.editMessageText(
+          adminChatId,
+          progressMessageId,
+          undefined,
+          finalMessage
+        );
+      } catch (error) {
+        await this.adminBot.telegram.sendMessage(adminChatId, finalMessage);
+      }
+      
+      console.log(`Organic users status check completed: ${activeCount}/${totalUsers} active, ${blockedCount} blocked`);
+      
+    } catch (error) {
+      console.error('Error during organic users status check:', error);
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        '❌ Ошибка при проверке статуса органических пользователей'
+      );
+    } finally {
+      client.release();
+    }
+  }
+
   private async sendBroadcast(
     broadcastData: BroadcastData, 
     adminChatId: number,
