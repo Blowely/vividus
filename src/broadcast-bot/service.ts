@@ -123,7 +123,7 @@ export class BroadcastService {
     const client = await pool.connect();
     
     try {
-      const result = await client.query('SELECT telegram_id FROM users ORDER BY telegram_id');
+      const result = await client.query('SELECT telegram_id, start_param FROM users ORDER BY telegram_id');
       const users = result.rows;
       const totalUsers = users.length;
       
@@ -131,6 +131,12 @@ export class BroadcastService {
       let blockedCount = 0;
       let errorCount = 0;
       let processedCount = 0;
+      
+      // Статистика по неорганическим пользователям (unu)
+      let unuActiveCount = 0;
+      let unuBlockedCount = 0;
+      let unuErrorCount = 0;
+      let unuTotalCount = 0;
       
       // Отправляем начальное сообщение
       const initialMessage = `🔍 Проверка статуса пользователей...\n\n` +
@@ -146,16 +152,30 @@ export class BroadcastService {
       // Проверяем каждого пользователя
       for (let i = 0; i < users.length; i++) {
         const user = users[i];
+        const isUnu = user.start_param === 'unu';
         const status = await this.checkUserStatus(user.telegram_id);
         
         processedCount++;
         
+        // Общая статистика
         if (status.active) {
           activeCount++;
         } else if (status.reason === 'blocked') {
           blockedCount++;
         } else {
           errorCount++;
+        }
+        
+        // Статистика по неорганическим пользователям (unu)
+        if (isUnu) {
+          unuTotalCount++;
+          if (status.active) {
+            unuActiveCount++;
+          } else if (status.reason === 'blocked') {
+            unuBlockedCount++;
+          } else {
+            unuErrorCount++;
+          }
         }
         
         // Обновляем прогресс
@@ -188,13 +208,23 @@ export class BroadcastService {
       }
       
       // Финальная статистика
-      const finalMessage = `✅ Проверка завершена!\n\n` +
+      let finalMessage = `✅ Проверка завершена!\n\n` +
         `📊 Статистика на ${this.getCurrentDateTime()}:\n\n` +
         `👥 Всего пользователей: ${totalUsers}\n` +
         `📤 Обработано: ${processedCount}\n\n` +
-        `✅ Активны (бот не заблокирован): ${activeCount} (${Math.round(activeCount / totalUsers * 100)}%)\n` +
-        `🚫 Заблокировали бота: ${blockedCount} (${Math.round(blockedCount / totalUsers * 100)}%)\n` +
-        `❌ Ошибки проверки: ${errorCount} (${Math.round(errorCount / totalUsers * 100)}%)`;
+        `✅ Активны (бот не заблокирован): ${activeCount} (${totalUsers > 0 ? Math.round(activeCount / totalUsers * 100) : 0}%)\n` +
+        `🚫 Заблокировали бота: ${blockedCount} (${totalUsers > 0 ? Math.round(blockedCount / totalUsers * 100) : 0}%)\n` +
+        `❌ Ошибки проверки: ${errorCount} (${totalUsers > 0 ? Math.round(errorCount / totalUsers * 100) : 0}%)`;
+      
+      // Добавляем статистику по неорганическим пользователям (unu)
+      if (unuTotalCount > 0) {
+        finalMessage += `\n\n━━━━━━━━━━━━━━━━━━━━\n` +
+          `📊 Неорганические пользователи (unu):\n` +
+          `👥 Всего: ${unuTotalCount}\n` +
+          `✅ Успешно: ${unuActiveCount} (${Math.round(unuActiveCount / unuTotalCount * 100)}%)\n` +
+          `🚫 Заблокировали бота: ${unuBlockedCount} (${Math.round(unuBlockedCount / unuTotalCount * 100)}%)\n` +
+          `❌ Неуспешно: ${unuErrorCount} (${Math.round(unuErrorCount / unuTotalCount * 100)}%)`;
+      }
       
       try {
         await this.adminBot.telegram.editMessageText(

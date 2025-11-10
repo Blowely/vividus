@@ -629,31 +629,31 @@ router.get('/stats/summary', async (req, res) => {
         ),
         periods AS (
           SELECT 
-            DATE_TRUNC('day', NOW()) as today_start,
-            DATE_TRUNC('day', NOW()) - INTERVAL '2 days' as three_days_start,
-            DATE_TRUNC('day', NOW()) - INTERVAL '6 days' as week_start
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) as today_start,
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) - INTERVAL '2 days' as three_days_start,
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) - INTERVAL '6 days' as week_start
         )
         SELECT 
           -- Сегодня
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT today_start FROM periods) ${userCampaignFilter}) as users_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods)) as orders_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods) AND orders.status = 'completed') as generations_today,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
           
           -- За 3 дня
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT three_days_start FROM periods) ${userCampaignFilter}) as users_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods) AND orders.status = 'completed') as generations_3d,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
           
           -- За неделю
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT week_start FROM periods) ${userCampaignFilter}) as users_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods)) as orders_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods) AND orders.status = 'completed') as generations_week,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
           
           -- Метрики возвращаемости
           (SELECT COUNT(*) FROM users WHERE (SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params)) as total_users,
@@ -745,10 +745,10 @@ router.get('/stats/summary-daily', async (req, res) => {
       
       let startDateQuery = '';
       if (range === '7d') {
-        // 7 полных дней (с начала дня 7 дней назад)
-        startDateQuery = `DATE_TRUNC('day', NOW()) - INTERVAL '6 days'`;
+        // 7 полных дней (с начала дня 7 дней назад в МСК)
+        startDateQuery = `DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) - INTERVAL '6 days'`;
       } else if (range === '30d') {
-        // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней (с начала дня 30 дней назад)
+        // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней (с начала дня 30 дней назад в МСК)
         startDateQuery = `(
           SELECT GREATEST(
             LEAST(
@@ -756,7 +756,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            DATE_TRUNC('day', NOW()) - INTERVAL '29 days'
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) - INTERVAL '29 days'
           )
         )`;
       } else if (range === 'all') {
@@ -768,7 +768,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            DATE_TRUNC('day', NOW()) - INTERVAL '30 days'
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) - INTERVAL '30 days'
           )
         )`;
       }
@@ -781,7 +781,7 @@ router.get('/stats/summary-daily', async (req, res) => {
           SELECT DATE(day) as date
           FROM generate_series(
             DATE(${startDateQuery}),
-            NOW(),
+            (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')::date,
             '1 day'::interval
           ) day
         )
@@ -819,7 +819,7 @@ router.get('/stats/summary-daily', async (req, res) => {
         ) g ON ds.date = g.date
         LEFT JOIN (
           SELECT 
-            DATE(p.updated_at) as date, 
+            DATE((p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')) as date, 
             COUNT(*) as new_payments,
             COALESCE(SUM(p.amount), 0) as revenue
           FROM payments p
@@ -827,8 +827,8 @@ router.get('/stats/summary-daily', async (req, res) => {
           LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
           WHERE p.status = 'success'
             AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))
-            AND p.updated_at >= DATE(${startDateQuery})
-          GROUP BY DATE(p.updated_at)
+            AND (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE(${startDateQuery})
+          GROUP BY DATE((p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))
         ) p ON ds.date = p.date
         ORDER BY ds.date
       `, params);
@@ -1479,26 +1479,26 @@ router.get('/analytics/payments-growth', async (req, res) => {
     try {
       const range = req.query.range as string || '30d';
       
-      // Определяем интервал и группировку
+      // Определяем интервал и группировку (все в МСК)
       let interval = '30 days';
-      let groupBy = 'DATE(updated_at)';
+      let groupBy = "DATE((updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
       let dateFormat = 'date';
       
       if (range === '3h') {
         interval = '3 hours';
-        groupBy = "DATE_TRUNC('minute', updated_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM updated_at)::int / 5)";
+        groupBy = "DATE_TRUNC('minute', (updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM (updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))::int / 5)";
         dateFormat = 'datetime';
       } else if (range === '24h') {
         interval = '24 hours';
-        groupBy = "DATE_TRUNC('hour', updated_at)";
+        groupBy = "DATE_TRUNC('hour', (updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'datetime';
       } else if (range === '7d') {
         interval = '7 days';
-        groupBy = 'DATE(updated_at)';
+        groupBy = "DATE((updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'date';
       } else if (range === '30d') {
         interval = '30 days';
-        groupBy = 'DATE(updated_at)';
+        groupBy = "DATE((updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'date';
       }
       
@@ -1509,7 +1509,7 @@ router.get('/analytics/payments-growth', async (req, res) => {
           COALESCE(SUM(amount), 0) as total_amount,
           SUM(COUNT(*)) OVER (ORDER BY ${groupBy}) as total_payments
         FROM payments
-        WHERE updated_at >= NOW() - INTERVAL '${interval}'
+        WHERE (updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') - INTERVAL '${interval}'
           AND status = 'success'
         GROUP BY ${groupBy}
         ORDER BY date
@@ -1533,26 +1533,26 @@ router.get('/analytics/payments-growth-by-campaign', async (req, res) => {
       const range = req.query.range as string || '30d';
       const campaign = req.query.campaign as string;
       
-      // Определяем интервал и группировку
+      // Определяем интервал и группировку (все в МСК)
       let interval = '30 days';
-      let groupBy = 'DATE(p.updated_at)';
+      let groupBy = "DATE((p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
       let dateFormat = 'date';
       
       if (range === '3h') {
         interval = '3 hours';
-        groupBy = "DATE_TRUNC('minute', p.updated_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM p.updated_at)::int / 5)";
+        groupBy = "DATE_TRUNC('minute', (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))::int / 5)";
         dateFormat = 'datetime';
       } else if (range === '24h') {
         interval = '24 hours';
-        groupBy = "DATE_TRUNC('hour', p.updated_at)";
+        groupBy = "DATE_TRUNC('hour', (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'datetime';
       } else if (range === '7d') {
         interval = '7 days';
-        groupBy = 'DATE(p.updated_at)';
+        groupBy = "DATE((p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'date';
       } else if (range === '30d') {
         interval = '30 days';
-        groupBy = 'DATE(p.updated_at)';
+        groupBy = "DATE((p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow'))";
         dateFormat = 'date';
       }
       
@@ -1566,7 +1566,7 @@ router.get('/analytics/payments-growth-by-campaign', async (req, res) => {
         FROM payments p
         LEFT JOIN orders o ON p.order_id = o.id
         LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
-        WHERE p.updated_at >= NOW() - INTERVAL '${interval}'
+        WHERE (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') - INTERVAL '${interval}'
           AND p.status = 'success'
           AND u.id IS NOT NULL
       `;
