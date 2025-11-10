@@ -629,9 +629,9 @@ router.get('/stats/summary', async (req, res) => {
         ),
         periods AS (
           SELECT 
-            NOW() - INTERVAL '1 day' as today_start,
-            NOW() - INTERVAL '3 days' as three_days_start,
-            NOW() - INTERVAL '7 days' as week_start
+            DATE_TRUNC('day', NOW()) as today_start,
+            DATE_TRUNC('day', NOW()) - INTERVAL '2 days' as three_days_start,
+            DATE_TRUNC('day', NOW()) - INTERVAL '6 days' as week_start
         )
         SELECT 
           -- Сегодня
@@ -745,9 +745,10 @@ router.get('/stats/summary-daily', async (req, res) => {
       
       let startDateQuery = '';
       if (range === '7d') {
-        startDateQuery = `NOW() - INTERVAL '7 days'`;
+        // 7 полных дней (с начала дня 7 дней назад)
+        startDateQuery = `DATE_TRUNC('day', NOW()) - INTERVAL '6 days'`;
       } else if (range === '30d') {
-        // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней
+        // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней (с начала дня 30 дней назад)
         startDateQuery = `(
           SELECT GREATEST(
             LEAST(
@@ -755,7 +756,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            NOW() - INTERVAL '30 days'
+            DATE_TRUNC('day', NOW()) - INTERVAL '29 days'
           )
         )`;
       } else if (range === 'all') {
@@ -767,7 +768,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            NOW() - INTERVAL '30 days'
+            DATE_TRUNC('day', NOW()) - INTERVAL '30 days'
           )
         )`;
       }
