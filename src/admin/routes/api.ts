@@ -638,22 +638,22 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT today_start FROM periods) ${userCampaignFilter}) as users_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods)) as orders_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods) AND orders.status = 'completed') as generations_today,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
           
           -- За 3 дня
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT three_days_start FROM periods) ${userCampaignFilter}) as users_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods) AND orders.status = 'completed') as generations_3d,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
           
           -- За неделю
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT week_start FROM periods) ${userCampaignFilter}) as users_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods)) as orders_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods) AND orders.status = 'completed') as generations_week,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.updated_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
           
           -- Метрики возвращаемости
           (SELECT COUNT(*) FROM users WHERE (SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params)) as total_users,
@@ -819,7 +819,7 @@ router.get('/stats/summary-daily', async (req, res) => {
         ) g ON ds.date = g.date
         LEFT JOIN (
           SELECT 
-            DATE(p.created_at) as date, 
+            DATE(p.updated_at) as date, 
             COUNT(*) as new_payments,
             COALESCE(SUM(p.amount), 0) as revenue
           FROM payments p
@@ -827,8 +827,8 @@ router.get('/stats/summary-daily', async (req, res) => {
           LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
           WHERE p.status = 'success'
             AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))
-            AND p.created_at >= DATE(${startDateQuery})
-          GROUP BY DATE(p.created_at)
+            AND p.updated_at >= DATE(${startDateQuery})
+          GROUP BY DATE(p.updated_at)
         ) p ON ds.date = p.date
         ORDER BY ds.date
       `, params);
@@ -1481,24 +1481,24 @@ router.get('/analytics/payments-growth', async (req, res) => {
       
       // Определяем интервал и группировку
       let interval = '30 days';
-      let groupBy = 'DATE(created_at)';
+      let groupBy = 'DATE(updated_at)';
       let dateFormat = 'date';
       
       if (range === '3h') {
         interval = '3 hours';
-        groupBy = "DATE_TRUNC('minute', created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM created_at)::int / 5)";
+        groupBy = "DATE_TRUNC('minute', updated_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM updated_at)::int / 5)";
         dateFormat = 'datetime';
       } else if (range === '24h') {
         interval = '24 hours';
-        groupBy = "DATE_TRUNC('hour', created_at)";
+        groupBy = "DATE_TRUNC('hour', updated_at)";
         dateFormat = 'datetime';
       } else if (range === '7d') {
         interval = '7 days';
-        groupBy = 'DATE(created_at)';
+        groupBy = 'DATE(updated_at)';
         dateFormat = 'date';
       } else if (range === '30d') {
         interval = '30 days';
-        groupBy = 'DATE(created_at)';
+        groupBy = 'DATE(updated_at)';
         dateFormat = 'date';
       }
       
@@ -1509,7 +1509,7 @@ router.get('/analytics/payments-growth', async (req, res) => {
           COALESCE(SUM(amount), 0) as total_amount,
           SUM(COUNT(*)) OVER (ORDER BY ${groupBy}) as total_payments
         FROM payments
-        WHERE created_at >= NOW() - INTERVAL '${interval}'
+        WHERE updated_at >= NOW() - INTERVAL '${interval}'
           AND status = 'success'
         GROUP BY ${groupBy}
         ORDER BY date
@@ -1535,24 +1535,24 @@ router.get('/analytics/payments-growth-by-campaign', async (req, res) => {
       
       // Определяем интервал и группировку
       let interval = '30 days';
-      let groupBy = 'DATE(p.created_at)';
+      let groupBy = 'DATE(p.updated_at)';
       let dateFormat = 'date';
       
       if (range === '3h') {
         interval = '3 hours';
-        groupBy = "DATE_TRUNC('minute', p.created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM p.created_at)::int / 5)";
+        groupBy = "DATE_TRUNC('minute', p.updated_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM p.updated_at)::int / 5)";
         dateFormat = 'datetime';
       } else if (range === '24h') {
         interval = '24 hours';
-        groupBy = "DATE_TRUNC('hour', p.created_at)";
+        groupBy = "DATE_TRUNC('hour', p.updated_at)";
         dateFormat = 'datetime';
       } else if (range === '7d') {
         interval = '7 days';
-        groupBy = 'DATE(p.created_at)';
+        groupBy = 'DATE(p.updated_at)';
         dateFormat = 'date';
       } else if (range === '30d') {
         interval = '30 days';
-        groupBy = 'DATE(p.created_at)';
+        groupBy = 'DATE(p.updated_at)';
         dateFormat = 'date';
       }
       
@@ -1566,7 +1566,7 @@ router.get('/analytics/payments-growth-by-campaign', async (req, res) => {
         FROM payments p
         LEFT JOIN orders o ON p.order_id = o.id
         LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
-        WHERE p.created_at >= NOW() - INTERVAL '${interval}'
+        WHERE p.updated_at >= NOW() - INTERVAL '${interval}'
           AND p.status = 'success'
           AND u.id IS NOT NULL
       `;
