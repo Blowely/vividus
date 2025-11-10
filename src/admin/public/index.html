@@ -1299,6 +1299,10 @@
                     // Закрываем модалку авторизации перед показом контента
                     closeAuthModal();
                     showMainContent();
+                    // Загружаем данные для главной страницы (вкладка "Главная")
+                    loadSummaryCampaigns();
+                    loadSummaryStats();
+                    // Загружаем данные для других вкладок
                     loadStats();
                     loadUsers();
                 } else {
