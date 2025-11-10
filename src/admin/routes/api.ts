@@ -1229,5 +1229,127 @@ router.get('/analytics/users-growth-by-campaign', async (req, res) => {
   }
 });
 
+// Получить данные о платежах по времени
+router.get('/analytics/payments-growth', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const range = req.query.range as string || '30d';
+      
+      // Определяем интервал и группировку
+      let interval = '30 days';
+      let groupBy = 'DATE(created_at)';
+      let dateFormat = 'date';
+      
+      if (range === '3h') {
+        interval = '3 hours';
+        groupBy = "DATE_TRUNC('minute', created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM created_at)::int / 5)";
+        dateFormat = 'datetime';
+      } else if (range === '24h') {
+        interval = '24 hours';
+        groupBy = "DATE_TRUNC('hour', created_at)";
+        dateFormat = 'datetime';
+      } else if (range === '7d') {
+        interval = '7 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      } else if (range === '30d') {
+        interval = '30 days';
+        groupBy = 'DATE(created_at)';
+        dateFormat = 'date';
+      }
+      
+      const result = await client.query(`
+        SELECT 
+          ${groupBy} as date,
+          COUNT(*) as new_payments,
+          COALESCE(SUM(amount), 0) as total_amount,
+          SUM(COUNT(*)) OVER (ORDER BY ${groupBy}) as total_payments
+        FROM payments
+        WHERE created_at >= NOW() - INTERVAL '${interval}'
+          AND status = 'success'
+        GROUP BY ${groupBy}
+        ORDER BY date
+      `);
+      
+      res.json({ data: result.rows, format: dateFormat });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching payments growth:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Получить данные о платежах по кампаниям
+router.get('/analytics/payments-growth-by-campaign', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const range = req.query.range as string || '30d';
+      const campaign = req.query.campaign as string;
+      
+      // Определяем интервал и группировку
+      let interval = '30 days';
+      let groupBy = 'DATE(p.created_at)';
+      let dateFormat = 'date';
+      
+      if (range === '3h') {
+        interval = '3 hours';
+        groupBy = "DATE_TRUNC('minute', p.created_at + INTERVAL '5 minutes') - INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM p.created_at)::int / 5)";
+        dateFormat = 'datetime';
+      } else if (range === '24h') {
+        interval = '24 hours';
+        groupBy = "DATE_TRUNC('hour', p.created_at)";
+        dateFormat = 'datetime';
+      } else if (range === '7d') {
+        interval = '7 days';
+        groupBy = 'DATE(p.created_at)';
+        dateFormat = 'date';
+      } else if (range === '30d') {
+        interval = '30 days';
+        groupBy = 'DATE(p.created_at)';
+        dateFormat = 'date';
+      }
+      
+      let query = `
+        SELECT 
+          ${groupBy} as date,
+          COALESCE(u.start_param, 'Без кампании') as campaign,
+          COUNT(*) as new_payments,
+          COALESCE(SUM(p.amount), 0) as total_amount,
+          SUM(COUNT(*)) OVER (PARTITION BY COALESCE(u.start_param, 'Без кампании') ORDER BY ${groupBy}) as total_payments
+        FROM payments p
+        LEFT JOIN orders o ON p.order_id = o.id
+        LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
+        WHERE p.created_at >= NOW() - INTERVAL '${interval}'
+          AND p.status = 'success'
+          AND u.id IS NOT NULL
+      `;
+      
+      if (campaign) {
+        query += ` AND u.start_param = $1`;
+      }
+      
+      query += `
+        GROUP BY ${groupBy}, COALESCE(u.start_param, 'Без кампании')
+        ORDER BY date, campaign
+      `;
+      
+      const result = campaign 
+        ? await client.query(query, [campaign])
+        : await client.query(query);
+      
+      res.json({ data: result.rows, format: dateFormat });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching payments growth by campaign:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
 
