@@ -46,6 +46,20 @@ export class BroadcastService {
     return `${filledBar}${emptyBar} ${percentage}%`;
   }
 
+  private getCurrentDateTime(): string {
+    const now = new Date();
+    // Московское время (UTC+3)
+    const moscowTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+    const day = String(moscowTime.getUTCDate()).padStart(2, '0');
+    const month = String(moscowTime.getUTCMonth() + 1).padStart(2, '0');
+    const year = moscowTime.getUTCFullYear();
+    const hours = String(moscowTime.getUTCHours()).padStart(2, '0');
+    const minutes = String(moscowTime.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(moscowTime.getUTCSeconds()).padStart(2, '0');
+    
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds} (МСК)`;
+  }
+
   private async sendToUser(userId: number, broadcastData: BroadcastData): Promise<{ success: boolean; reason?: string }> {
     try {
       if (broadcastData.mediaType && broadcastData.mediaFileId) {
@@ -175,7 +189,7 @@ export class BroadcastService {
       
       // Финальная статистика
       const finalMessage = `✅ Проверка завершена!\n\n` +
-        `📊 Статистика:\n` +
+        `📊 Статистика на ${this.getCurrentDateTime()}:\n\n` +
         `👥 Всего пользователей: ${totalUsers}\n` +
         `📤 Обработано: ${processedCount}\n\n` +
         `✅ Активны (бот не заблокирован): ${activeCount} (${Math.round(activeCount / totalUsers * 100)}%)\n` +
@@ -297,7 +311,7 @@ export class BroadcastService {
       // Отправляем финальную статистику
       if (progressMessageId) {
         const finalMessage = `✅ Рассылка завершена!\n\n` +
-          `📊 Статистика:\n` +
+          `📊 Статистика на ${this.getCurrentDateTime()}:\n\n` +
           `👥 Всего пользователей: ${totalUsers}\n` +
           `📤 Обработано: ${processedCount}\n\n` +
           `✅ Успешно доставлено: ${successCount} (${Math.round(successCount / totalUsers * 100)}%)\n` +

@@ -1074,6 +1074,20 @@ export class TelegramService {
     });
   }
 
+  private getCurrentDateTime(): string {
+    const now = new Date();
+    // Московское время (UTC+3)
+    const moscowTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+    const day = String(moscowTime.getUTCDate()).padStart(2, '0');
+    const month = String(moscowTime.getUTCMonth() + 1).padStart(2, '0');
+    const year = moscowTime.getUTCFullYear();
+    const hours = String(moscowTime.getUTCHours()).padStart(2, '0');
+    const minutes = String(moscowTime.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(moscowTime.getUTCSeconds()).padStart(2, '0');
+    
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds} (МСК)`;
+  }
+
   private isAdmin(userId: number): boolean {
     const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
     return adminIds.includes(userId);
@@ -1108,6 +1122,7 @@ export class TelegramService {
 
       // Форматируем сообщение для пересылки (без inline-кнопок или с минимальными)
       const message = `📊 *Статистика по кампании: ${escapedCampaignName}*\n\n` +
+        `📅 Статистика на ${this.getCurrentDateTime()}:\n\n` +
         `👥 Пользователи: ${stat.total_users}\n` +
         `💰 Сумма оплат: ${stat.total_payments_rub.toFixed(2)} ₽\n` +
         `⭐ Сумма в stars: ${stat.total_payments_stars}\n` +
@@ -1144,7 +1159,7 @@ export class TelegramService {
         return;
       }
 
-      let message = '📊 Статистика по кампаниям:\n\n';
+      let message = `📊 Статистика по кампаниям\n\n📅 Статистика на ${this.getCurrentDateTime()}:\n\n`;
       const inlineKeyboard: any[] = [];
       
       for (const stat of analytics) {
