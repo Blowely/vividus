@@ -2840,6 +2840,9 @@
         
         // Функция для генерации фиксированного цвета на основе хеша строки
         function getCampaignColor(campaignName) {
+            // Нормализуем название кампании (обрабатываем null, undefined, пустую строку)
+            const normalizedName = campaignName || 'Без кампании';
+            
             // Расширенная палитра уникальных цветов
             const colors = [
                 'rgba(75, 192, 192, 1)',    // teal
@@ -2869,16 +2872,19 @@
                 'rgba(236, 240, 241, 1)'    // clouds
             ];
             
-            // Улучшенный хеш для строки
-            let hash = 0;
-            for (let i = 0; i < campaignName.length; i++) {
-                const char = campaignName.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32bit integer
+            // Улучшенный алгоритм хеширования (djb2 с модификацией)
+            let hash = 5381;
+            const str = normalizedName.toLowerCase();
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) + hash) + str.charCodeAt(i);
+                hash = hash & 0x7fffffff; // Приводим к положительному 32-битному числу
             }
             
+            // Добавляем длину строки для большей уникальности
+            hash = (hash + str.length * 31) & 0x7fffffff;
+            
             // Используем абсолютное значение хеша для выбора цвета
-            const index = Math.abs(hash) % colors.length;
+            const index = hash % colors.length;
             return colors[index];
         }
 
