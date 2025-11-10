@@ -610,20 +610,22 @@ router.get('/stats/summary', async (req, res) => {
     try {
       const campaign = req.query.campaign as string | undefined;
       
-      // Фильтр по кампании для пользователей
-      const userCampaignFilter = campaign ? `AND start_param = $1` : '';
+      // Фильтр по кампании для пользователей - работает с NULL
+      const userCampaignFilter = `AND ((SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params))`;
       // Фильтр по кампании для заказов через JOIN с users
-      const orderCampaignFilter = campaign ? `INNER JOIN users u ON orders.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE';
+      const orderCampaignFilter = `INNER JOIN users u ON orders.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND`;
       // Фильтр по кампании для платежей
-      const paymentCampaignJoin = campaign 
-        ? `LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE u.start_param = $1 AND` 
-        : 'WHERE';
+      const paymentCampaignJoin = `LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND`;
       
-      const params = campaign ? [campaign] : [];
+      // Всегда передаем параметр, но используем NULL если кампания не выбрана
+      const params = [campaign || null];
       
       // Получаем статистику за разные периоды
       const result = await client.query(`
-        WITH periods AS (
+        WITH filter_params AS (
+          SELECT NULLIF($1, '')::text as campaign_filter
+        ),
+        periods AS (
           SELECT 
             NOW() - INTERVAL '1 day' as today_start,
             NOW() - INTERVAL '3 days' as three_days_start,
@@ -652,21 +654,21 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
           
           -- Метрики возвращаемости
-          (SELECT COUNT(*) FROM users ${campaign ? `WHERE start_param = $1` : ''}) as total_users,
+          (SELECT COUNT(*) FROM users WHERE (SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params)) as total_users,
           (SELECT COUNT(*) FROM (
             SELECT p.user_id 
             FROM payments p
-            ${campaign ? 'LEFT JOIN users u ON p.user_id = u.id' : ''}
-            WHERE p.status = 'success' ${campaign ? `AND u.start_param = $1` : ''}
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.status = 'success' AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))
             GROUP BY p.user_id 
             HAVING COUNT(*) > 1
           ) as repeat_users) as repeat_customers,
-          (SELECT COUNT(DISTINCT p.user_id) FROM payments p ${campaign ? 'LEFT JOIN users u ON p.user_id = u.id' : ''} WHERE p.status = 'success' ${campaign ? `AND u.start_param = $1` : ''}) as paid_users,
+          (SELECT COUNT(DISTINCT p.user_id) FROM payments p LEFT JOIN users u ON p.user_id = u.id WHERE p.status = 'success' AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))) as paid_users,
           
           -- Активные пользователи (сделали заказ за последние 7 дней)
-          (SELECT COUNT(DISTINCT o.user_id) FROM orders o ${campaign ? `INNER JOIN users u ON o.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE'} o.created_at >= NOW() - INTERVAL '7 days') as active_7d,
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND o.created_at >= NOW() - INTERVAL '7 days') as active_7d,
           -- Активные пользователи (сделали заказ за последние 30 дней)
-          (SELECT COUNT(DISTINCT o.user_id) FROM orders o ${campaign ? `INNER JOIN users u ON o.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE'} o.created_at >= NOW() - INTERVAL '30 days') as active_30d
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND o.created_at >= NOW() - INTERVAL '30 days') as active_30d
       `, params);
       
       const data = result.rows[0];
