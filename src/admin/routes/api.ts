@@ -620,6 +620,8 @@ router.get('/stats/summary', async (req, res) => {
       // Всегда передаем параметр, но используем NULL если кампания не выбрана
       const params = [campaign || null];
       
+      console.log('Fetching summary stats with params:', { campaign, params });
+      
       // Получаем статистику за разные периоды
       const result = await client.query(`
         WITH filter_params AS (
@@ -671,6 +673,8 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND o.created_at >= NOW() - INTERVAL '30 days') as active_30d
       `, params);
       
+      console.log('Summary stats query completed successfully');
+      
       const data = result.rows[0];
       
       // Считаем процент возвращаемости
@@ -712,9 +716,20 @@ router.get('/stats/summary', async (req, res) => {
     } finally {
       client.release();
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching summary stats:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      position: error.position
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
