@@ -1446,9 +1446,63 @@
                     </div>
                     
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px;">
-                        <!-- Карточка: За неделю -->
+                        <!-- Карточка: Сегодня -->
                         <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">📈 За неделю</h3>
+                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">📅 Сегодня</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Пользователи</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.today.users}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Заказы</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.today.orders}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Генерации</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #9b59b6;">${data.today.generations}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Платежи</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.today.payments}</div>
+                                </div>
+                                <div style="grid-column: 1 / -1;">
+                                    <div style="font-size: 12px; color: #666;">Выручка</div>
+                                    <div style="font-size: 28px; font-weight: bold; color: #27ae60;">${data.today.revenue.toFixed(0)} ₽</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Карточка: 3 дня -->
+                        <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">📊 3 дня</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Пользователи</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.three_days.users}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Заказы</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.three_days.orders}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Генерации</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #9b59b6;">${data.three_days.generations}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 12px; color: #666;">Платежи</div>
+                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.three_days.payments}</div>
+                                </div>
+                                <div style="grid-column: 1 / -1;">
+                                    <div style="font-size: 12px; color: #666;">Выручка</div>
+                                    <div style="font-size: 28px; font-weight: bold; color: #27ae60;">${data.three_days.revenue.toFixed(0)} ₽</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Карточка: Неделя -->
+                        <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">📈 Неделя</h3>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                                 <div>
                                     <div style="font-size: 12px; color: #666;">Пользователи</div>
@@ -1469,60 +1523,6 @@
                                 <div style="grid-column: 1 / -1;">
                                     <div style="font-size: 12px; color: #666;">Выручка</div>
                                     <div style="font-size: 28px; font-weight: bold; color: #27ae60;">${data.week.revenue.toFixed(0)} ₽</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Карточка: За месяц -->
-                        <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">📊 За месяц</h3>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Пользователи</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.month.users}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Заказы</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.month.orders}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Генерации</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #9b59b6;">${data.month.generations}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Платежи</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.month.payments}</div>
-                                </div>
-                                <div style="grid-column: 1 / -1;">
-                                    <div style="font-size: 12px; color: #666;">Выручка</div>
-                                    <div style="font-size: 28px; font-weight: bold; color: #27ae60;">${data.month.revenue.toFixed(0)} ₽</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Карточка: За все время -->
-                        <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                            <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #667eea;">🌍 За все время</h3>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Пользователи</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.all.users}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Заказы</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.all.orders}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Генерации</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #9b59b6;">${data.all.generations}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 12px; color: #666;">Платежи</div>
-                                    <div style="font-size: 24px; font-weight: bold; color: #333;">${data.all.payments}</div>
-                                </div>
-                                <div style="grid-column: 1 / -1;">
-                                    <div style="font-size: 12px; color: #666;">Выручка</div>
-                                    <div style="font-size: 28px; font-weight: bold; color: #27ae60;">${data.all.revenue.toFixed(0)} ₽</div>
                                 </div>
                             </div>
                         </div>
@@ -1573,16 +1573,13 @@
                 
                 // Отрисовываем диаграммы после небольшой задержки
                 setTimeout(() => {
-                    // Загружаем диаграмму "Общая" с текущим диапазоном
-                    drawDailyChart(currentDailyRange);
+                    // Загружаем диаграмму "Общая" с диапазоном 7 дней
+                    drawDailyChart('7d');
                     
                     // Обработчики для кнопок диапазонов диаграммы "Общая"
                     document.querySelectorAll('.daily-range-btn').forEach(btn => {
                         btn.addEventListener('click', (e) => {
                             const range = e.target.dataset.range;
-                            
-                            // Сохраняем текущий диапазон
-                            currentDailyRange = range;
                             
                             // Обновляем активную кнопку
                             document.querySelectorAll('.daily-range-btn').forEach(b => {
@@ -2802,7 +2799,6 @@
         let currentPaymentsRange = '30d';
         let currentPaymentsCampaignsRange = '30d';
         let currentSummaryCampaign = '';
-        let currentDailyRange = '7d';
         
         // Функция для генерации фиксированного цвета на основе хеша строки
         function getCampaignColor(campaignName) {
@@ -2872,44 +2868,46 @@
                     return `${date.getDate()}.${date.getMonth() + 1}`;
                 });
                 
+                const datasets = [
+                    {
+                        label: 'Пользователи',
+                        data: result.data.map(row => parseInt(row.new_users)),
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Заказы',
+                        data: result.data.map(row => parseInt(row.new_orders)),
+                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Генерации',
+                        data: result.data.map(row => parseInt(row.new_generations)),
+                        backgroundColor: 'rgba(155, 89, 182, 0.2)',
+                        borderColor: 'rgba(155, 89, 182, 1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Платежи',
+                        data: result.data.map(row => parseInt(row.new_payments)),
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    }
+                ];
+                
                 dailyChart = new Chart(canvas.getContext('2d'), {
                     type: 'line',
                     data: {
                         labels: labels,
-                        datasets: [
-                            {
-                                label: 'Пользователи',
-                                data: result.data.map(row => parseInt(row.new_users)),
-                                backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                                borderColor: 'rgba(54, 162, 235, 1)',
-                                borderWidth: 2,
-                                tension: 0.4
-                            },
-                            {
-                                label: 'Заказы',
-                                data: result.data.map(row => parseInt(row.new_orders)),
-                                backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                                borderColor: 'rgba(255, 206, 86, 1)',
-                                borderWidth: 2,
-                                tension: 0.4
-                            },
-                            {
-                                label: 'Генерации',
-                                data: result.data.map(row => parseInt(row.new_generations)),
-                                backgroundColor: 'rgba(155, 89, 182, 0.2)',
-                                borderColor: 'rgba(155, 89, 182, 1)',
-                                borderWidth: 2,
-                                tension: 0.4
-                            },
-                            {
-                                label: 'Платежи',
-                                data: result.data.map(row => parseInt(row.new_payments)),
-                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                                borderColor: 'rgba(75, 192, 192, 1)',
-                                borderWidth: 2,
-                                tension: 0.4
-                            }
-                        ]
+                        datasets: datasets
                     },
                     options: {
                         responsive: true,
@@ -2947,7 +2945,7 @@
                 summaryChart.destroy();
             }
             
-            const labels = ['За неделю', 'За месяц', 'За все время'];
+            const labels = ['Сегодня', '3 дня', 'Неделя'];
             let datasets = [];
             
             // Определяем, какие данные показывать
@@ -2956,28 +2954,28 @@
                 datasets = [
                     {
                         label: 'Пользователи',
-                        data: [data.week.users, data.month.users, data.all.users],
+                        data: [data.today.users, data.three_days.users, data.week.users],
                         backgroundColor: 'rgba(54, 162, 235, 0.6)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 2
                     },
                     {
                         label: 'Заказы',
-                        data: [data.week.orders, data.month.orders, data.all.orders],
+                        data: [data.today.orders, data.three_days.orders, data.week.orders],
                         backgroundColor: 'rgba(255, 206, 86, 0.6)',
                         borderColor: 'rgba(255, 206, 86, 1)',
                         borderWidth: 2
                     },
                     {
                         label: 'Генерации',
-                        data: [data.week.generations, data.month.generations, data.all.generations],
+                        data: [data.today.generations, data.three_days.generations, data.week.generations],
                         backgroundColor: 'rgba(155, 89, 182, 0.6)',
                         borderColor: 'rgba(155, 89, 182, 1)',
                         borderWidth: 2
                     },
                     {
                         label: 'Платежи',
-                        data: [data.week.payments, data.month.payments, data.all.payments],
+                        data: [data.today.payments, data.three_days.payments, data.week.payments],
                         backgroundColor: 'rgba(75, 192, 192, 0.6)',
                         borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2
@@ -2986,7 +2984,7 @@
             } else if (metric === 'users') {
                 datasets = [{
                     label: 'Пользователи',
-                    data: [data.week.users, data.month.users, data.all.users],
+                    data: [data.today.users, data.three_days.users, data.week.users],
                     backgroundColor: 'rgba(54, 162, 235, 0.7)',
                     borderColor: 'rgba(54, 162, 235, 1)',
                     borderWidth: 2
@@ -2994,7 +2992,7 @@
             } else if (metric === 'orders') {
                 datasets = [{
                     label: 'Заказы',
-                    data: [data.week.orders, data.month.orders, data.all.orders],
+                    data: [data.today.orders, data.three_days.orders, data.week.orders],
                     backgroundColor: 'rgba(255, 206, 86, 0.7)',
                     borderColor: 'rgba(255, 206, 86, 1)',
                     borderWidth: 2
@@ -3002,7 +3000,7 @@
             } else if (metric === 'generations') {
                 datasets = [{
                     label: 'Генерации',
-                    data: [data.week.generations, data.month.generations, data.all.generations],
+                    data: [data.today.generations, data.three_days.generations, data.week.generations],
                     backgroundColor: 'rgba(155, 89, 182, 0.7)',
                     borderColor: 'rgba(155, 89, 182, 1)',
                     borderWidth: 2
@@ -3010,7 +3008,7 @@
             } else if (metric === 'payments') {
                 datasets = [{
                     label: 'Платежи',
-                    data: [data.week.payments, data.month.payments, data.all.payments],
+                    data: [data.today.payments, data.three_days.payments, data.week.payments],
                     backgroundColor: 'rgba(75, 192, 192, 0.7)',
                     borderColor: 'rgba(75, 192, 192, 1)',
                     borderWidth: 2
@@ -3018,7 +3016,7 @@
             } else if (metric === 'revenue') {
                 datasets = [{
                     label: 'Выручка (₽)',
-                    data: [data.week.revenue, data.month.revenue, data.all.revenue],
+                    data: [data.today.revenue, data.three_days.revenue, data.week.revenue],
                     backgroundColor: 'rgba(39, 174, 96, 0.7)',
                     borderColor: 'rgba(39, 174, 96, 1)',
                     borderWidth: 2
