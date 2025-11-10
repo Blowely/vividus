@@ -603,6 +603,99 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// Получить краткую статистику по периодам (для главной страницы)
+router.get('/stats/summary', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      // Получаем статистику за разные периоды
+      const result = await client.query(`
+        WITH periods AS (
+          SELECT 
+            NOW() - INTERVAL '1 day' as today_start,
+            NOW() - INTERVAL '3 days' as three_days_start,
+            NOW() - INTERVAL '7 days' as week_start
+        )
+        SELECT 
+          -- Сегодня
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT today_start FROM periods)) as users_today,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT today_start FROM periods)) as orders_today,
+          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as payments_today,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as revenue_today,
+          
+          -- За 3 дня
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT three_days_start FROM periods)) as users_3d,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
+          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as payments_3d,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as revenue_3d,
+          
+          -- За неделю
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT week_start FROM periods)) as users_week,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT week_start FROM periods)) as orders_week,
+          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as payments_week,
+          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as revenue_week,
+          
+          -- Метрики возвращаемости
+          (SELECT COUNT(*) FROM users) as total_users,
+          (SELECT COUNT(*) FROM (
+            SELECT user_id 
+            FROM payments 
+            WHERE status = 'success' 
+            GROUP BY user_id 
+            HAVING COUNT(*) > 1
+          ) as repeat_users) as repeat_customers,
+          (SELECT COUNT(DISTINCT user_id) FROM payments WHERE status = 'success') as paid_users,
+          
+          -- Активные пользователи (сделали заказ за последние 7 дней)
+          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE created_at >= NOW() - INTERVAL '7 days') as active_7d,
+          -- Активные пользователи (сделали заказ за последние 30 дней)
+          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE created_at >= NOW() - INTERVAL '30 days') as active_30d
+      `);
+      
+      const data = result.rows[0];
+      
+      // Считаем процент возвращаемости
+      const paidUsers = parseInt(data.paid_users) || 0;
+      const repeatCustomers = parseInt(data.repeat_customers) || 0;
+      const repeatRate = paidUsers > 0 ? ((repeatCustomers / paidUsers) * 100).toFixed(1) : '0.0';
+      
+      res.json({
+        today: {
+          users: parseInt(data.users_today) || 0,
+          orders: parseInt(data.orders_today) || 0,
+          payments: parseInt(data.payments_today) || 0,
+          revenue: parseFloat(data.revenue_today) || 0
+        },
+        three_days: {
+          users: parseInt(data.users_3d) || 0,
+          orders: parseInt(data.orders_3d) || 0,
+          payments: parseInt(data.payments_3d) || 0,
+          revenue: parseFloat(data.revenue_3d) || 0
+        },
+        week: {
+          users: parseInt(data.users_week) || 0,
+          orders: parseInt(data.orders_week) || 0,
+          payments: parseInt(data.payments_week) || 0,
+          revenue: parseFloat(data.revenue_week) || 0
+        },
+        retention: {
+          total_users: parseInt(data.total_users) || 0,
+          paid_users: paidUsers,
+          repeat_customers: repeatCustomers,
+          repeat_rate: parseFloat(repeatRate),
+          active_7d: parseInt(data.active_7d) || 0,
+          active_30d: parseInt(data.active_30d) || 0
+        }
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching summary stats:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Получить аналитику по кампаниям
 router.get('/analytics/campaigns', async (req, res) => {
   try {
