@@ -1365,7 +1365,17 @@
                 container.innerHTML = `
                     <!-- Диаграмма сравнения периодов -->
                     <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 30px;">
-                        <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #667eea;">📊 Сравнение периодов</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                            <h3 style="margin: 0; font-size: 18px; color: #667eea;">📊 Сравнение периодов</h3>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="metric-btn active" data-metric="all" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #667eea; background: #667eea; color: white; border-radius: 6px; transition: all 0.3s;">Все метрики</button>
+                                <button class="metric-btn" data-metric="users" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">👥 Пользователи</button>
+                                <button class="metric-btn" data-metric="orders" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">📦 Заказы</button>
+                                <button class="metric-btn" data-metric="generations" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">🎬 Генерации</button>
+                                <button class="metric-btn" data-metric="payments" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">💳 Платежи</button>
+                                <button class="metric-btn" data-metric="revenue" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">💰 Выручка</button>
+                            </div>
+                        </div>
                         <div style="position: relative; height: 350px;">
                             <canvas id="summaryChart"></canvas>
                         </div>
@@ -1494,9 +1504,34 @@
                     </div>
                 `;
                 
+                // Сохраняем данные для переключения метрик
+                window.summaryData = data;
+                
                 // Отрисовываем диаграмму после небольшой задержки
                 setTimeout(() => {
-                    drawSummaryChart(data);
+                    drawSummaryChart(data, 'all');
+                    
+                    // Добавляем обработчики кнопок метрик
+                    document.querySelectorAll('.metric-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const metric = e.target.dataset.metric;
+                            
+                            // Обновляем активную кнопку
+                            document.querySelectorAll('.metric-btn').forEach(b => {
+                                b.style.background = 'white';
+                                b.style.color = '#333';
+                                b.style.border = '1px solid #ddd';
+                                b.classList.remove('active');
+                            });
+                            e.target.style.background = '#667eea';
+                            e.target.style.color = 'white';
+                            e.target.style.border = '1px solid #667eea';
+                            e.target.classList.add('active');
+                            
+                            // Перерисовываем диаграмму
+                            drawSummaryChart(window.summaryData, metric);
+                        });
+                    });
                 }, 100);
             } catch (error) {
                 console.error('Error loading summary stats:', error);
@@ -2697,7 +2732,7 @@
             return colors[Math.abs(hash) % colors.length];
         }
 
-        function drawSummaryChart(data) {
+        function drawSummaryChart(data, metric = 'all') {
             const canvas = document.getElementById('summaryChart');
             if (!canvas) return;
             
@@ -2707,45 +2742,88 @@
             }
             
             const labels = ['Сегодня', '3 дня', 'Неделя'];
-            const usersData = [data.today.users, data.three_days.users, data.week.users];
-            const ordersData = [data.today.orders, data.three_days.orders, data.week.orders];
-            const generationsData = [data.today.generations, data.three_days.generations, data.week.generations];
-            const paymentsData = [data.today.payments, data.three_days.payments, data.week.payments];
+            let datasets = [];
+            
+            // Определяем, какие данные показывать
+            if (metric === 'all') {
+                // Все метрики
+                datasets = [
+                    {
+                        label: 'Пользователи',
+                        data: [data.today.users, data.three_days.users, data.week.users],
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Заказы',
+                        data: [data.today.orders, data.three_days.orders, data.week.orders],
+                        backgroundColor: 'rgba(255, 206, 86, 0.6)',
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Генерации',
+                        data: [data.today.generations, data.three_days.generations, data.week.generations],
+                        backgroundColor: 'rgba(155, 89, 182, 0.6)',
+                        borderColor: 'rgba(155, 89, 182, 1)',
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Платежи',
+                        data: [data.today.payments, data.three_days.payments, data.week.payments],
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2
+                    }
+                ];
+            } else if (metric === 'users') {
+                datasets = [{
+                    label: 'Пользователи',
+                    data: [data.today.users, data.three_days.users, data.week.users],
+                    backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 2
+                }];
+            } else if (metric === 'orders') {
+                datasets = [{
+                    label: 'Заказы',
+                    data: [data.today.orders, data.three_days.orders, data.week.orders],
+                    backgroundColor: 'rgba(255, 206, 86, 0.7)',
+                    borderColor: 'rgba(255, 206, 86, 1)',
+                    borderWidth: 2
+                }];
+            } else if (metric === 'generations') {
+                datasets = [{
+                    label: 'Генерации',
+                    data: [data.today.generations, data.three_days.generations, data.week.generations],
+                    backgroundColor: 'rgba(155, 89, 182, 0.7)',
+                    borderColor: 'rgba(155, 89, 182, 1)',
+                    borderWidth: 2
+                }];
+            } else if (metric === 'payments') {
+                datasets = [{
+                    label: 'Платежи',
+                    data: [data.today.payments, data.three_days.payments, data.week.payments],
+                    backgroundColor: 'rgba(75, 192, 192, 0.7)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 2
+                }];
+            } else if (metric === 'revenue') {
+                datasets = [{
+                    label: 'Выручка (₽)',
+                    data: [data.today.revenue, data.three_days.revenue, data.week.revenue],
+                    backgroundColor: 'rgba(39, 174, 96, 0.7)',
+                    borderColor: 'rgba(39, 174, 96, 1)',
+                    borderWidth: 2
+                }];
+            }
             
             summaryChart = new Chart(canvas, {
                 type: 'bar',
                 data: {
                     labels: labels,
-                    datasets: [
-                        {
-                            label: 'Пользователи',
-                            data: usersData,
-                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 2
-                        },
-                        {
-                            label: 'Заказы',
-                            data: ordersData,
-                            backgroundColor: 'rgba(255, 206, 86, 0.6)',
-                            borderColor: 'rgba(255, 206, 86, 1)',
-                            borderWidth: 2
-                        },
-                        {
-                            label: 'Генерации',
-                            data: generationsData,
-                            backgroundColor: 'rgba(155, 89, 182, 0.6)',
-                            borderColor: 'rgba(155, 89, 182, 1)',
-                            borderWidth: 2
-                        },
-                        {
-                            label: 'Платежи',
-                            data: paymentsData,
-                            backgroundColor: 'rgba(75, 192, 192, 0.6)',
-                            borderColor: 'rgba(75, 192, 192, 1)',
-                            borderWidth: 2
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -2756,6 +2834,7 @@
                     },
                     plugins: {
                         legend: {
+                            display: metric === 'all',
                             position: 'top',
                             labels: {
                                 padding: 15,
@@ -2767,6 +2846,9 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
+                                    if (metric === 'revenue') {
+                                        return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ₽`;
+                                    }
                                     return `${context.dataset.label}: ${context.parsed.y}`;
                                 }
                             }
@@ -2777,7 +2859,15 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Количество'
+                                text: metric === 'revenue' ? 'Выручка (₽)' : 'Количество'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    if (metric === 'revenue') {
+                                        return value.toFixed(0) + ' ₽';
+                                    }
+                                    return value;
+                                }
                             }
                         }
                     }
