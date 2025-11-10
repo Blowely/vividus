@@ -661,7 +661,15 @@
     <div class="container">
         <!-- Краткая статистика -->
         <div id="summary-stats" style="margin-bottom: 30px;">
-            <h2 style="margin-bottom: 20px; font-size: 20px;">📊 Краткая статистика</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                <h2 style="margin: 0; font-size: 20px;">📊 Краткая статистика</h2>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="summary-campaign-filter" style="font-size: 14px; color: #666;">Кампания:</label>
+                    <select id="summary-campaign-filter" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; cursor: pointer; min-width: 200px;">
+                        <option value="">Все кампании</option>
+                    </select>
+                </div>
+            </div>
             <div id="summary-content"></div>
         </div>
         
@@ -1355,11 +1363,38 @@
             }
         }
 
+        // Загрузка списка кампаний
+        async function loadSummaryCampaigns() {
+            try {
+                const response = await fetchWithAuth('/api/analytics/campaigns');
+                const campaigns = await response.json();
+                
+                const select = document.getElementById('summary-campaign-filter');
+                if (select && campaigns.length > 0) {
+                    campaigns.forEach(campaign => {
+                        const option = document.createElement('option');
+                        option.value = campaign.campaign_name;
+                        option.textContent = campaign.campaign_name || 'Без кампании';
+                        select.appendChild(option);
+                    });
+                    
+                    // Добавляем обработчик изменения
+                    select.addEventListener('change', (e) => {
+                        currentSummaryCampaign = e.target.value;
+                        loadSummaryStats(currentSummaryCampaign);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading campaigns:', error);
+            }
+        }
+
         // Загрузка краткой статистики
-        async function loadSummaryStats() {
+        async function loadSummaryStats(campaign = '') {
             const container = document.getElementById('summary-content');
             try {
-                const response = await fetchWithAuth('/api/stats/summary');
+                const url = campaign ? `/api/stats/summary?campaign=${encodeURIComponent(campaign)}` : '/api/stats/summary';
+                const response = await fetchWithAuth(url);
                 const data = await response.json();
                 
                 container.innerHTML = `
@@ -2703,6 +2738,7 @@
         
         let currentPaymentsRange = '30d';
         let currentPaymentsCampaignsRange = '30d';
+        let currentSummaryCampaign = '';
         
         // Функция для генерации фиксированного цвета на основе хеша строки
         function getCampaignColor(campaignName) {
@@ -3804,6 +3840,7 @@
 
         // Инициализация
         checkAuth();
+        loadSummaryCampaigns();
         loadSummaryStats();
     </script>
 </body>

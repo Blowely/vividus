@@ -608,6 +608,19 @@ router.get('/stats/summary', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
+      const campaign = req.query.campaign as string | undefined;
+      
+      // Фильтр по кампании для пользователей
+      const userCampaignFilter = campaign ? `AND start_param = $1` : '';
+      // Фильтр по кампании для заказов через JOIN с users
+      const orderCampaignFilter = campaign ? `INNER JOIN users u ON orders.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE';
+      // Фильтр по кампании для платежей
+      const paymentCampaignJoin = campaign 
+        ? `LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE u.start_param = $1 AND` 
+        : 'WHERE';
+      
+      const params = campaign ? [campaign] : [];
+      
       // Получаем статистику за разные периоды
       const result = await client.query(`
         WITH periods AS (
@@ -618,42 +631,43 @@ router.get('/stats/summary', async (req, res) => {
         )
         SELECT 
           -- Сегодня
-          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT today_start FROM periods)) as users_today,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT today_start FROM periods)) as orders_today,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT today_start FROM periods) AND status = 'completed') as generations_today,
-          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as payments_today,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as revenue_today,
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT today_start FROM periods) ${userCampaignFilter}) as users_today,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT today_start FROM periods)) as orders_today,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT today_start FROM periods) AND status = 'completed') as generations_today,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
           
           -- За 3 дня
-          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT three_days_start FROM periods)) as users_3d,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'completed') as generations_3d,
-          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as payments_3d,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as revenue_3d,
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT three_days_start FROM periods) ${userCampaignFilter}) as users_3d,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT three_days_start FROM periods) AND status = 'completed') as generations_3d,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
           
           -- За неделю
-          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT week_start FROM periods)) as users_week,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT week_start FROM periods)) as orders_week,
-          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT week_start FROM periods) AND status = 'completed') as generations_week,
-          (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as payments_week,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as revenue_week,
+          (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT week_start FROM periods) ${userCampaignFilter}) as users_week,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT week_start FROM periods)) as orders_week,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} created_at >= (SELECT week_start FROM periods) AND status = 'completed') as generations_week,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
           
           -- Метрики возвращаемости
-          (SELECT COUNT(*) FROM users) as total_users,
+          (SELECT COUNT(*) FROM users ${campaign ? `WHERE start_param = $1` : ''}) as total_users,
           (SELECT COUNT(*) FROM (
-            SELECT user_id 
-            FROM payments 
-            WHERE status = 'success' 
-            GROUP BY user_id 
+            SELECT p.user_id 
+            FROM payments p
+            ${campaign ? 'LEFT JOIN users u ON p.user_id = u.id' : ''}
+            WHERE p.status = 'success' ${campaign ? `AND u.start_param = $1` : ''}
+            GROUP BY p.user_id 
             HAVING COUNT(*) > 1
           ) as repeat_users) as repeat_customers,
-          (SELECT COUNT(DISTINCT user_id) FROM payments WHERE status = 'success') as paid_users,
+          (SELECT COUNT(DISTINCT p.user_id) FROM payments p ${campaign ? 'LEFT JOIN users u ON p.user_id = u.id' : ''} WHERE p.status = 'success' ${campaign ? `AND u.start_param = $1` : ''}) as paid_users,
           
           -- Активные пользователи (сделали заказ за последние 7 дней)
-          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE created_at >= NOW() - INTERVAL '7 days') as active_7d,
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o ${campaign ? `INNER JOIN users u ON o.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE'} o.created_at >= NOW() - INTERVAL '7 days') as active_7d,
           -- Активные пользователи (сделали заказ за последние 30 дней)
-          (SELECT COUNT(DISTINCT user_id) FROM orders WHERE created_at >= NOW() - INTERVAL '30 days') as active_30d
-      `);
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o ${campaign ? `INNER JOIN users u ON o.user_id = u.id WHERE u.start_param = $1 AND` : 'WHERE'} o.created_at >= NOW() - INTERVAL '30 days') as active_30d
+      `, params);
       
       const data = result.rows[0];
       
