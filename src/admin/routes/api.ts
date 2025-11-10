@@ -747,7 +747,17 @@ router.get('/stats/summary-daily', async (req, res) => {
       if (range === '7d') {
         startDateQuery = `NOW() - INTERVAL '7 days'`;
       } else if (range === '30d') {
-        startDateQuery = `NOW() - INTERVAL '30 days'`;
+        // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней
+        startDateQuery = `(
+          SELECT GREATEST(
+            LEAST(
+              (SELECT MIN(created_at) FROM users WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params))),
+              (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
+              (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
+            ),
+            NOW() - INTERVAL '30 days'
+          )
+        )`;
       } else if (range === 'all') {
         // Для "все время" находим самую раннюю дату создания
         startDateQuery = `(

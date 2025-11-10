@@ -1414,13 +1414,21 @@
                 container.innerHTML = `
                     <!-- Диаграмма "Общая" с данными по дням -->
                     <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 30px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 15px;">
                             <h3 style="margin: 0; font-size: 18px; color: #667eea;">📈 Общая статистика по дням</h3>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                 <button class="daily-range-btn active" data-range="7d" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #667eea; background: #667eea; color: white; border-radius: 6px; transition: all 0.3s;">7 дней</button>
                                 <button class="daily-range-btn" data-range="30d" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">30 дней</button>
                                 <button class="daily-range-btn" data-range="all" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">Все время</button>
                             </div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 15px;">
+                            <button class="daily-metric-btn active" data-metric="all" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #667eea; background: #667eea; color: white; border-radius: 6px; transition: all 0.3s;">Все метрики</button>
+                            <button class="daily-metric-btn" data-metric="users" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">👥 Пользователи</button>
+                            <button class="daily-metric-btn" data-metric="orders" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">📦 Заказы</button>
+                            <button class="daily-metric-btn" data-metric="generations" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">🎬 Генерации</button>
+                            <button class="daily-metric-btn" data-metric="payments" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">💳 Платежи</button>
+                            <button class="daily-metric-btn" data-metric="revenue" style="padding: 8px 16px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; color: #333; border-radius: 6px; transition: all 0.3s;">💰 Выручка</button>
                         </div>
                         <div style="position: relative; height: 350px;">
                             <canvas id="dailyChart"></canvas>
@@ -1573,13 +1581,16 @@
                 
                 // Отрисовываем диаграммы после небольшой задержки
                 setTimeout(() => {
-                    // Загружаем диаграмму "Общая" с диапазоном 7 дней
-                    drawDailyChart('7d');
+                    // Загружаем диаграмму "Общая" с начальными параметрами
+                    drawDailyChart(currentDailyRange, currentDailyMetric);
                     
                     // Обработчики для кнопок диапазонов диаграммы "Общая"
                     document.querySelectorAll('.daily-range-btn').forEach(btn => {
                         btn.addEventListener('click', (e) => {
                             const range = e.target.dataset.range;
+                            
+                            // Сохраняем текущий диапазон
+                            currentDailyRange = range;
                             
                             // Обновляем активную кнопку
                             document.querySelectorAll('.daily-range-btn').forEach(b => {
@@ -1594,7 +1605,32 @@
                             e.target.classList.add('active');
                             
                             // Перерисовываем диаграмму
-                            drawDailyChart(range);
+                            drawDailyChart(currentDailyRange, currentDailyMetric);
+                        });
+                    });
+                    
+                    // Обработчики для кнопок метрик диаграммы "Общая"
+                    document.querySelectorAll('.daily-metric-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const metric = e.target.dataset.metric;
+                            
+                            // Сохраняем текущую метрику
+                            currentDailyMetric = metric;
+                            
+                            // Обновляем активную кнопку
+                            document.querySelectorAll('.daily-metric-btn').forEach(b => {
+                                b.style.background = 'white';
+                                b.style.color = '#333';
+                                b.style.border = '1px solid #ddd';
+                                b.classList.remove('active');
+                            });
+                            e.target.style.background = '#667eea';
+                            e.target.style.color = 'white';
+                            e.target.style.border = '1px solid #667eea';
+                            e.target.classList.add('active');
+                            
+                            // Перерисовываем диаграмму
+                            drawDailyChart(currentDailyRange, currentDailyMetric);
                         });
                     });
                     
@@ -2799,6 +2835,8 @@
         let currentPaymentsRange = '30d';
         let currentPaymentsCampaignsRange = '30d';
         let currentSummaryCampaign = '';
+        let currentDailyRange = '7d';
+        let currentDailyMetric = 'all';
         
         // Функция для генерации фиксированного цвета на основе хеша строки
         function getCampaignColor(campaignName) {
@@ -2846,7 +2884,7 @@
 
         // Диаграмма "Общая" - по дням
         let dailyChart = null;
-        async function drawDailyChart(range = '7d') {
+        async function drawDailyChart(range = '7d', metric = 'all') {
             const canvas = document.getElementById('dailyChart');
             if (!canvas) return;
             
@@ -2868,40 +2906,95 @@
                     return `${date.getDate()}.${date.getMonth() + 1}`;
                 });
                 
-                const datasets = [
-                    {
+                let datasets = [];
+                
+                // Определяем, какие данные показывать
+                if (metric === 'all') {
+                    datasets = [
+                        {
+                            label: 'Пользователи',
+                            data: result.data.map(row => parseInt(row.new_users)),
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Заказы',
+                            data: result.data.map(row => parseInt(row.new_orders)),
+                            backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                            borderColor: 'rgba(255, 206, 86, 1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Генерации',
+                            data: result.data.map(row => parseInt(row.new_generations)),
+                            backgroundColor: 'rgba(155, 89, 182, 0.2)',
+                            borderColor: 'rgba(155, 89, 182, 1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Платежи',
+                            data: result.data.map(row => parseInt(row.new_payments)),
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        }
+                    ];
+                } else if (metric === 'users') {
+                    datasets = [{
                         label: 'Пользователи',
                         data: result.data.map(row => parseInt(row.new_users)),
-                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.3)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 2,
-                        tension: 0.4
-                    },
-                    {
+                        tension: 0.4,
+                        fill: true
+                    }];
+                } else if (metric === 'orders') {
+                    datasets = [{
                         label: 'Заказы',
                         data: result.data.map(row => parseInt(row.new_orders)),
-                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                        backgroundColor: 'rgba(255, 206, 86, 0.3)',
                         borderColor: 'rgba(255, 206, 86, 1)',
                         borderWidth: 2,
-                        tension: 0.4
-                    },
-                    {
+                        tension: 0.4,
+                        fill: true
+                    }];
+                } else if (metric === 'generations') {
+                    datasets = [{
                         label: 'Генерации',
                         data: result.data.map(row => parseInt(row.new_generations)),
-                        backgroundColor: 'rgba(155, 89, 182, 0.2)',
+                        backgroundColor: 'rgba(155, 89, 182, 0.3)',
                         borderColor: 'rgba(155, 89, 182, 1)',
                         borderWidth: 2,
-                        tension: 0.4
-                    },
-                    {
+                        tension: 0.4,
+                        fill: true
+                    }];
+                } else if (metric === 'payments') {
+                    datasets = [{
                         label: 'Платежи',
                         data: result.data.map(row => parseInt(row.new_payments)),
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.3)',
                         borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2,
-                        tension: 0.4
-                    }
-                ];
+                        tension: 0.4,
+                        fill: true
+                    }];
+                } else if (metric === 'revenue') {
+                    datasets = [{
+                        label: 'Выручка (₽)',
+                        data: result.data.map(row => parseFloat(row.revenue)),
+                        backgroundColor: 'rgba(39, 174, 96, 0.3)',
+                        borderColor: 'rgba(39, 174, 96, 1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true
+                    }];
+                }
                 
                 dailyChart = new Chart(canvas.getContext('2d'), {
                     type: 'line',
