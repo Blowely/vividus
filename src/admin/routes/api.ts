@@ -630,30 +630,30 @@ router.get('/stats/summary', async (req, res) => {
         periods AS (
           SELECT 
             NOW() - INTERVAL '1 day' as today_start,
-            NOW() - INTERVAL '3 days' as three_days_start,
-            NOW() - INTERVAL '7 days' as week_start
+            NOW() - INTERVAL '7 days' as week_start,
+            NOW() - INTERVAL '30 days' as month_start
         )
         SELECT 
-          -- Сегодня
-          (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT today_start FROM periods) ${userCampaignFilter}) as users_today,
-          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods)) as orders_today,
-          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT today_start FROM periods) AND orders.status = 'completed') as generations_today,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
-          
-          -- За 3 дня
-          (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT three_days_start FROM periods) ${userCampaignFilter}) as users_3d,
-          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
-          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT three_days_start FROM periods) AND orders.status = 'completed') as generations_3d,
-          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
-          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
-          
           -- За неделю
           (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT week_start FROM periods) ${userCampaignFilter}) as users_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods)) as orders_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT week_start FROM periods) AND orders.status = 'completed') as generations_week,
           (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
           (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
+          
+          -- За месяц
+          (SELECT COUNT(*) FROM users WHERE users.created_at >= (SELECT month_start FROM periods) ${userCampaignFilter}) as users_month,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT month_start FROM periods)) as orders_month,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.created_at >= (SELECT month_start FROM periods) AND orders.status = 'completed') as generations_month,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT month_start FROM periods) AND p.status = 'success') as payments_month,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.created_at >= (SELECT month_start FROM periods) AND p.status = 'success') as revenue_month,
+          
+          -- За все время
+          (SELECT COUNT(*) FROM users WHERE TRUE ${userCampaignFilter}) as users_all,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} TRUE) as orders_all,
+          (SELECT COUNT(*) FROM orders ${orderCampaignFilter} orders.status = 'completed') as generations_all,
+          (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} p.status = 'success') as payments_all,
+          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} p.status = 'success') as revenue_all,
           
           -- Метрики возвращаемости
           (SELECT COUNT(*) FROM users WHERE (SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params)) as total_users,
@@ -683,26 +683,26 @@ router.get('/stats/summary', async (req, res) => {
       const repeatRate = paidUsers > 0 ? ((repeatCustomers / paidUsers) * 100).toFixed(1) : '0.0';
       
       res.json({
-        today: {
-          users: parseInt(data.users_today) || 0,
-          orders: parseInt(data.orders_today) || 0,
-          generations: parseInt(data.generations_today) || 0,
-          payments: parseInt(data.payments_today) || 0,
-          revenue: parseFloat(data.revenue_today) || 0
-        },
-        three_days: {
-          users: parseInt(data.users_3d) || 0,
-          orders: parseInt(data.orders_3d) || 0,
-          generations: parseInt(data.generations_3d) || 0,
-          payments: parseInt(data.payments_3d) || 0,
-          revenue: parseFloat(data.revenue_3d) || 0
-        },
         week: {
           users: parseInt(data.users_week) || 0,
           orders: parseInt(data.orders_week) || 0,
           generations: parseInt(data.generations_week) || 0,
           payments: parseInt(data.payments_week) || 0,
           revenue: parseFloat(data.revenue_week) || 0
+        },
+        month: {
+          users: parseInt(data.users_month) || 0,
+          orders: parseInt(data.orders_month) || 0,
+          generations: parseInt(data.generations_month) || 0,
+          payments: parseInt(data.payments_month) || 0,
+          revenue: parseFloat(data.revenue_month) || 0
+        },
+        all: {
+          users: parseInt(data.users_all) || 0,
+          orders: parseInt(data.orders_all) || 0,
+          generations: parseInt(data.generations_all) || 0,
+          payments: parseInt(data.payments_all) || 0,
+          revenue: parseFloat(data.revenue_all) || 0
         },
         retention: {
           total_users: parseInt(data.total_users) || 0,
@@ -726,6 +726,96 @@ router.get('/stats/summary', async (req, res) => {
       hint: error.hint,
       position: error.position
     });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Получить детальную статистику по дням (для диаграммы "Общая")
+router.get('/stats/summary-daily', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const campaign = req.query.campaign as string | undefined;
+      const range = req.query.range as string || '7d';
+      
+      let interval = '7 days';
+      if (range === '30d') {
+        interval = '30 days';
+      } else if (range === 'all') {
+        interval = '10 years'; // Достаточно большой период для "все время"
+      }
+      
+      const params = [campaign || null];
+      
+      const result = await client.query(`
+        WITH filter_params AS (
+          SELECT NULLIF($1, '')::text as campaign_filter
+        ),
+        date_series AS (
+          SELECT DATE(day) as date
+          FROM generate_series(
+            NOW() - INTERVAL '${interval}',
+            NOW(),
+            '1 day'::interval
+          ) day
+        )
+        SELECT 
+          ds.date,
+          COALESCE(u.new_users, 0) as new_users,
+          COALESCE(o.new_orders, 0) as new_orders,
+          COALESCE(g.new_generations, 0) as new_generations,
+          COALESCE(p.new_payments, 0) as new_payments,
+          COALESCE(p.revenue, 0) as revenue
+        FROM date_series ds
+        LEFT JOIN (
+          SELECT DATE(created_at) as date, COUNT(*) as new_users
+          FROM users
+          WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR start_param = (SELECT campaign_filter FROM filter_params))
+            AND created_at >= NOW() - INTERVAL '${interval}'
+          GROUP BY DATE(created_at)
+        ) u ON ds.date = u.date
+        LEFT JOIN (
+          SELECT DATE(orders.created_at) as date, COUNT(*) as new_orders
+          FROM orders
+          INNER JOIN users ON orders.user_id = users.id
+          WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))
+            AND orders.created_at >= NOW() - INTERVAL '${interval}'
+          GROUP BY DATE(orders.created_at)
+        ) o ON ds.date = o.date
+        LEFT JOIN (
+          SELECT DATE(orders.created_at) as date, COUNT(*) as new_generations
+          FROM orders
+          INNER JOIN users ON orders.user_id = users.id
+          WHERE orders.status = 'completed'
+            AND ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))
+            AND orders.created_at >= NOW() - INTERVAL '${interval}'
+          GROUP BY DATE(orders.created_at)
+        ) g ON ds.date = g.date
+        LEFT JOIN (
+          SELECT 
+            DATE(p.created_at) as date, 
+            COUNT(*) as new_payments,
+            COALESCE(SUM(p.amount), 0) as revenue
+          FROM payments p
+          LEFT JOIN orders o ON p.order_id = o.id
+          LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id)
+          WHERE p.status = 'success'
+            AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))
+            AND p.created_at >= NOW() - INTERVAL '${interval}'
+          GROUP BY DATE(p.created_at)
+        ) p ON ds.date = p.date
+        ORDER BY ds.date
+      `, params);
+      
+      res.json({ data: result.rows });
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Error fetching summary daily stats:', error);
     res.status(500).json({ 
       error: 'Internal server error',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
