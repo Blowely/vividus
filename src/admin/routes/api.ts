@@ -620,18 +620,21 @@ router.get('/stats/summary', async (req, res) => {
           -- Сегодня
           (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT today_start FROM periods)) as users_today,
           (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT today_start FROM periods)) as orders_today,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT today_start FROM periods) AND status = 'completed') as generations_today,
           (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as payments_today,
           (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT today_start FROM periods) AND status = 'success') as revenue_today,
           
           -- За 3 дня
           (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT three_days_start FROM periods)) as users_3d,
           (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT three_days_start FROM periods)) as orders_3d,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'completed') as generations_3d,
           (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as payments_3d,
           (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT three_days_start FROM periods) AND status = 'success') as revenue_3d,
           
           -- За неделю
           (SELECT COUNT(*) FROM users WHERE created_at >= (SELECT week_start FROM periods)) as users_week,
           (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT week_start FROM periods)) as orders_week,
+          (SELECT COUNT(*) FROM orders WHERE created_at >= (SELECT week_start FROM periods) AND status = 'completed') as generations_week,
           (SELECT COUNT(*) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as payments_week,
           (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE created_at >= (SELECT week_start FROM periods) AND status = 'success') as revenue_week,
           
@@ -663,18 +666,21 @@ router.get('/stats/summary', async (req, res) => {
         today: {
           users: parseInt(data.users_today) || 0,
           orders: parseInt(data.orders_today) || 0,
+          generations: parseInt(data.generations_today) || 0,
           payments: parseInt(data.payments_today) || 0,
           revenue: parseFloat(data.revenue_today) || 0
         },
         three_days: {
           users: parseInt(data.users_3d) || 0,
           orders: parseInt(data.orders_3d) || 0,
+          generations: parseInt(data.generations_3d) || 0,
           payments: parseInt(data.payments_3d) || 0,
           revenue: parseFloat(data.revenue_3d) || 0
         },
         week: {
           users: parseInt(data.users_week) || 0,
           orders: parseInt(data.orders_week) || 0,
+          generations: parseInt(data.generations_week) || 0,
           payments: parseInt(data.payments_week) || 0,
           revenue: parseFloat(data.revenue_week) || 0
         },
