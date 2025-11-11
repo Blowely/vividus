@@ -20,13 +20,21 @@ interface BroadcastResult {
 
 export class BroadcastService {
   private bot: Telegraf; // Основной бот для отправки сообщений пользователям
-  private adminBot: Telegraf; // Broadcast-бот для отправки статистики админу
+  private adminBot: Telegraf; // Broadcast-бот для отправки статистики админу и получения файлов
 
   constructor() {
     // Используем токен ОСНОВНОГО бота для отправки сообщений пользователям
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
     // Используем токен BROADCAST-бота для отправки статистики админу
     this.adminBot = new Telegraf(process.env.BROADCAST_BOT_TOKEN!);
+  }
+
+  // Скачиваем файл через broadcast-бот и конвертируем в Buffer
+  private async downloadMediaFile(fileId: string): Promise<Buffer> {
+    const fileLink = await this.adminBot.telegram.getFileLink(fileId);
+    const response = await fetch(fileLink.href);
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   private isBlockedError(error: any): boolean {
@@ -68,12 +76,16 @@ export class BroadcastService {
           options.caption = broadcastData.text;
         }
         
+        // Скачиваем файл через broadcast-бот
+        const fileBuffer = await this.downloadMediaFile(broadcastData.mediaFileId);
+        
+        // Отправляем как Buffer через основной бот
         if (broadcastData.mediaType === 'photo') {
-          await this.bot.telegram.sendPhoto(userId, broadcastData.mediaFileId, options);
+          await this.bot.telegram.sendPhoto(userId, { source: fileBuffer }, options);
         } else if (broadcastData.mediaType === 'video') {
-          await this.bot.telegram.sendVideo(userId, broadcastData.mediaFileId, options);
+          await this.bot.telegram.sendVideo(userId, { source: fileBuffer }, options);
         } else if (broadcastData.mediaType === 'animation') {
-          await this.bot.telegram.sendAnimation(userId, broadcastData.mediaFileId, options);
+          await this.bot.telegram.sendAnimation(userId, { source: fileBuffer }, options);
         }
       } else if (broadcastData.text) {
         await this.bot.telegram.sendMessage(userId, broadcastData.text);
