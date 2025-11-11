@@ -1,6 +1,7 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { config } from 'dotenv';
 import { BroadcastService } from './service';
+import pool from '../config/database';
 
 config();
 
@@ -169,6 +170,26 @@ async function showBroadcastPreview(ctx: Context, data: BroadcastData) {
     previewText += `\n📝 Текст: (пусто)\n`;
   }
   
+  // Получаем количество неплатящих пользователей
+  let nonPayingCount = 0;
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT COUNT(DISTINCT u.id) as count
+      FROM users u
+      LEFT JOIN payments p ON u.id = p.user_id AND p.status = 'success'
+      WHERE p.id IS NULL
+    `);
+    nonPayingCount = parseInt(result.rows[0]?.count || '0', 10);
+  } catch (error) {
+    console.error('Error getting non-paying users count:', error);
+  } finally {
+    client.release();
+  }
+  
+  previewText += '\n━━━━━━━━━━━━━━━━━━━━\n';
+  previewText += '📊 Статистика получателей:\n';
+  previewText += `💸 Неплатящих пользователей: ${nonPayingCount}\n`;
   previewText += '\n━━━━━━━━━━━━━━━━━━━━\n';
   previewText += 'Выберите действие:';
   
@@ -178,7 +199,7 @@ async function showBroadcastPreview(ctx: Context, data: BroadcastData) {
       Markup.button.callback('🧪 Тест (мне)', 'broadcast_test')
     ],
     [
-      Markup.button.callback('💸 Разослать неплатящим', 'broadcast_non_paying')
+      Markup.button.callback(`💸 Разослать неплатящим (${nonPayingCount})`, 'broadcast_non_paying')
     ],
     [Markup.button.callback('❌ Отменить', 'broadcast_cancel')]
   ]);
