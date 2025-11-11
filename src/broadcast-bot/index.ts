@@ -177,6 +177,9 @@ async function showBroadcastPreview(ctx: Context, data: BroadcastData) {
       Markup.button.callback('✅ Разослать всем', 'broadcast_all'),
       Markup.button.callback('🧪 Тест (мне)', 'broadcast_test')
     ],
+    [
+      Markup.button.callback('💸 Разослать неплатящим', 'broadcast_non_paying')
+    ],
     [Markup.button.callback('❌ Отменить', 'broadcast_cancel')]
   ]);
 
@@ -228,6 +231,25 @@ bot.action('broadcast_all', async (ctx) => {
 
   // Запускаем рассылку
   await broadcastService.startMassBroadcast(broadcastData, ctx.from!.id, ctx.chat!.id);
+
+  waitingForBroadcast.delete(ctx.from!.id);
+});
+
+bot.action('broadcast_non_paying', async (ctx) => {
+  if (!isAdmin(ctx.from!.id)) {
+    return ctx.answerCbQuery('❌ Нет доступа');
+  }
+
+  const broadcastData = waitingForBroadcast.get(ctx.from!.id);
+  if (!broadcastData) {
+    return ctx.answerCbQuery('❌ Данные не найдены. Отправьте сообщение заново.');
+  }
+
+  await ctx.answerCbQuery('💸 Запускаю рассылку неплатящим...');
+  await ctx.editMessageText('💸 Рассылка неплатящим пользователям началась...\n\nОжидайте обновлений...');
+
+  // Запускаем рассылку только неплатящим пользователям
+  await broadcastService.sendBroadcastToNonPayingUsers(broadcastData, ctx.chat!.id);
 
   waitingForBroadcast.delete(ctx.from!.id);
 });

@@ -487,6 +487,138 @@ export class BroadcastService {
     }
   }
 
+  // Рассылка только пользователям без платежей
+  async sendBroadcastToNonPayingUsers(
+    broadcastData: BroadcastData, 
+    adminChatId: number
+  ): Promise<BroadcastResult> {
+    const client = await pool.connect();
+    
+    try {
+      // Получаем пользователей, которые еще не делали успешных платежей
+      const result = await client.query(`
+        SELECT DISTINCT u.telegram_id 
+        FROM users u
+        LEFT JOIN payments p ON u.id = p.user_id AND p.status = 'success'
+        WHERE p.id IS NULL
+        ORDER BY u.telegram_id
+      `);
+      const users = result.rows;
+      const totalUsers = users.length;
+      
+      let successCount = 0;
+      let blockedCount = 0;
+      let errorCount = 0;
+      let processedCount = 0;
+      
+      console.log(`Starting broadcast to ${totalUsers} non-paying users`);
+      
+      // Отправляем начальное сообщение с прогрессом
+      let progressMessageId: number | undefined;
+      try {
+        const initialProgress = `💸 Рассылка неплатящим пользователям началась...\n\n` +
+          `👥 Всего неплатящих пользователей: ${totalUsers}\n\n` +
+          `📊 Прогресс: 0/${totalUsers}\n` +
+          `${this.getProgressBar(0, totalUsers)}\n\n` +
+          `✅ Успешно: 0\n` +
+          `🚫 Заблокировали: 0\n` +
+          `❌ Ошибки: 0`;
+        
+        const msg = await this.adminBot.telegram.sendMessage(adminChatId, initialProgress);
+        progressMessageId = msg.message_id;
+      } catch (error) {
+        console.error('Error creating initial progress message:', error);
+      }
+      
+      // Рассылаем сообщения
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const sendResult = await this.sendToUser(user.telegram_id, broadcastData);
+        
+        processedCount++;
+        
+        if (sendResult.success) {
+          successCount++;
+        } else if (sendResult.reason === 'blocked') {
+          blockedCount++;
+        } else {
+          errorCount++;
+        }
+        
+        // Обновляем прогресс
+        const shouldUpdate = totalUsers <= 10 
+          ? true 
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
+        
+        if (shouldUpdate && progressMessageId) {
+          try {
+            const progressText = `💸 Рассылка неплатящим пользователям в процессе...\n\n` +
+              `👥 Всего неплатящих пользователей: ${totalUsers}\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Успешно: ${successCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
+            // Игнорируем ошибки обновления прогресса
+          }
+        }
+        
+        // Задержка между отправками
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      // Отправляем финальную статистику
+      if (progressMessageId) {
+        const finalMessage = `✅ Рассылка неплатящим пользователям завершена!\n\n` +
+          `📊 Статистика на ${this.getCurrentDateTime()}:\n\n` +
+          `👥 Всего неплатящих пользователей: ${totalUsers}\n` +
+          `📤 Обработано: ${processedCount}\n\n` +
+          `✅ Успешно доставлено: ${successCount} (${totalUsers > 0 ? Math.round(successCount / totalUsers * 100) : 0}%)\n` +
+          `🚫 Заблокировали бота: ${blockedCount} (${totalUsers > 0 ? Math.round(blockedCount / totalUsers * 100) : 0}%)\n` +
+          `❌ Ошибки отправки: ${errorCount} (${totalUsers > 0 ? Math.round(errorCount / totalUsers * 100) : 0}%)\n\n` +
+          `ℹ️ Отправлено только пользователям без успешных платежей`;
+        
+        try {
+          await this.adminBot.telegram.editMessageText(
+            adminChatId,
+            progressMessageId,
+            undefined,
+            finalMessage
+          );
+        } catch (error) {
+          await this.adminBot.telegram.sendMessage(adminChatId, finalMessage);
+        }
+      }
+      
+      console.log(`Broadcast to non-paying users completed: ${successCount}/${totalUsers} successful`);
+      
+      return { 
+        successCount, 
+        blockedCount, 
+        errorCount, 
+        totalUsers,
+        processedCount
+      };
+    } catch (error) {
+      console.error('Error during broadcast to non-paying users:', error);
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        '❌ Ошибка при рассылке неплатящим пользователям'
+      );
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async start() {
     console.log('Broadcast bot service ready');
   }
