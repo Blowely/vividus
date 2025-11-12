@@ -1165,6 +1165,7 @@ export class TelegramService {
 
     try {
       const analytics = await this.analyticsService.getCampaignAnalytics();
+      const todayStats = await this.analyticsService.getTodayStatsByCampaign();
       
       if (analytics.length === 0) {
         await this.sendMessage(ctx, '📊 Статистика пока пуста');
@@ -1186,11 +1187,25 @@ export class TelegramService {
           .replace(/~/g, '\\~')
           .replace(/`/g, '\\`');
         
+        const today = todayStats.get(stat.campaign_name) || {
+          users: 0,
+          payments_rub: 0,
+          payments_stars: 0,
+          completed_orders: 0
+        };
+        
+        // Форматируем изменения за сегодня
+        const formatTodayChange = (todayValue: number, isDecimal: boolean = false): string => {
+          if (todayValue === 0) return '';
+          const displayValue = isDecimal ? Math.round(todayValue) : todayValue;
+          return todayValue > 0 ? ` (+${displayValue})` : ` (${displayValue})`;
+        };
+        
         message += `🏷️ *${campaignName}*\n`;
-        message += `👥 Пользователи: ${stat.total_users}\n`;
-        message += `💰 Сумма оплат: ${stat.total_payments_rub} руб\n`;
-        message += `⭐ Сумма в stars: ${stat.total_payments_stars}\n`;
-        message += `🎬 Успешных генераций: ${stat.completed_orders}\n`;
+        message += `👥 Пользователи: ${stat.total_users}${formatTodayChange(today.users)}\n`;
+        message += `💰 Сумма оплат: ${stat.total_payments_rub} руб${formatTodayChange(today.payments_rub, true)}\n`;
+        message += `⭐ Сумма в stars: ${stat.total_payments_stars}${formatTodayChange(today.payments_stars)}\n`;
+        message += `🎬 Успешных генераций: ${stat.completed_orders}${formatTodayChange(today.completed_orders)}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
         
         // Добавляем кнопку для детальной статистики по кампании

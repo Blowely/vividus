@@ -171,4 +171,72 @@ export class AnalyticsService {
       client.release();
     }
   }
+
+  async getTodayStatsByCampaign(): Promise<Map<string, {
+    users: number;
+    payments_rub: number;
+    payments_stars: number;
+    completed_orders: number;
+  }>> {
+    const client = await pool.connect();
+    
+    try {
+      // Получаем статистику за сегодня (московское время UTC+3)
+      // Используем DATE_TRUNC для получения начала дня в московском времени
+      const result = await client.query(`
+        SELECT 
+          c.name as campaign_name,
+          (SELECT COUNT(DISTINCT u.id)::INTEGER 
+           FROM users u 
+           WHERE u.start_param = c.name
+             AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')) as users_today,
+          (
+            SELECT COALESCE(SUM(p.amount), 0)::DECIMAL(12,2)
+            FROM payments p
+            WHERE p.status = 'success'
+              AND (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')
+              AND (
+                p.order_id IN (
+                  SELECT o.id FROM orders o 
+                  INNER JOIN users u ON o.user_id = u.id 
+                  WHERE u.start_param = c.name
+                )
+                OR (p.order_id IS NULL AND p.user_id IN (
+                  SELECT u.id FROM users u WHERE u.start_param = c.name
+                ))
+              )
+          ) as payments_rub_today,
+          0::INTEGER as payments_stars_today,
+          (
+            SELECT COUNT(DISTINCT o.id)::INTEGER
+            FROM orders o
+            INNER JOIN users u ON o.user_id = u.id
+            WHERE o.status = 'completed'
+              AND u.start_param = c.name
+              AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')
+          ) as completed_orders_today
+        FROM campaigns c
+      `);
+      
+      const statsMap = new Map<string, {
+        users: number;
+        payments_rub: number;
+        payments_stars: number;
+        completed_orders: number;
+      }>();
+      
+      for (const row of result.rows) {
+        statsMap.set(row.campaign_name, {
+          users: parseInt(row.users_today) || 0,
+          payments_rub: parseFloat(row.payments_rub_today) || 0,
+          payments_stars: parseInt(row.payments_stars_today) || 0,
+          completed_orders: parseInt(row.completed_orders_today) || 0
+        });
+      }
+      
+      return statsMap;
+    } finally {
+      client.release();
+    }
+  }
 }
