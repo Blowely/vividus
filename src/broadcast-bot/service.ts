@@ -262,15 +262,15 @@ export class BroadcastService {
     }
   }
 
-  // Проверка только органических пользователей (исключая кампанию "unu")
+  // Проверка только органических пользователей (исключая кампании "unu", "smm", "task_pay")
   async checkOrganicUsersStatus(adminChatId: number): Promise<void> {
     const client = await pool.connect();
     
     try {
-      // Получаем только органических пользователей (исключаем кампанию "unu")
+      // Получаем только органических пользователей (исключаем кампании "unu", "smm", "task_pay")
       const result = await client.query(
         `SELECT telegram_id FROM users 
-         WHERE start_param IS NULL OR start_param != 'unu' 
+         WHERE start_param IS NULL OR start_param NOT IN ('unu', 'smm', 'task_pay')
          ORDER BY telegram_id`
       );
       const users = result.rows;
@@ -288,7 +288,7 @@ export class BroadcastService {
         `✅ Активны: 0\n` +
         `🚫 Заблокировали: 0\n` +
         `❌ Ошибки: 0\n\n` +
-        `ℹ️ Исключены пользователи из кампании "unu"`;
+        `ℹ️ Исключены пользователи из кампаний: unu, smm, task_pay`;
       
       const progressMsg = await this.adminBot.telegram.sendMessage(adminChatId, initialMessage);
       const progressMessageId = progressMsg.message_id;
@@ -321,7 +321,7 @@ export class BroadcastService {
               `✅ Активны: ${activeCount}\n` +
               `🚫 Заблокировали: ${blockedCount}\n` +
               `❌ Ошибки: ${errorCount}\n\n` +
-              `ℹ️ Исключены пользователи из кампании "unu"`;
+              `ℹ️ Исключены пользователи из кампаний: unu, smm, task_pay`;
             
             await this.adminBot.telegram.editMessageText(
               adminChatId,
@@ -346,7 +346,7 @@ export class BroadcastService {
         `✅ Активны (бот не заблокирован): ${activeCount} (${totalUsers > 0 ? Math.round(activeCount / totalUsers * 100) : 0}%)\n` +
         `🚫 Заблокировали бота: ${blockedCount} (${totalUsers > 0 ? Math.round(blockedCount / totalUsers * 100) : 0}%)\n` +
         `❌ Ошибки проверки: ${errorCount} (${totalUsers > 0 ? Math.round(errorCount / totalUsers * 100) : 0}%)\n\n` +
-        `ℹ️ Исключены пользователи из кампании "unu"`;
+        `ℹ️ Исключены пользователи из кампаний: unu, smm, task_pay`;
       
       try {
         await this.adminBot.telegram.editMessageText(
