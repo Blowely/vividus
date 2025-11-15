@@ -35,7 +35,9 @@ bot.start(async (ctx) => {
     '✅ После отправки вы увидите предпросмотр и кнопки для подтверждения.\n\n' +
     '━━━━━━━━━━━━━━━━━━━━\n' +
     '🔍 /check - Проверить статус всех пользователей\n' +
-    '🌱 /check_organic - Проверить статус органических пользователей (исключая unu, smm, task_pay)'
+    '🌱 /check_organic - Проверить статус органических пользователей (исключая unu, smm, task_pay)\n' +
+    '💾 /dump_all - Создать полный дамп базы данных\n' +
+    '📦 /dump - Создать дамп выбранных таблиц'
   );
 });
 
@@ -68,6 +70,53 @@ bot.command('check_organic', async (ctx) => {
   );
 
   await broadcastService.checkOrganicUsersStatus(ctx.chat!.id);
+});
+
+// Команда /dump_all - создать полный дамп базы данных
+bot.command('dump_all', async (ctx) => {
+  if (!isAdmin(ctx.from!.id)) {
+    return ctx.reply('❌ У вас нет доступа к этой команде.');
+  }
+
+  await ctx.reply(
+    '💾 Начинаю создание полного дампа базы данных...\n\n' +
+    'Это может занять некоторое время в зависимости от объема данных.'
+  );
+
+  await broadcastService.createFullDatabaseDump(ctx.chat!.id);
+});
+
+// Команда /dump - создать дамп выбранных таблиц
+bot.command('dump', async (ctx) => {
+  if (!isAdmin(ctx.from!.id)) {
+    return ctx.reply('❌ У вас нет доступа к этой команде.');
+  }
+
+  const keyboard = Markup.inlineKeyboard([
+    [
+      Markup.button.callback('👥 users', 'dump_users'),
+      Markup.button.callback('📦 orders', 'dump_orders')
+    ],
+    [
+      Markup.button.callback('💳 payments', 'dump_payments'),
+      Markup.button.callback('🎬 did_jobs', 'dump_did_jobs')
+    ],
+    [
+      Markup.button.callback('📊 campaigns', 'dump_campaigns'),
+      Markup.button.callback('📈 campaign_stats', 'dump_campaign_stats')
+    ],
+    [
+      Markup.button.callback('📋 activity_logs', 'dump_activity_logs')
+    ],
+    [
+      Markup.button.callback('❌ Отмена', 'dump_cancel')
+    ]
+  ]);
+
+  await ctx.reply(
+    '📦 Выберите таблицу для создания дампа:',
+    keyboard
+  );
 });
 
 // Обработка текстовых сообщений
@@ -285,6 +334,28 @@ bot.action('broadcast_cancel', async (ctx) => {
   await ctx.editMessageText('❌ Рассылка отменена.');
 });
 
+// Обработчики для дампов таблиц
+bot.action(/^dump_(users|orders|payments|did_jobs|campaigns|campaign_stats|activity_logs)$/, async (ctx) => {
+  if (!isAdmin(ctx.from!.id)) {
+    return ctx.answerCbQuery('❌ Нет доступа');
+  }
+
+  const tableName = ctx.match![1];
+  await ctx.answerCbQuery(`💾 Создаю дамп таблицы ${tableName}...`);
+  await ctx.editMessageText(`💾 Создание дампа таблицы ${tableName}...\n\nОжидайте...`);
+
+  await broadcastService.createTableDump(tableName, ctx.chat!.id);
+});
+
+bot.action('dump_cancel', async (ctx) => {
+  if (!isAdmin(ctx.from!.id)) {
+    return ctx.answerCbQuery('❌ Нет доступа');
+  }
+
+  await ctx.answerCbQuery('❌ Отменено');
+  await ctx.editMessageText('❌ Создание дампа отменено.');
+});
+
 // Обработка ошибок
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
@@ -294,7 +365,9 @@ bot.catch((err, ctx) => {
 bot.telegram.setMyCommands([
   { command: 'start', description: 'Начать работу с ботом' },
   { command: 'check', description: 'Проверить статус всех пользователей' },
-  { command: 'check_organic', description: 'Проверить статус органических пользователей (исключая unu, smm, task_pay)' }
+  { command: 'check_organic', description: 'Проверить статус органических пользователей' },
+  { command: 'dump_all', description: 'Создать полный дамп базы данных' },
+  { command: 'dump', description: 'Создать дамп выбранных таблиц' }
 ]);
 
 // Запуск бота

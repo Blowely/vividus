@@ -1,6 +1,8 @@
 import { Telegraf } from 'telegraf';
 import pool from '../config/database';
 import { config } from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 
 config();
 
@@ -637,6 +639,329 @@ export class BroadcastService {
 
   getBot() {
     return this.bot;
+  }
+
+  // Создание полного дампа базы данных
+  async createFullDatabaseDump(adminChatId: number): Promise<void> {
+    const client = await pool.connect();
+    const tables = ['users', 'orders', 'payments', 'did_jobs', 'campaigns', 'campaign_stats', 'activity_logs'];
+    
+    try {
+      const progressMessage = await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        '💾 Создание полного дампа базы данных...\n\n' +
+        '⏳ Подготовка...'
+      );
+      
+      const dumps: { [key: string]: string } = {};
+      const rowCounts: { [key: string]: number } = {};
+      
+      // Создаем дампы всех таблиц с прогресс-баром
+      for (let i = 0; i < tables.length; i++) {
+        const tableName = tables[i];
+        const progress = this.getProgressBar(i, tables.length);
+        
+        await this.adminBot.telegram.editMessageText(
+          adminChatId,
+          progressMessage.message_id,
+          undefined,
+          `💾 Создание полного дампа базы данных...\n\n` +
+          `📊 Прогресс: ${progress}\n` +
+          `📦 Обработка таблицы: ${tableName}`
+        );
+        
+        const { dump, rowCount } = await this.createTableDumpContent(client, tableName);
+        dumps[tableName] = dump;
+        rowCounts[tableName] = rowCount;
+      }
+      
+      // Финальный прогресс
+      await this.adminBot.telegram.editMessageText(
+        adminChatId,
+        progressMessage.message_id,
+        undefined,
+        `💾 Создание полного дампа базы данных...\n\n` +
+        `📊 Прогресс: ${this.getProgressBar(tables.length, tables.length)}\n` +
+        `📝 Формирование файлов...`
+      );
+      
+      // Создаем директорию для дампов
+      const dumpDir = path.join(__dirname, '../../dumps');
+      if (!fs.existsSync(dumpDir)) {
+        fs.mkdirSync(dumpDir, { recursive: true });
+      }
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      
+      // Создаем отдельные файлы для каждой таблицы
+      const dumpFiles: string[] = [];
+      for (const tableName of tables) {
+        const fileName = `${tableName}_${timestamp}.sql`;
+        const filePath = path.join(dumpDir, fileName);
+        fs.writeFileSync(filePath, dumps[tableName], 'utf8');
+        dumpFiles.push(filePath);
+      }
+      
+      // Создаем скрипт восстановления
+      const restoreScript = this.createRestoreScript(tables, timestamp);
+      const restoreScriptPath = path.join(dumpDir, `restore_${timestamp}.sh`);
+      fs.writeFileSync(restoreScriptPath, restoreScript, 'utf8');
+      fs.chmodSync(restoreScriptPath, '755');
+      
+      // Отправляем статистику
+      let statsMessage = `✅ Полный дамп базы данных создан!\n\n` +
+        `📅 Дата: ${this.getCurrentDateTime()}\n\n` +
+        `📊 Статистика по таблицам:\n`;
+      
+      for (const tableName of tables) {
+        statsMessage += `  • ${tableName}: ${rowCounts[tableName]} записей\n`;
+      }
+      
+      statsMessage += `\n📝 Создано файлов: ${dumpFiles.length + 1}\n`;
+      statsMessage += `\n📤 Отправка файлов...`;
+      
+      await this.adminBot.telegram.editMessageText(
+        adminChatId,
+        progressMessage.message_id,
+        undefined,
+        statsMessage
+      );
+      
+      // Отправляем скрипт восстановления
+      await this.adminBot.telegram.sendDocument(
+        adminChatId,
+        { source: restoreScriptPath, filename: `restore_${timestamp}.sh` },
+        { caption: '🔧 Скрипт восстановления базы данных' }
+      );
+      
+      // Отправляем файлы дампов
+      for (const filePath of dumpFiles) {
+        const tableName = path.basename(filePath).split('_')[0];
+        await this.adminBot.telegram.sendDocument(
+          adminChatId,
+          { source: filePath, filename: path.basename(filePath) },
+          { caption: `📦 Дамп таблицы: ${tableName} (${rowCounts[tableName]} записей)` }
+        );
+      }
+      
+      // Удаляем временные файлы
+      for (const filePath of dumpFiles) {
+        fs.unlinkSync(filePath);
+      }
+      fs.unlinkSync(restoreScriptPath);
+      
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        `✅ Все файлы успешно отправлены!\n\n` +
+        `💡 Для восстановления базы:\n` +
+        `1. Скачайте все файлы в одну директорию\n` +
+        `2. Запустите скрипт: ./restore_${timestamp}.sh`
+      );
+      
+    } catch (error) {
+      console.error('Error creating full database dump:', error);
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        `❌ Ошибка при создании дампа: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  // Создание дампа конкретной таблицы
+  async createTableDump(tableName: string, adminChatId: number): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      const progressMessage = await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        `💾 Создание дампа таблицы ${tableName}...\n\n` +
+        '⏳ Чтение данных...'
+      );
+      
+      const { dump, rowCount } = await this.createTableDumpContent(client, tableName);
+      
+      await this.adminBot.telegram.editMessageText(
+        adminChatId,
+        progressMessage.message_id,
+        undefined,
+        `💾 Создание дампа таблицы ${tableName}...\n\n` +
+        `📊 Найдено записей: ${rowCount}\n` +
+        `📝 Формирование файла...`
+      );
+      
+      // Создаем директорию для дампов
+      const dumpDir = path.join(__dirname, '../../dumps');
+      if (!fs.existsSync(dumpDir)) {
+        fs.mkdirSync(dumpDir, { recursive: true });
+      }
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const fileName = `${tableName}_${timestamp}.sql`;
+      const filePath = path.join(dumpDir, fileName);
+      
+      fs.writeFileSync(filePath, dump, 'utf8');
+      
+      // Отправляем файл
+      await this.adminBot.telegram.sendDocument(
+        adminChatId,
+        { source: filePath, filename: fileName },
+        { 
+          caption: `✅ Дамп таблицы: ${tableName}\n` +
+            `📊 Записей: ${rowCount}\n` +
+            `📅 ${this.getCurrentDateTime()}`
+        }
+      );
+      
+      // Удаляем временный файл
+      fs.unlinkSync(filePath);
+      
+      await this.adminBot.telegram.editMessageText(
+        adminChatId,
+        progressMessage.message_id,
+        undefined,
+        `✅ Дамп таблицы ${tableName} успешно создан и отправлен!\n\n` +
+        `📊 Записей: ${rowCount}`
+      );
+      
+    } catch (error) {
+      console.error(`Error creating dump for table ${tableName}:`, error);
+      await this.adminBot.telegram.sendMessage(
+        adminChatId,
+        `❌ Ошибка при создании дампа таблицы ${tableName}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  // Создание SQL-дампа содержимого таблицы
+  private async createTableDumpContent(client: any, tableName: string): Promise<{ dump: string; rowCount: number }> {
+    // Получаем структуру таблицы
+    const columnsResult = await client.query(`
+      SELECT column_name, data_type, column_default, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+    
+    const columns = columnsResult.rows.map((row: any) => row.column_name);
+    
+    // Получаем данные
+    const dataResult = await client.query(`SELECT * FROM ${tableName}`);
+    const rows = dataResult.rows;
+    
+    let dump = `-- Dump of table: ${tableName}\n`;
+    dump += `-- Generated at: ${this.getCurrentDateTime()}\n`;
+    dump += `-- Rows: ${rows.length}\n\n`;
+    
+    if (rows.length === 0) {
+      dump += `-- Table ${tableName} is empty\n\n`;
+      return { dump, rowCount: 0 };
+    }
+    
+    // Генерируем INSERT-ы
+    dump += `-- Data for table: ${tableName}\n`;
+    
+    for (const row of rows) {
+      const values = columns.map(col => {
+        const value = row[col];
+        
+        if (value === null || value === undefined) {
+          return 'NULL';
+        }
+        
+        if (typeof value === 'string') {
+          return `'${value.replace(/'/g, "''")}'`;
+        }
+        
+        if (value instanceof Date) {
+          return `'${value.toISOString()}'`;
+        }
+        
+        if (typeof value === 'boolean') {
+          return value ? 'TRUE' : 'FALSE';
+        }
+        
+        if (typeof value === 'object') {
+          return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+        }
+        
+        return value.toString();
+      });
+      
+      dump += `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${values.join(', ')});\n`;
+    }
+    
+    dump += '\n';
+    
+    return { dump, rowCount: rows.length };
+  }
+
+  // Создание скрипта восстановления
+  private createRestoreScript(tables: string[], timestamp: string): string {
+    let script = `#!/bin/bash\n\n`;
+    script += `# Скрипт восстановления базы данных\n`;
+    script += `# Создан: ${this.getCurrentDateTime()}\n\n`;
+    script += `# Использование:\n`;
+    script += `# 1. Установите переменные окружения для подключения к БД:\n`;
+    script += `#    export PGHOST=localhost\n`;
+    script += `#    export PGPORT=5432\n`;
+    script += `#    export PGDATABASE=vividus\n`;
+    script += `#    export PGUSER=postgres\n`;
+    script += `#    export PGPASSWORD=password\n`;
+    script += `# 2. Запустите скрипт: ./restore_${timestamp}.sh\n\n`;
+    
+    script += `set -e\n\n`;
+    
+    script += `echo "🔄 Начало восстановления базы данных..."\n`;
+    script += `echo ""\n\n`;
+    
+    script += `# Проверка наличия файлов\n`;
+    for (const tableName of tables) {
+      script += `if [ ! -f "${tableName}_${timestamp}.sql" ]; then\n`;
+      script += `    echo "❌ Файл ${tableName}_${timestamp}.sql не найден!"\n`;
+      script += `    exit 1\n`;
+      script += `fi\n`;
+    }
+    
+    script += `\necho "✅ Все файлы дампов найдены"\n`;
+    script += `echo ""\n\n`;
+    
+    script += `# Очистка таблиц (в правильном порядке, учитывая foreign keys)\n`;
+    script += `echo "🗑️  Очистка существующих данных..."\n`;
+    const reversedTables = [...tables].reverse();
+    for (const tableName of reversedTables) {
+      script += `psql -c "TRUNCATE TABLE ${tableName} CASCADE;" || true\n`;
+    }
+    
+    script += `\necho ""\n`;
+    script += `echo "📥 Восстановление данных..."\n`;
+    script += `echo ""\n\n`;
+    
+    // Восстановление в правильном порядке (учитывая зависимости)
+    const orderedTables = ['users', 'campaigns', 'orders', 'payments', 'did_jobs', 'campaign_stats', 'activity_logs'];
+    for (const tableName of orderedTables) {
+      if (tables.includes(tableName)) {
+        script += `echo "📦 Восстановление таблицы: ${tableName}"\n`;
+        script += `psql -f "${tableName}_${timestamp}.sql" -q\n`;
+        script += `echo "✅ ${tableName} восстановлена"\n`;
+        script += `echo ""\n`;
+      }
+    }
+    
+    script += `\necho ""\n`;
+    script += `echo "✅ Восстановление базы данных завершено успешно!"\n`;
+    script += `echo ""\n`;
+    script += `echo "📊 Статистика:"\n`;
+    
+    for (const tableName of tables) {
+      script += `echo -n "  • ${tableName}: "\n`;
+      script += `psql -t -c "SELECT COUNT(*) FROM ${tableName};"\n`;
+    }
+    
+    return script;
   }
 }
 
