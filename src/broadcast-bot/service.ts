@@ -1,6 +1,7 @@
 import { Telegraf } from 'telegraf';
 import pool from '../config/database';
 import { config } from 'dotenv';
+import { S3Service } from '../services/s3';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,12 +24,14 @@ interface BroadcastResult {
 export class BroadcastService {
   private bot: Telegraf; // Основной бот для отправки сообщений пользователям
   private adminBot: Telegraf; // Broadcast-бот для отправки статистики админу и получения файлов
+  private s3Service: S3Service;
 
   constructor() {
     // Используем токен ОСНОВНОГО бота для отправки сообщений пользователям
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
     // Используем токен BROADCAST-бота для отправки статистики админу
     this.adminBot = new Telegraf(process.env.BROADCAST_BOT_TOKEN!);
+    this.s3Service = new S3Service();
   }
 
   // Скачиваем файл через broadcast-бот и конвертируем в Buffer
@@ -653,8 +656,15 @@ export class BroadcastService {
         '⏳ Подготовка...'
       );
       
-      const dumps: { [key: string]: string } = {};
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const s3Links: { [key: string]: string } = {};
       const rowCounts: { [key: string]: number } = {};
+      const tempDir = path.join(__dirname, '../../temp_dumps');
+      
+      // Создаем временную директорию
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
       
       // Создаем дампы всех таблиц с прогресс-баром
       for (let i = 0; i < tables.length; i++) {
@@ -670,9 +680,27 @@ export class BroadcastService {
           `📦 Обработка таблицы: ${tableName}`
         );
         
+        // Создаем дамп и сохраняем во временный файл
         const { dump, rowCount } = await this.createTableDumpContent(client, tableName);
-        dumps[tableName] = dump;
         rowCounts[tableName] = rowCount;
+        
+        const tempFilePath = path.join(tempDir, `${tableName}_${timestamp}.sql`);
+        fs.writeFileSync(tempFilePath, dump, 'utf8');
+        
+        // Загружаем в S3
+        const s3Key = `service/dumps/${tableName}_${timestamp}.sql`;
+        const s3Url = await this.s3Service.uploadFile(tempFilePath, s3Key);
+        s3Links[tableName] = s3Url;
+        
+        // Удаляем временный файл
+        fs.unlinkSync(tempFilePath);
+      }
+      
+      // Удаляем временную директорию, если пуста
+      try {
+        fs.rmdirSync(tempDir);
+      } catch (e) {
+        // Игнорируем ошибку, если директория не пуста
       }
       
       // Финальный прогресс
@@ -682,80 +710,39 @@ export class BroadcastService {
         undefined,
         `💾 Создание полного дампа базы данных...\n\n` +
         `📊 Прогресс: ${this.getProgressBar(tables.length, tables.length)}\n` +
-        `📝 Формирование файлов...`
+        `☁️ Загрузка в S3...`
       );
       
-      // Создаем директорию для дампов
-      const dumpDir = path.join(__dirname, '../../dumps');
-      if (!fs.existsSync(dumpDir)) {
-        fs.mkdirSync(dumpDir, { recursive: true });
-      }
-      
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      
-      // Создаем отдельные файлы для каждой таблицы
-      const dumpFiles: string[] = [];
-      for (const tableName of tables) {
-        const fileName = `${tableName}_${timestamp}.sql`;
-        const filePath = path.join(dumpDir, fileName);
-        fs.writeFileSync(filePath, dumps[tableName], 'utf8');
-        dumpFiles.push(filePath);
-      }
-      
       // Создаем скрипт восстановления
-      const restoreScript = this.createRestoreScript(tables, timestamp);
-      const restoreScriptPath = path.join(dumpDir, `restore_${timestamp}.sh`);
+      const restoreScript = this.createRestoreScript(tables, timestamp, s3Links);
+      const restoreScriptPath = path.join(tempDir, `restore_${timestamp}.sh`);
       fs.writeFileSync(restoreScriptPath, restoreScript, 'utf8');
-      fs.chmodSync(restoreScriptPath, '755');
       
-      // Отправляем статистику
-      let statsMessage = `✅ Полный дамп базы данных создан!\n\n` +
+      const restoreScriptKey = `service/dumps/restore_${timestamp}.sh`;
+      const restoreScriptUrl = await this.s3Service.uploadFile(restoreScriptPath, restoreScriptKey);
+      
+      // Удаляем временный скрипт
+      fs.unlinkSync(restoreScriptPath);
+      
+      // Формируем сообщение со ссылками
+      let message = `✅ Полный дамп базы данных создан и загружен в S3!\n\n` +
         `📅 Дата: ${this.getCurrentDateTime()}\n\n` +
         `📊 Статистика по таблицам:\n`;
       
       for (const tableName of tables) {
-        statsMessage += `  • ${tableName}: ${rowCounts[tableName]} записей\n`;
+        message += `\n📦 *${tableName}*: ${rowCounts[tableName]} записей\n`;
+        message += `   🔗 [Скачать дамп](${s3Links[tableName]})\n`;
       }
       
-      statsMessage += `\n📝 Создано файлов: ${dumpFiles.length + 1}\n`;
-      statsMessage += `\n📤 Отправка файлов...`;
+      message += `\n🔧 [Скрипт восстановления](${restoreScriptUrl})\n`;
+      message += `\n💡 Все файлы сохранены в S3: service/dumps/`;
       
       await this.adminBot.telegram.editMessageText(
         adminChatId,
         progressMessage.message_id,
         undefined,
-        statsMessage
-      );
-      
-      // Отправляем скрипт восстановления
-      await this.adminBot.telegram.sendDocument(
-        adminChatId,
-        { source: restoreScriptPath, filename: `restore_${timestamp}.sh` },
-        { caption: '🔧 Скрипт восстановления базы данных' }
-      );
-      
-      // Отправляем файлы дампов
-      for (const filePath of dumpFiles) {
-        const tableName = path.basename(filePath).split('_')[0];
-        await this.adminBot.telegram.sendDocument(
-          adminChatId,
-          { source: filePath, filename: path.basename(filePath) },
-          { caption: `📦 Дамп таблицы: ${tableName} (${rowCounts[tableName]} записей)` }
-        );
-      }
-      
-      // Удаляем временные файлы
-      for (const filePath of dumpFiles) {
-        fs.unlinkSync(filePath);
-      }
-      fs.unlinkSync(restoreScriptPath);
-      
-      await this.adminBot.telegram.sendMessage(
-        adminChatId,
-        `✅ Все файлы успешно отправлены!\n\n` +
-        `💡 Для восстановления базы:\n` +
-        `1. Скачайте все файлы в одну директорию\n` +
-        `2. Запустите скрипт: ./restore_${timestamp}.sh`
+        message,
+        { parse_mode: 'Markdown' }
       );
       
     } catch (error) {
@@ -788,41 +775,40 @@ export class BroadcastService {
         undefined,
         `💾 Создание дампа таблицы ${tableName}...\n\n` +
         `📊 Найдено записей: ${rowCount}\n` +
-        `📝 Формирование файла...`
+        `☁️ Загрузка в S3...`
       );
-      
-      // Создаем директорию для дампов
-      const dumpDir = path.join(__dirname, '../../dumps');
-      if (!fs.existsSync(dumpDir)) {
-        fs.mkdirSync(dumpDir, { recursive: true });
-      }
       
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const fileName = `${tableName}_${timestamp}.sql`;
-      const filePath = path.join(dumpDir, fileName);
+      const tempDir = path.join(__dirname, '../../temp_dumps');
       
-      fs.writeFileSync(filePath, dump, 'utf8');
+      // Создаем временную директорию
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
       
-      // Отправляем файл
-      await this.adminBot.telegram.sendDocument(
-        adminChatId,
-        { source: filePath, filename: fileName },
-        { 
-          caption: `✅ Дамп таблицы: ${tableName}\n` +
-            `📊 Записей: ${rowCount}\n` +
-            `📅 ${this.getCurrentDateTime()}`
-        }
-      );
+      // Сохраняем во временный файл
+      const tempFilePath = path.join(tempDir, `${tableName}_${timestamp}.sql`);
+      fs.writeFileSync(tempFilePath, dump, 'utf8');
+      
+      // Загружаем в S3
+      const s3Key = `service/dumps/${tableName}_${timestamp}.sql`;
+      const s3Url = await this.s3Service.uploadFile(tempFilePath, s3Key);
       
       // Удаляем временный файл
-      fs.unlinkSync(filePath);
+      fs.unlinkSync(tempFilePath);
+      
+      // Формируем сообщение со ссылкой
+      let message = `✅ Дамп таблицы ${tableName} успешно создан и загружен в S3!\n\n` +
+        `📊 Записей: ${rowCount}\n` +
+        `📅 ${this.getCurrentDateTime()}\n\n` +
+        `🔗 [Скачать дамп](${s3Url})`;
       
       await this.adminBot.telegram.editMessageText(
         adminChatId,
         progressMessage.message_id,
         undefined,
-        `✅ Дамп таблицы ${tableName} успешно создан и отправлен!\n\n` +
-        `📊 Записей: ${rowCount}`
+        message,
+        { parse_mode: 'Markdown' }
       );
       
     } catch (error) {
@@ -836,7 +822,7 @@ export class BroadcastService {
     }
   }
 
-  // Создание SQL-дампа содержимого таблицы
+  // Создание SQL-дампа содержимого таблицы (с обработкой порциями)
   private async createTableDumpContent(client: any, tableName: string): Promise<{ dump: string; rowCount: number }> {
     // Получаем структуру таблицы
     const columnsResult = await client.query(`
@@ -848,61 +834,73 @@ export class BroadcastService {
     
     const columns = columnsResult.rows.map((row: any) => row.column_name);
     
-    // Получаем данные
-    const dataResult = await client.query(`SELECT * FROM ${tableName}`);
-    const rows = dataResult.rows;
+    // Получаем количество записей
+    const countResult = await client.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+    const totalRows = parseInt(countResult.rows[0].count, 10);
     
-    let dump = `-- Dump of table: ${tableName}\n`;
-    dump += `-- Generated at: ${this.getCurrentDateTime()}\n`;
-    dump += `-- Rows: ${rows.length}\n\n`;
+    const header = `-- Dump of table: ${tableName}\n` +
+      `-- Generated at: ${this.getCurrentDateTime()}\n` +
+      `-- Rows: ${totalRows}\n\n`;
     
-    if (rows.length === 0) {
-      dump += `-- Table ${tableName} is empty\n\n`;
-      return { dump, rowCount: 0 };
+    if (totalRows === 0) {
+      return { dump: `${header}-- Table ${tableName} is empty\n\n`, rowCount: 0 };
     }
     
-    // Генерируем INSERT-ы
-    dump += `-- Data for table: ${tableName}\n`;
+    const BATCH_SIZE = 1000; // Обрабатываем по 1000 записей за раз
+    let dump = header + `-- Data for table: ${tableName}\n`;
     
-    for (const row of rows) {
-      const values = columns.map(col => {
-        const value = row[col];
-        
-        if (value === null || value === undefined) {
-          return 'NULL';
-        }
-        
-        if (typeof value === 'string') {
-          return `'${value.replace(/'/g, "''")}'`;
-        }
-        
-        if (value instanceof Date) {
-          return `'${value.toISOString()}'`;
-        }
-        
-        if (typeof value === 'boolean') {
-          return value ? 'TRUE' : 'FALSE';
-        }
-        
-        if (typeof value === 'object') {
-          return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
-        }
-        
-        return value.toString();
-      });
+    // Обрабатываем данные порциями, чтобы не загружать всю таблицу в память
+    for (let offset = 0; offset < totalRows; offset += BATCH_SIZE) {
+      const batchResult = await client.query(
+        `SELECT * FROM ${tableName} ORDER BY (SELECT NULL) LIMIT $1 OFFSET $2`,
+        [BATCH_SIZE, offset]
+      );
+      const rows = batchResult.rows;
       
-      dump += `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${values.join(', ')});\n`;
+      // Генерируем INSERT-ы для текущей порции
+      for (const row of rows) {
+        const values = columns.map((col: string) => {
+          const value = row[col];
+          
+          if (value === null || value === undefined) {
+            return 'NULL';
+          }
+          
+          if (typeof value === 'string') {
+            return `'${value.replace(/'/g, "''")}'`;
+          }
+          
+          if (value instanceof Date) {
+            return `'${value.toISOString()}'`;
+          }
+          
+          if (typeof value === 'boolean') {
+            return value ? 'TRUE' : 'FALSE';
+          }
+          
+          if (typeof value === 'object') {
+            return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+          }
+          
+          return value.toString();
+        });
+        
+        dump += `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${values.join(', ')});\n`;
+      }
+      
+      // Освобождаем память после обработки порции
+      rows.length = 0;
     }
     
     dump += '\n';
     
-    return { dump, rowCount: rows.length };
+    return { dump, rowCount: totalRows };
   }
 
   // Создание скрипта восстановления
-  private createRestoreScript(tables: string[], timestamp: string): string {
+  private createRestoreScript(tables: string[], timestamp: string, s3Links: { [key: string]: string }): string {
     let script = `#!/bin/bash\n\n`;
-    script += `# Скрипт восстановления базы данных\n`;
+    script += `# Скрипт восстановления базы данных из S3\n`;
     script += `# Создан: ${this.getCurrentDateTime()}\n\n`;
     script += `# Использование:\n`;
     script += `# 1. Установите переменные окружения для подключения к БД:\n`;
@@ -915,18 +913,28 @@ export class BroadcastService {
     
     script += `set -e\n\n`;
     
-    script += `echo "🔄 Начало восстановления базы данных..."\n`;
+    script += `echo "🔄 Начало восстановления базы данных из S3..."\n`;
     script += `echo ""\n\n`;
     
-    script += `# Проверка наличия файлов\n`;
+    script += `# Создаем временную директорию\n`;
+    script += `TMP_DIR=$(mktemp -d)\n`;
+    script += `trap "rm -rf $TMP_DIR" EXIT\n`;
+    script += `cd $TMP_DIR\n`;
+    script += `echo "📁 Временная директория: $TMP_DIR"\n`;
+    script += `echo ""\n\n`;
+    
+    script += `# Скачиваем файлы из S3\n`;
+    script += `echo "📥 Скачивание дампов из S3..."\n`;
+    script += `echo ""\n`;
+    
+    // Скачивание файлов из S3
     for (const tableName of tables) {
-      script += `if [ ! -f "${tableName}_${timestamp}.sql" ]; then\n`;
-      script += `    echo "❌ Файл ${tableName}_${timestamp}.sql не найден!"\n`;
-      script += `    exit 1\n`;
-      script += `fi\n`;
+      script += `echo "📦 Скачивание ${tableName}..."\n`;
+      script += `curl -o "${tableName}_${timestamp}.sql" "${s3Links[tableName]}"\n`;
     }
     
-    script += `\necho "✅ Все файлы дампов найдены"\n`;
+    script += `\necho ""\n`;
+    script += `echo "✅ Все файлы дампов скачаны"\n`;
     script += `echo ""\n\n`;
     
     script += `# Очистка таблиц (в правильном порядке, учитывая foreign keys)\n`;
