@@ -696,13 +696,6 @@ export class BroadcastService {
         fs.unlinkSync(tempFilePath);
       }
       
-      // Удаляем временную директорию, если пуста
-      try {
-        fs.rmdirSync(tempDir);
-      } catch (e) {
-        // Игнорируем ошибку, если директория не пуста
-      }
-      
       // Финальный прогресс
       await this.adminBot.telegram.editMessageText(
         adminChatId,
@@ -713,7 +706,7 @@ export class BroadcastService {
         `☁️ Загрузка в S3...`
       );
       
-      // Создаем скрипт восстановления
+      // Создаем скрипт восстановления (до удаления директории)
       const restoreScript = this.createRestoreScript(tables, timestamp, s3Links);
       const restoreScriptPath = path.join(tempDir, `restore_${timestamp}.sh`);
       fs.writeFileSync(restoreScriptPath, restoreScript, 'utf8');
@@ -723,6 +716,13 @@ export class BroadcastService {
       
       // Удаляем временный скрипт
       fs.unlinkSync(restoreScriptPath);
+      
+      // Удаляем временную директорию, если пуста
+      try {
+        fs.rmdirSync(tempDir);
+      } catch (e) {
+        // Игнорируем ошибку, если директория не пуста
+      }
       
       // Формируем сообщение со ссылками
       let message = `✅ Полный дамп базы данных создан и загружен в S3!\n\n` +
