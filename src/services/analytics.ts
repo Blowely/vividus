@@ -189,12 +189,12 @@ export class AnalyticsService {
           (SELECT COUNT(DISTINCT u.id)::INTEGER 
            FROM users u 
            WHERE u.start_param = c.name
-             AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')) as users_today,
+             AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow'))) as users_today,
           (
             SELECT COALESCE(SUM(p.amount), 0)::DECIMAL(12,2)
             FROM payments p
             WHERE p.status = 'success'
-              AND (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')
+              AND (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow'))
               AND (
                 p.order_id IN (
                   SELECT o.id FROM orders o 
@@ -213,7 +213,7 @@ export class AnalyticsService {
             INNER JOIN users u ON o.user_id = u.id
             WHERE o.status = 'completed'
               AND u.start_param = c.name
-              AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', NOW() + INTERVAL '3 hours')
+              AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow'))
           ) as completed_orders_today
         FROM campaigns c
       `);

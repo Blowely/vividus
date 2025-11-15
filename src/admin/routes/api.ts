@@ -629,9 +629,9 @@ router.get('/stats/summary', async (req, res) => {
         ),
         periods AS (
           SELECT 
-            DATE_TRUNC('day', NOW() + INTERVAL '3 hours') as today_start,
-            DATE_TRUNC('day', NOW() + INTERVAL '3 hours') - INTERVAL '2 days' as three_days_start,
-            DATE_TRUNC('day', NOW() + INTERVAL '3 hours') - INTERVAL '6 days' as week_start
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) as today_start,
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) - INTERVAL '2 days' as three_days_start,
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) - INTERVAL '6 days' as week_start
         )
         SELECT 
           -- Сегодня
@@ -668,9 +668,9 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(DISTINCT p.user_id) FROM payments p LEFT JOIN users u ON p.user_id = u.id WHERE p.status = 'success' AND ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params))) as paid_users,
           
           -- Активные пользователи (сделали заказ за последние 7 дней)
-          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at + INTERVAL '3 hours') >= (NOW() + INTERVAL '3 hours') - INTERVAL '7 days') as active_7d,
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (NOW() AT TIME ZONE 'Europe/Moscow') - INTERVAL '7 days') as active_7d,
           -- Активные пользователи (сделали заказ за последние 30 дней)
-          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at + INTERVAL '3 hours') >= (NOW() + INTERVAL '3 hours') - INTERVAL '30 days') as active_30d
+          (SELECT COUNT(DISTINCT o.user_id) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (NOW() AT TIME ZONE 'Europe/Moscow') - INTERVAL '30 days') as active_30d
       `, params);
       
       console.log('Summary stats query completed successfully');
@@ -746,7 +746,7 @@ router.get('/stats/summary-daily', async (req, res) => {
       let startDateQuery = '';
       if (range === '7d') {
         // 7 полных дней (с начала дня 7 дней назад в МСК)
-        startDateQuery = `DATE_TRUNC('day', NOW() + INTERVAL '3 hours') - INTERVAL '6 days'`;
+        startDateQuery = `DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) - INTERVAL '6 days'`;
       } else if (range === '30d') {
         // Для 30 дней: если проект младше 30 дней, показываем с начала, иначе ровно 30 дней (с начала дня 30 дней назад в МСК)
         startDateQuery = `(
@@ -756,7 +756,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            DATE_TRUNC('day', NOW() + INTERVAL '3 hours') - INTERVAL '29 days'
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) - INTERVAL '29 days'
           )
         )`;
       } else if (range === 'all') {
@@ -768,7 +768,7 @@ router.get('/stats/summary-daily', async (req, res) => {
               (SELECT MIN(orders.created_at) FROM orders INNER JOIN users ON orders.user_id = users.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR users.start_param = (SELECT campaign_filter FROM filter_params))),
               (SELECT MIN(p.created_at) FROM payments p LEFT JOIN orders o ON p.order_id = o.id LEFT JOIN users u ON (p.user_id = u.id OR o.user_id = u.id) WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)))
             ),
-            DATE_TRUNC('day', NOW() + INTERVAL '3 hours') - INTERVAL '30 days'
+            DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow')) - INTERVAL '30 days'
           )
         )`;
       }
@@ -781,7 +781,7 @@ router.get('/stats/summary-daily', async (req, res) => {
           SELECT DATE(day) as date
           FROM generate_series(
             DATE(${startDateQuery}),
-            DATE(NOW() + INTERVAL '3 hours'),
+            DATE((NOW() AT TIME ZONE 'Europe/Moscow')),
             '1 day'::interval
           ) day
         )
