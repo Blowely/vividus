@@ -730,11 +730,12 @@ export class BroadcastService {
         `📊 Статистика по таблицам:\n`;
       
       for (const tableName of tables) {
-        message += `\n📦 *${tableName}*: ${rowCounts[tableName]} записей\n`;
-        message += `   🔗 [Скачать дамп](${s3Links[tableName]})\n`;
+        const escapedTableName = tableName.replace(/_/g, '\\_');
+        message += `\n📦 <b>${escapedTableName}</b>: ${rowCounts[tableName]} записей\n`;
+        message += `   🔗 <a href="${s3Links[tableName]}">Скачать дамп</a>\n`;
       }
       
-      message += `\n🔧 [Скрипт восстановления](${restoreScriptUrl})\n`;
+      message += `\n🔧 <a href="${restoreScriptUrl}">Скрипт восстановления</a>\n`;
       message += `\n💡 Все файлы сохранены в S3: service/dumps/`;
       
       await this.adminBot.telegram.editMessageText(
@@ -742,7 +743,7 @@ export class BroadcastService {
         progressMessage.message_id,
         undefined,
         message,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'HTML' }
       );
       
     } catch (error) {
@@ -798,17 +799,18 @@ export class BroadcastService {
       fs.unlinkSync(tempFilePath);
       
       // Формируем сообщение со ссылкой
-      let message = `✅ Дамп таблицы ${tableName} успешно создан и загружен в S3!\n\n` +
+      const escapedTableName = tableName.replace(/_/g, '\\_');
+      let message = `✅ Дамп таблицы <b>${escapedTableName}</b> успешно создан и загружен в S3!\n\n` +
         `📊 Записей: ${rowCount}\n` +
         `📅 ${this.getCurrentDateTime()}\n\n` +
-        `🔗 [Скачать дамп](${s3Url})`;
+        `🔗 <a href="${s3Url}">Скачать дамп</a>`;
       
       await this.adminBot.telegram.editMessageText(
         adminChatId,
         progressMessage.message_id,
         undefined,
         message,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'HTML' }
       );
       
     } catch (error) {
