@@ -168,10 +168,20 @@ export class ProcessorService {
           if (!jobStatus) continue;
 
           const status = jobStatus.status;
+          
+          // Формируем полное сообщение об ошибке с failureCode, если есть
+          let errorMessage: string | undefined;
+          if (status === 'FAILED') {
+            errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+            if ((jobStatus as any).failureCode) {
+              errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
+            }
+          }
+          
           jobStatuses.set(generationId, {
             status,
             videoUrl: status === 'SUCCEEDED' ? jobStatus.output?.[0] : undefined,
-            error: status === 'FAILED' ? (jobStatus.failure || jobStatus.error || 'Job failed') : undefined
+            error: errorMessage
           });
 
           if (status === 'SUCCEEDED') {
@@ -180,10 +190,7 @@ export class ProcessorService {
             await this.runwayService.updateJobStatus(generationId, 'completed' as any, jobStatus.output?.[0]);
           } else if (status === 'FAILED') {
             failedCount++;
-            let errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
-            if ((jobStatus as any).failureCode) {
-              errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
-            }
+            // Сохраняем ошибку в БД (errorMessage уже содержит failureCode, если был)
             await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
           } else {
             processingCount++;
@@ -212,8 +219,21 @@ export class ProcessorService {
           if (successfulVideos.length > 0) {
             await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
           } else {
-            // Все джобы провалились
-            await this.handleAllJobsFailed(telegramId, orderId);
+            // Все джобы провалились - собираем все ошибки
+            const failedErrors: string[] = [];
+            for (const generationId of generationIds) {
+              const jobInfo = jobStatuses.get(generationId);
+              if (jobInfo?.error) {
+                failedErrors.push(jobInfo.error);
+              } else {
+                // Проверяем БД на наличие ошибок
+                const job = await this.runwayService.getJobByGenerationId(generationId);
+                if (job?.error_message) {
+                  failedErrors.push(job.error_message);
+                }
+              }
+            }
+            await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
         } else if (!allFinished && attempts < maxAttempts) {
           // Обновляем прогресс
@@ -263,7 +283,21 @@ export class ProcessorService {
           if (successfulVideos.length > 0) {
             await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
           } else {
-            await this.handleJobTimeout(generationIds[0], telegramId, orderId);
+            // Таймаут - собираем ошибки из провалившихся джобов
+            const failedErrors: string[] = [];
+            for (const generationId of generationIds) {
+              const jobInfo = jobStatuses.get(generationId);
+              if (jobInfo?.error) {
+                failedErrors.push(jobInfo.error);
+              } else {
+                // Проверяем БД на наличие ошибок
+                const job = await this.runwayService.getJobByGenerationId(generationId);
+                if (job?.error_message) {
+                  failedErrors.push(job.error_message);
+                }
+              }
+            }
+            await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
         }
       } catch (error) {
@@ -283,7 +317,21 @@ export class ProcessorService {
           if (successfulVideos.length > 0) {
             await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
           } else {
-            await this.handleAllJobsFailed(telegramId, orderId);
+            // Собираем ошибки из провалившихся джобов
+            const failedErrors: string[] = [];
+            for (const generationId of generationIds) {
+              const jobInfo = jobStatuses.get(generationId);
+              if (jobInfo?.error) {
+                failedErrors.push(jobInfo.error);
+              } else {
+                // Проверяем БД на наличие ошибок
+                const job = await this.runwayService.getJobByGenerationId(generationId);
+                if (job?.error_message) {
+                  failedErrors.push(job.error_message);
+                }
+              }
+            }
+            await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
         } else if (!hasNotifiedUser) {
           setTimeout(checkStatus, 5000);
@@ -428,11 +476,11 @@ export class ProcessorService {
 
     } catch (error) {
       console.error(`Error handling multiple jobs success for order ${orderId}:`, error);
-      await this.handleAllJobsFailed(telegramId, orderId);
+      await this.handleAllJobsFailed(telegramId, orderId, [error instanceof Error ? error.message : String(error)]);
     }
   }
 
-  private async handleAllJobsFailed(telegramId: number, orderId: string): Promise<void> {
+  private async handleAllJobsFailed(telegramId: number, orderId: string, errors: string[] = []): Promise<void> {
     try {
       const order = await this.orderService.getOrder(orderId);
       if (!order) return;
@@ -446,7 +494,33 @@ export class ProcessorService {
         await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
       }
 
-      await this.notifyUser(telegramId, '❌ Не удалось создать видео. Попробуйте другое изображение.');
+      // Проверяем ошибки на наличие модерации
+      let errorMessage = '❌ Не удалось создать видео. Попробуйте другое изображение.';
+      
+      if (errors.length > 0) {
+        // Ищем ошибку модерации среди всех ошибок
+        const moderationError = errors.find(error => {
+          const errorLower = error.toLowerCase();
+          return errorLower.includes('content moderation') || 
+                 errorLower.includes('moderation') || 
+                 errorLower.includes('not passed moderation') ||
+                 errorLower.includes('public figure') ||
+                 errorLower.includes('did not pass');
+        });
+        
+        if (moderationError) {
+          // Переводим ошибку модерации
+          errorMessage = `❌ ${this.translateRunwayError(moderationError)}`;
+        } else {
+          // Используем первую доступную переведенную ошибку
+          const translatedError = this.translateRunwayError(errors[0]);
+          if (translatedError !== errors[0]) {
+            errorMessage = `❌ ${translatedError}`;
+          }
+        }
+      }
+
+      await this.notifyUser(telegramId, errorMessage);
     } catch (error) {
       console.error(`Error handling all jobs failed for order ${orderId}:`, error);
     }
