@@ -1145,6 +1145,14 @@ export class TelegramService {
         } else if (callbackData.startsWith('campaign_stats_')) {
           const campaignName = callbackData.replace('campaign_stats_', '');
           await this.showCampaignStats(ctx, campaignName);
+        } else if (callbackData.startsWith('delete_campaign_')) {
+          const campaignName = callbackData.replace('delete_campaign_', '');
+          await this.handleDeleteCampaign(ctx, campaignName);
+        } else if (callbackData.startsWith('restore_campaign_')) {
+          const campaignName = callbackData.replace('restore_campaign_', '');
+          await this.handleRestoreCampaign(ctx, campaignName);
+        } else if (callbackData === 'show_deleted_campaigns') {
+          await this.showDeletedCampaigns(ctx);
         } else if (callbackData.startsWith('pay_')) {
           const orderId = callbackData.replace('pay_', '');
           await this.handlePayOrder(ctx, orderId);
@@ -1287,6 +1295,7 @@ export class TelegramService {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
+            [Markup.button.callback('🗑️ Удалить кампанию', `delete_campaign_${stat.campaign_name}`)],
             [Markup.button.callback('◀️ Назад к общей статистике', 'back_to_stats')]
           ]
         }
@@ -1294,6 +1303,86 @@ export class TelegramService {
     } catch (error) {
       console.error('Error showing campaign stats:', error);
       await ctx.answerCbQuery('❌ Ошибка при получении статистики');
+    }
+  }
+
+  private async handleDeleteCampaign(ctx: Context, campaignName: string) {
+    if (!this.isAdmin(ctx.from!.id)) {
+      await ctx.answerCbQuery('❌ У вас нет прав для удаления кампаний');
+      return;
+    }
+
+    try {
+      await this.analyticsService.deleteCampaign(campaignName);
+      await ctx.answerCbQuery('✅ Кампания удалена');
+      await this.sendMessage(ctx, `✅ Кампания "${campaignName}" удалена.\n\nОна больше не будет отображаться в статистике, но данные сохранятся в базе.`);
+      // Обновляем список аналитики
+      await this.showAnalytics(ctx);
+    } catch (error) {
+      console.error('Error deleting campaign:', error);
+      await ctx.answerCbQuery('❌ Ошибка при удалении');
+      await this.sendMessage(ctx, '❌ Ошибка при удалении кампании');
+    }
+  }
+
+  private async showDeletedCampaigns(ctx: Context) {
+    if (!this.isAdmin(ctx.from!.id)) {
+      await this.sendMessage(ctx, '❌ У вас нет прав для просмотра удаленных кампаний');
+      return;
+    }
+
+    try {
+      const deletedCampaigns = await this.analyticsService.getDeletedCampaigns();
+      
+      if (deletedCampaigns.length === 0) {
+        await this.sendMessage(ctx, '🗑️ Удаленных кампаний нет');
+        return;
+      }
+
+      let message = '🗑️ Удаленные кампании:\n\n';
+      const inlineKeyboard: any[] = [];
+      
+      for (const campaign of deletedCampaigns) {
+        message += `🏷️ ${campaign.name}\n`;
+        if (campaign.description) {
+          message += `   ${campaign.description}\n`;
+        }
+        message += `   📅 Создана: ${new Date(campaign.created_at).toLocaleDateString()}\n\n`;
+        
+        inlineKeyboard.push([
+          Markup.button.callback(`↩️ Восстановить: ${campaign.name}`, `restore_campaign_${campaign.name}`)
+        ]);
+      }
+      
+      inlineKeyboard.push(this.getBackButton());
+      
+      await this.sendMessage(ctx, message, {
+        reply_markup: {
+          inline_keyboard: inlineKeyboard
+        }
+      });
+    } catch (error) {
+      console.error('Error showing deleted campaigns:', error);
+      await this.sendMessage(ctx, '❌ Ошибка при получении удаленных кампаний');
+    }
+  }
+
+  private async handleRestoreCampaign(ctx: Context, campaignName: string) {
+    if (!this.isAdmin(ctx.from!.id)) {
+      await ctx.answerCbQuery('❌ У вас нет прав для восстановления кампаний');
+      return;
+    }
+
+    try {
+      await this.analyticsService.restoreCampaign(campaignName);
+      await ctx.answerCbQuery('✅ Кампания восстановлена');
+      await this.sendMessage(ctx, `✅ Кампания "${campaignName}" восстановлена.\n\nОна снова будет отображаться в статистике.`);
+      // Обновляем список удаленных кампаний
+      await this.showDeletedCampaigns(ctx);
+    } catch (error) {
+      console.error('Error restoring campaign:', error);
+      await ctx.answerCbQuery('❌ Ошибка при восстановлении');
+      await this.sendMessage(ctx, '❌ Ошибка при восстановлении кампании');
     }
   }
 
@@ -1348,12 +1437,17 @@ export class TelegramService {
         message += `🎬 Успешных генераций: ${stat.completed_orders}${formatTodayChange(today.completed_orders)}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
         
-        // Добавляем кнопку для детальной статистики по кампании
+        // Добавляем кнопки для детальной статистики и удаления
         inlineKeyboard.push([
-          Markup.button.callback(`📊 Детали: ${stat.campaign_name}`, `campaign_stats_${stat.campaign_name}`)
+          Markup.button.callback(`📊 Детали: ${stat.campaign_name}`, `campaign_stats_${stat.campaign_name}`),
+          Markup.button.callback(`🗑️ Удалить`, `delete_campaign_${stat.campaign_name}`)
         ]);
       }
       
+      // Добавляем кнопку для просмотра удаленных кампаний
+      inlineKeyboard.push([
+        Markup.button.callback('🗑️ Удаленные кампании', 'show_deleted_campaigns')
+      ]);
       inlineKeyboard.push(this.getBackButton());
 
       await this.sendMessage(ctx, message, { 

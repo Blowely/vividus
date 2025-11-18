@@ -127,12 +127,13 @@ export class AnalyticsService {
               AND u.start_param = c.name
           ) as completed_orders
         FROM campaigns c
+        WHERE c.is_deleted = false
       `;
 
       const params: any[] = [];
       
       if (campaignName) {
-        query += ' WHERE c.name = $1';
+        query += ' AND c.name = $1';
         params.push(campaignName);
       }
 
@@ -165,8 +166,45 @@ export class AnalyticsService {
     const client = await pool.connect();
     
     try {
-      const result = await client.query('SELECT * FROM campaigns ORDER BY created_at DESC');
+      const result = await client.query('SELECT * FROM campaigns WHERE is_deleted = false ORDER BY created_at DESC');
       return result.rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getDeletedCampaigns(): Promise<Campaign[]> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query('SELECT * FROM campaigns WHERE is_deleted = true ORDER BY created_at DESC');
+      return result.rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteCampaign(campaignName: string): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        'UPDATE campaigns SET is_deleted = true WHERE name = $1',
+        [campaignName]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async restoreCampaign(campaignName: string): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        'UPDATE campaigns SET is_deleted = false WHERE name = $1',
+        [campaignName]
+      );
     } finally {
       client.release();
     }
@@ -216,6 +254,7 @@ export class AnalyticsService {
               AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= DATE_TRUNC('day', (NOW() AT TIME ZONE 'Europe/Moscow'))
           ) as completed_orders_today
         FROM campaigns c
+        WHERE c.is_deleted = false
       `);
       
       const statsMap = new Map<string, {

@@ -896,6 +896,7 @@ router.get('/analytics/campaigns', async (req, res) => {
           END as conversion_rate
         FROM campaigns c
         LEFT JOIN campaign_stats cs ON c.id = cs.campaign_id
+        WHERE c.is_deleted = false
         GROUP BY c.id, c.name
         ORDER BY total_payments_rub DESC NULLS LAST
       `);
@@ -910,18 +911,18 @@ router.get('/analytics/campaigns', async (req, res) => {
   }
 });
 
-// Удалить кампанию
+// Удалить кампанию (мягкое удаление)
 router.delete('/campaigns/:name', async (req, res) => {
   try {
     const client = await pool.connect();
     try {
       const campaignName = decodeURIComponent(req.params.name);
       
-      // Сначала удаляем статистику кампании (CASCADE должно это сделать автоматически, но для безопасности)
-      await client.query('DELETE FROM campaign_stats WHERE campaign_id IN (SELECT id FROM campaigns WHERE name = $1)', [campaignName]);
-      
-      // Удаляем кампанию
-      const result = await client.query('DELETE FROM campaigns WHERE name = $1 RETURNING id', [campaignName]);
+      // Мягкое удаление - устанавливаем флаг is_deleted = true
+      const result = await client.query(
+        'UPDATE campaigns SET is_deleted = true WHERE name = $1 RETURNING id', 
+        [campaignName]
+      );
       
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Кампания не найдена' });
@@ -933,6 +934,76 @@ router.delete('/campaigns/:name', async (req, res) => {
     }
   } catch (error) {
     console.error('Error deleting campaign:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Восстановить кампанию
+router.post('/campaigns/:name/restore', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const campaignName = decodeURIComponent(req.params.name);
+      
+      const result = await client.query(
+        'UPDATE campaigns SET is_deleted = false WHERE name = $1 RETURNING id', 
+        [campaignName]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Кампания не найдена' });
+      }
+      
+      res.json({ success: true, message: 'Кампания успешно восстановлена' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error restoring campaign:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Получить удаленные кампании
+router.get('/campaigns/deleted', async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(`
+        SELECT 
+          c.id as campaign_id,
+          c.name as campaign_name,
+          c.description,
+          c.created_at,
+          (SELECT COUNT(DISTINCT u.id)::INTEGER 
+           FROM users u 
+           WHERE u.start_param = c.name) as total_users,
+          (
+            SELECT COALESCE(SUM(p.amount), 0)::DECIMAL(12,2)
+            FROM payments p
+            WHERE p.status = 'success'
+              AND (
+                p.order_id IN (
+                  SELECT o.id FROM orders o 
+                  INNER JOIN users u ON o.user_id = u.id 
+                  WHERE u.start_param = c.name
+                )
+                OR (p.order_id IS NULL AND p.user_id IN (
+                  SELECT u.id FROM users u WHERE u.start_param = c.name
+                ))
+              )
+          ) as total_payments_rub
+        FROM campaigns c
+        WHERE c.is_deleted = true
+        ORDER BY c.created_at DESC
+      `);
+      
+      res.json(result.rows);
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error fetching deleted campaigns:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

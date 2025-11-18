@@ -2651,57 +2651,71 @@
                     </div>
                 </div>
                 
-                <h2 style="margin-bottom: 20px; margin-top: 40px;">📈 Аналитика по кампаниям</h2>
-                ${campaigns.length > 0 ? `
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Кампания</th>
-                                    <th>Пользователи</th>
-                                    <th>Выручка (₽)</th>
-                                    <th>Выручка (⭐)</th>
-                                    <th>Заказы</th>
-                                    <th>Конверсия (%)</th>
-                                    <th>Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${campaigns.map(c => {
-                                    const campaignName = c.campaign_name || '';
-                                    const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                                    return `
-                                    <tr>
-                                        <td>${campaignName || 'Без кампании'}</td>
-                                        <td>${c.total_users || 0}</td>
-                                        <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
-                                        <td>${c.total_payments_stars || 0}</td>
-                                        <td>${c.completed_orders || 0}</td>
-                                        <td>${parseFloat(c.conversion_rate || 0).toFixed(2)}%</td>
-                                        <td class="actions">
-                                            ${campaignName && campaignName !== 'Без кампании' ? `
-                                                <button class="btn btn-danger btn-sm" onclick="resetCampaignStats('${safeCampaignName}')" style="margin-right: 5px;">🔄 Сбросить</button>
-                                                <button class="btn btn-danger btn-sm" onclick="deleteCampaign('${safeCampaignName}')">🗑️ Удалить</button>
-                                            ` : '<span style="color: #999;">-</span>'}
-                                        </td>
-                                    </tr>
-                                `;
-                                }).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                    
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; margin-top: 40px;">
+                    <button id="campaigns-tab-active" class="tab-btn active" onclick="switchCampaignsTab('active')" style="padding: 10px 20px; border: none; background: #667eea; color: white; border-radius: 4px; cursor: pointer; font-size: 14px;">📈 Активные кампании</button>
+                    <button id="campaigns-tab-deleted" class="tab-btn" onclick="switchCampaignsTab('deleted')" style="padding: 10px 20px; border: 1px solid #ddd; background: white; color: #333; border-radius: 4px; cursor: pointer; font-size: 14px;">🗑️ Удаленные кампании</button>
+                </div>
+                
+                <div id="campaigns-active-content">
+                    <h2 style="margin-bottom: 20px;">📈 Аналитика по кампаниям</h2>
                     ${campaigns.length > 0 ? `
-                        <div style="margin-top: 40px;">
-                            <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                <h3 style="margin-bottom: 15px; font-size: 16px;">Выручка по кампаниям</h3>
-                                <div style="position: relative; height: 350px;">
-                                    <canvas id="campaignsChart"></canvas>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Кампания</th>
+                                        <th>Пользователи</th>
+                                        <th>Выручка (₽)</th>
+                                        <th>Выручка (⭐)</th>
+                                        <th>Заказы</th>
+                                        <th>Конверсия (%)</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${campaigns.map(c => {
+                                        const campaignName = c.campaign_name || '';
+                                        const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                        return `
+                                        <tr>
+                                            <td>${campaignName || 'Без кампании'}</td>
+                                            <td>${c.total_users || 0}</td>
+                                            <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
+                                            <td>${c.total_payments_stars || 0}</td>
+                                            <td>${c.completed_orders || 0}</td>
+                                            <td>${parseFloat(c.conversion_rate || 0).toFixed(2)}%</td>
+                                            <td class="actions">
+                                                ${campaignName && campaignName !== 'Без кампании' ? `
+                                                    <button class="btn btn-danger btn-sm" onclick="resetCampaignStats('${safeCampaignName}')" style="margin-right: 5px;">🔄 Сбросить</button>
+                                                    <button class="btn btn-danger btn-sm" onclick="deleteCampaign('${safeCampaignName}')">🗑️ Удалить</button>
+                                                ` : '<span style="color: #999;">-</span>'}
+                                            </td>
+                                        </tr>
+                                    `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        ${campaigns.length > 0 ? `
+                            <div style="margin-top: 40px;">
+                                <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                    <h3 style="margin-bottom: 15px; font-size: 16px;">Выручка по кампаниям</h3>
+                                    <div style="position: relative; height: 350px;">
+                                        <canvas id="campaignsChart"></canvas>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ` : ''}
-                ` : '<p style="color: #999;">Данных по кампаниям нет</p>'}
+                        ` : ''}
+                    ` : '<p style="color: #999;">Данных по кампаниям нет</p>'}
+                </div>
+                
+                <div id="campaigns-deleted-content" style="display: none;">
+                    <h2 style="margin-bottom: 20px;">🗑️ Удаленные кампании</h2>
+                    <div id="deleted-campaigns-list">
+                        <div class="loading">Загрузка удаленных кампаний...</div>
+                    </div>
+                </div>
             `;
             
             container.innerHTML = html;
@@ -3944,9 +3958,9 @@
             document.getElementById('confirmDeleteLogsModal').classList.add('active');
         }
 
-        // Удалить кампанию
+        // Удалить кампанию (мягкое удаление)
         async function deleteCampaign(campaignName) {
-            if (!confirm(`Вы уверены, что хотите удалить кампанию "${campaignName}"?\n\nЭто действие удалит:\n- Кампанию из базы данных\n- Всю статистику кампании\n\nЭто действие нельзя отменить.`)) {
+            if (!confirm(`Вы уверены, что хотите удалить кампанию "${campaignName}"?\n\nКампания будет скрыта из статистики, но данные сохранятся в базе. Вы сможете восстановить её позже.`)) {
                 return;
             }
 
@@ -3965,6 +3979,118 @@
                 }
             } catch (error) {
                 showToast(error.message, 'error', 'Ошибка');
+            }
+        }
+
+        // Восстановить кампанию
+        async function restoreCampaign(campaignName) {
+            try {
+                const response = await fetchWithAuth(`/api/campaigns/${encodeURIComponent(campaignName)}/restore`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showToast('Кампания успешно восстановлена', 'success');
+                    loadDeletedCampaigns();
+                    loadAnalytics();
+                    loadCampaigns();
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'Ошибка восстановления кампании', 'error');
+                }
+            } catch (error) {
+                showToast(error.message, 'error', 'Ошибка');
+            }
+        }
+
+        // Переключение вкладок кампаний
+        function switchCampaignsTab(tab) {
+            const activeTab = document.getElementById('campaigns-tab-active');
+            const deletedTab = document.getElementById('campaigns-tab-deleted');
+            const activeContent = document.getElementById('campaigns-active-content');
+            const deletedContent = document.getElementById('campaigns-deleted-content');
+
+            if (tab === 'active') {
+                activeTab.classList.add('active');
+                activeTab.style.background = '#667eea';
+                activeTab.style.color = 'white';
+                activeTab.style.border = 'none';
+                deletedTab.classList.remove('active');
+                deletedTab.style.background = 'white';
+                deletedTab.style.color = '#333';
+                deletedTab.style.border = '1px solid #ddd';
+                activeContent.style.display = 'block';
+                deletedContent.style.display = 'none';
+            } else {
+                deletedTab.classList.add('active');
+                deletedTab.style.background = '#667eea';
+                deletedTab.style.color = 'white';
+                deletedTab.style.border = 'none';
+                activeTab.classList.remove('active');
+                activeTab.style.background = 'white';
+                activeTab.style.color = '#333';
+                activeTab.style.border = '1px solid #ddd';
+                activeContent.style.display = 'none';
+                deletedContent.style.display = 'block';
+                loadDeletedCampaigns();
+            }
+        }
+
+        // Загрузить удаленные кампании
+        async function loadDeletedCampaigns() {
+            const container = document.getElementById('deleted-campaigns-list');
+            container.innerHTML = '<div class="loading">Загрузка удаленных кампаний...</div>';
+
+            try {
+                const response = await fetchWithAuth('/api/campaigns/deleted');
+                const campaigns = await response.json();
+
+                if (campaigns.length === 0) {
+                    container.innerHTML = '<p style="color: #999;">Удаленных кампаний нет</p>';
+                    return;
+                }
+
+                let html = `
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Кампания</th>
+                                    <th>Описание</th>
+                                    <th>Пользователи</th>
+                                    <th>Выручка (₽)</th>
+                                    <th>Дата создания</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${campaigns.map(c => {
+                                    const campaignName = c.campaign_name || '';
+                                    const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                    const createdDate = new Date(c.created_at).toLocaleDateString('ru-RU');
+                                    return `
+                                    <tr>
+                                        <td>${campaignName || 'Без кампании'}</td>
+                                        <td>${c.description || '-'}</td>
+                                        <td>${c.total_users || 0}</td>
+                                        <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
+                                        <td>${createdDate}</td>
+                                        <td class="actions">
+                                            ${campaignName && campaignName !== 'Без кампании' ? `
+                                                <button class="btn btn-success btn-sm" onclick="restoreCampaign('${safeCampaignName}')">↩️ Восстановить</button>
+                                            ` : '<span style="color: #999;">-</span>'}
+                                        </td>
+                                    </tr>
+                                `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+
+                container.innerHTML = html;
+            } catch (error) {
+                container.innerHTML = `<div class="empty">Ошибка загрузки удаленных кампаний: ${error.message}</div>`;
             }
         }
 
