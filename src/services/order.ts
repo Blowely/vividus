@@ -35,6 +35,53 @@ export class OrderService {
       client.release();
     }
   }
+
+  async createCombineAndAnimateOrder(
+    userId: number, 
+    referenceImages: string[], 
+    combinePrompt?: string, 
+    animationPrompt?: string
+  ): Promise<Order> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        `INSERT INTO orders (
+          user_id, original_file_path, status, order_type, 
+          combine_prompt, animation_prompt, reference_images
+        ) 
+         VALUES ($1, $2, $3, 'combine_and_animate', $4, $5, $6) 
+         RETURNING *`,
+        [
+          userId, 
+          referenceImages[0] || '', // Первое фото как original_file_path для совместимости
+          OrderStatus.PAYMENT_REQUIRED, 
+          combinePrompt,
+          animationPrompt,
+          JSON.stringify(referenceImages)
+        ]
+      );
+      
+      return result.rows[0];
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateOrderCombinedImage(orderId: string, combinedImagePath: string): Promise<void> {
+    const client = await pool.connect();
+    
+    try {
+      await client.query(
+        `UPDATE orders 
+         SET combined_image_path = $1, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = $2`,
+        [combinedImagePath, orderId]
+      );
+    } finally {
+      client.release();
+    }
+  }
   
   async getOrder(orderId: string): Promise<Order | null> {
     const client = await pool.connect();

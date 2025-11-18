@@ -62,10 +62,14 @@ export class ProcessorService {
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
-      // Create videos using RunwayML with all available models - check if it's a merge order
+      // Create videos using RunwayML with all available models - check order type
       let generationIds: string[];
       try {
-        if (order.order_type === 'merge' && order.second_file_path) {
+        if (order.order_type === 'combine_and_animate') {
+          // Combine and animate order - two-step process
+          await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
+          return; // Exit early, processing continues in processCombineAndAnimateOrder
+        } else if (order.order_type === 'merge' && order.second_file_path) {
           // Merge order - use second image as reference for transition
           generationIds = await this.runwayService.createMultipleVideosFromTwoImages(
             order.original_file_path,
@@ -835,5 +839,143 @@ export class ProcessorService {
     } catch (error) {
       console.error('Error processing throttled orders:', error);
     }
+  }
+
+  private async processCombineAndAnimateOrder(orderId: string, order: any, telegramId: number): Promise<void> {
+    try {
+      console.log(`Processing combine_and_animate order: ${orderId}`);
+      
+      // Step 1: Combine images using text_to_image
+      let referenceImages: string[] = [];
+      if (order.reference_images) {
+        try {
+          referenceImages = JSON.parse(order.reference_images);
+        } catch (e) {
+          console.error('Error parsing reference_images:', e);
+          referenceImages = [order.original_file_path];
+        }
+      } else {
+        referenceImages = [order.original_file_path];
+      }
+
+      const combinePrompt = order.combine_prompt || 'combine all reference images into one cohesive image';
+      
+      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото...');
+      
+      // Create combined image
+      const textToImageJobId = await this.runwayService.createImageFromTextWithReferences(
+        combinePrompt,
+        referenceImages,
+        orderId
+      );
+      
+      // Monitor text_to_image job
+      await this.monitorTextToImageJob(textToImageJobId, orderId, telegramId, order);
+      
+    } catch (error: any) {
+      console.error(`Error processing combine_and_animate order ${orderId}:`, error);
+      await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+      
+      const user = await this.userService.getUserById(order.user_id);
+      if (user) {
+        const hasPayment = await this.orderService.hasPayment(orderId);
+        if (!hasPayment) {
+          await this.userService.returnGenerations(user.telegram_id, 1);
+          const newBalance = await this.userService.getUserGenerations(user.telegram_id);
+          await this.notifyUser(user.telegram_id, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+        }
+        
+        const errorMessage = error?.message || 'Произошла ошибка при обработке. Попробуйте позже.';
+        await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
+      }
+    }
+  }
+
+  private async monitorTextToImageJob(
+    generationId: string, 
+    orderId: string, 
+    telegramId: number, 
+    order: any
+  ): Promise<void> {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    let attempts = 0;
+
+    const checkStatus = async () => {
+      try {
+        attempts++;
+        
+        const jobStatus = await this.runwayService.checkJobStatus(generationId);
+        
+        if (jobStatus.status === 'succeeded' && jobStatus.output && jobStatus.output.length > 0) {
+          // Image created successfully
+          const combinedImageUrl = jobStatus.output[0];
+          
+          // Update job status
+          await this.runwayService.updateJobStatus(generationId, 'completed' as any, combinedImageUrl);
+          
+          // Download and save combined image
+          const { FileService } = await import('./file');
+          const fileService = new FileService();
+          const localPath = await fileService.downloadFileFromUrl(combinedImageUrl, 'combined');
+          const s3Url = await fileService.uploadToS3(localPath);
+          
+          // Update order with combined image
+          await this.orderService.updateOrderCombinedImage(orderId, s3Url);
+          
+          // Отправляем объединенное изображение пользователю
+          await this.notifyUser(telegramId, 'Современное объединённое фото ✅');
+          try {
+            await this.bot.telegram.sendPhoto(telegramId, combinedImageUrl, {
+              caption: 'Современное объединённое фото'
+            });
+          } catch (error) {
+            console.error('Error sending combined photo:', error);
+            // Если не удалось отправить фото, отправляем ссылку
+            await this.notifyUser(telegramId, `📸 Объединенное фото: ${combinedImageUrl}`);
+          }
+          
+          await this.notifyUser(telegramId, '🎬 Шаг 2/2: Анимирую изображение...');
+          
+          // Step 2: Animate the combined image
+          const animationPrompt = order.animation_prompt || 'animate this image with subtle movements and breathing effect';
+          const videoGenerationIds = await this.runwayService.createMultipleVideosFromImage(
+            s3Url,
+            orderId,
+            animationPrompt
+          );
+          
+          if (videoGenerationIds.length > 0) {
+            await this.orderService.updateOrderResult(orderId, videoGenerationIds[0]);
+            this.monitorMultipleJobs(videoGenerationIds, telegramId, orderId);
+          } else {
+            throw new Error('Не удалось создать анимацию');
+          }
+          
+        } else if (jobStatus.status === 'FAILED') {
+          let errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+          if ((jobStatus as any).failureCode) {
+            errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
+          }
+          await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+          throw new Error(this.translateRunwayError(errorMessage));
+        } else if (attempts >= maxAttempts) {
+          throw new Error('Время ожидания объединения изображения истекло');
+        } else {
+          // Still processing, check again in 5 seconds
+          setTimeout(checkStatus, 5000);
+        }
+      } catch (error: any) {
+        console.error(`Error monitoring text_to_image job ${generationId}:`, error);
+        
+        if (attempts >= maxAttempts || error.message?.includes('FAILED') || error.message?.includes('failed')) {
+          throw error;
+        } else {
+          setTimeout(checkStatus, 5000);
+        }
+      }
+    };
+
+    // Start monitoring
+    setTimeout(checkStatus, 5000);
   }
 }

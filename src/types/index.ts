@@ -17,9 +17,15 @@ export interface Order {
   status: OrderStatus;
   original_file_path: string;
   second_file_path?: string;
-  order_type?: 'single' | 'merge';
+  order_type?: 'single' | 'merge' | 'combine_and_animate';
   did_job_id?: string;
   custom_prompt?: string;
+  combine_prompt?: string; // Промпт для объединения фото
+  animation_prompt?: string; // Промпт для анимации
+  combine_type?: string; // Тип объединения (например, 'blend', 'morph', 'collage')
+  animation_type?: string; // Тип анимации (например, 'breathing', 'smile', 'wave')
+  reference_images?: string; // JSON массив URL множественных фото
+  combined_image_path?: string; // Путь к объединенному изображению
   created_at: Date;
   updated_at: Date;
 }

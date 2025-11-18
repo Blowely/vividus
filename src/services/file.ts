@@ -218,4 +218,40 @@ export class FileService {
       throw new Error('Failed to download and upload file');
     }
   }
+
+  async downloadFileFromUrl(url: string, prefix: string = 'downloaded'): Promise<string> {
+    try {
+      // Download file from URL
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer'
+      });
+      
+      // Generate unique filename
+      const timestamp = Date.now();
+      const extension = path.extname(new URL(url).pathname) || '.jpg';
+      const filename = `${prefix}_${timestamp}${extension}`;
+      const filePath = path.join(this.storagePath, 'processed', filename);
+      
+      // Save file
+      await fs.writeFile(filePath, Buffer.from(response.data));
+      
+      return filePath;
+    } catch (error) {
+      console.error('Error downloading file from URL:', error);
+      throw new Error('Failed to download file from URL');
+    }
+  }
+
+  async uploadToS3(filePath: string): Promise<string> {
+    try {
+      const filename = path.basename(filePath);
+      const contentType = mime.lookup(filePath) || 'application/octet-stream';
+      const fileBuffer = await fs.readFile(filePath);
+      
+      return await this.s3Service.uploadFile(fileBuffer, filename, contentType);
+    } catch (error) {
+      console.error('Error uploading file to S3:', error);
+      throw new Error('Failed to upload file to S3');
+    }
+  }
 }

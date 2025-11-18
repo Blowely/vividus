@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import pool from '../config/database';
 import { config } from 'dotenv';
@@ -11,14 +11,37 @@ async function runMigrations() {
   try {
     console.log('Starting database migrations...');
     
-    // Read migration file
-    const migrationPath = join(__dirname, 'migrations', '001_initial_schema.sql');
-    const migrationSQL = readFileSync(migrationPath, 'utf8');
+    // Get all migration files sorted by name
+    const migrationsDir = join(__dirname, 'migrations');
+    const migrationFiles = readdirSync(migrationsDir)
+      .filter(file => file.endsWith('.sql'))
+      .sort(); // Sort alphabetically to apply in order
     
-    // Execute migration
-    await client.query(migrationSQL);
+    console.log(`Found ${migrationFiles.length} migration(s):`);
+    migrationFiles.forEach(file => console.log(`  - ${file}`));
     
-    console.log('✅ Migration completed successfully!');
+    // Execute each migration
+    for (const migrationFile of migrationFiles) {
+      console.log(`\n📄 Applying ${migrationFile}...`);
+      const migrationPath = join(migrationsDir, migrationFile);
+      const migrationSQL = readFileSync(migrationPath, 'utf8');
+      
+      try {
+        await client.query(migrationSQL);
+        console.log(`✅ ${migrationFile} applied successfully!`);
+      } catch (error: any) {
+        // If error is about "already exists" or "IF NOT EXISTS", it's safe to continue
+        if (error.message?.includes('already exists') || 
+            error.message?.includes('duplicate') ||
+            migrationSQL.includes('IF NOT EXISTS')) {
+          console.log(`⚠️  ${migrationFile} - some objects may already exist, continuing...`);
+        } else {
+          throw error;
+        }
+      }
+    }
+    
+    console.log('\n✅ All migrations completed successfully!');
     
     // Verify tables were created
     const result = await client.query(`
@@ -28,7 +51,7 @@ async function runMigrations() {
       ORDER BY table_name;
     `);
     
-    console.log('📋 Created tables:');
+    console.log('\n📋 Tables in database:');
     result.rows.forEach(row => {
       console.log(`  - ${row.table_name}`);
     });

@@ -23,6 +23,8 @@ export class TelegramService {
   private pendingPrompts: Map<number, string> = new Map(); // userId -> fileId
   private pendingPromptsData: Map<number, { fileId: string; prompt: string }> = new Map(); // userId -> {fileId, prompt}
   private pendingMergeFirstPhoto: Map<number, string> = new Map(); // userId -> fileId (для режима объединения)
+  private combineAndAnimatePhotos: Map<number, string[]> = new Map(); // userId -> fileId[] (для режима объединить и оживить)
+  private combineAndAnimateState: Map<number, { combineType?: string; animationType?: string; combinePrompt?: string; animationPrompt?: string; waitingForCombinePrompt?: boolean; waitingForAnimationPrompt?: boolean }> = new Map(); // userId -> состояние
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
 
@@ -274,6 +276,7 @@ export class TelegramService {
     // Создаем reply клавиатуру (кнопки под полем ввода)
       const keyboard = [
       [Markup.button.text('🎬 Оживить фото')],
+      // [Markup.button.text('🔀 Объединить и оживить')], // Временно отключено, перенесено в broadcast-bot
       [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
       ];
 
@@ -368,6 +371,28 @@ export class TelegramService {
         return;
       }
       
+      // Проверяем, находимся ли мы в режиме объединить и оживить
+      const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
+      if (combinePhotos !== undefined) {
+        // Добавляем фото в список (ровно 2 фото)
+        if (combinePhotos.length < 2) {
+          combinePhotos.push(fileId);
+          this.combineAndAnimatePhotos.set(user.telegram_id, combinePhotos);
+          
+          if (combinePhotos.length === 1) {
+            await this.sendMessage(ctx, `Принял 1/2. Пришлите ещё одно изображение.`);
+          } else if (combinePhotos.length === 2) {
+            // Оба фото получены, запрашиваем промпт для анимации
+            await this.requestAnimationPrompt(ctx);
+          }
+          return;
+        } else {
+          // Уже есть 2 фото, игнорируем остальные
+          await this.sendMessage(ctx, 'ℹ️ Уже получено 2 фото. Если случайно отправили больше — бот возьмёт первые два.');
+          return;
+        }
+      }
+      
       // Проверяем, находимся ли мы в режиме объединения
       const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
       if (firstPhotoId) {
@@ -430,6 +455,27 @@ export class TelegramService {
 
   private async handleMediaGroupPhoto(ctx: Context, user: any, fileId: string, mediaGroupId: string): Promise<void> {
     try {
+      // Проверяем, находимся ли мы в режиме объединить и оживить
+      const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
+      if (combinePhotos !== undefined) {
+        // Добавляем фото в список для режима combine_and_animate (максимум 2)
+        if (combinePhotos.length < 2) {
+          combinePhotos.push(fileId);
+          this.combineAndAnimatePhotos.set(user.telegram_id, combinePhotos);
+          
+          // Если получили 2 фото, запрашиваем промпт
+          if (combinePhotos.length === 2) {
+            // Небольшая задержка, чтобы все фото из группы успели обработаться
+            setTimeout(async () => {
+              await this.requestAnimationPrompt(ctx);
+            }, 1000);
+          }
+          return;
+        }
+        // Уже есть 2 фото, игнорируем остальные
+        return;
+      }
+      
       // Для медиа-групп используем специальный ключ с mediaGroupId
       const mergeKey = `merge_${user.telegram_id}_${mediaGroupId}`;
       const storedData = this.pendingMergeFirstPhoto.get(user.telegram_id);
@@ -695,11 +741,67 @@ export class TelegramService {
         return;
       }
       
+      // Проверяем, ожидает ли пользователь промпт для анимации в режиме combine_and_animate
+      const combineState = this.combineAndAnimateState.get(user.telegram_id);
+      if (combineState && combineState.waitingForAnimationPrompt) {
+        const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
+        
+        if (photos.length < 2) {
+          await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+          return;
+        }
+        
+        // Берем только первые 2 фото
+        const twoPhotos = photos.slice(0, 2);
+        
+        combineState.animationPrompt = text;
+        combineState.waitingForAnimationPrompt = false;
+        this.combineAndAnimateState.set(user.telegram_id, combineState);
+        
+        await this.sendMessage(ctx, 'Объединяю фото и готовлю видео, это займет до 5 минут...');
+        await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
+        return;
+      }
+      
       // Обрабатываем команды от reply кнопок
       if (text === '🎬 Оживить фото') {
         await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
         return;
       }
+      
+      // Временно отключено - перенесено в broadcast-bot
+      // if (text === '🔀 Объединить и оживить') {
+      //   // Инициализируем режим объединить и оживить
+      //   this.combineAndAnimatePhotos.set(user.telegram_id, []);
+      //   this.combineAndAnimateState.set(user.telegram_id, {});
+      //   
+      //   const instructions = `🔀 ОБЪЕДИНИТЬ И ОЖИВИТЬ
+      // 
+      // ВАЖНО:
+      // Функция совмещает 2 фотографии и рисует сцену с нуля, чтобы создать современный общий кадр или видео.
+      // 
+      // ⚠️ Возможны небольшие неточности: лицо, выражение или детали внешности могут слегка измениться.
+      // 
+      // 📸 ТРЕБОВАНИЯ К ФОТО:
+      // • Фото в нормальном положении — не перевёрнутые и не боком
+      // • Без рамок и без лишних элементов (текста, логотипов, фонов)
+      // • Лицо должно быть чётко видно, хорошо освещено, без сильных теней
+      // • Если на фото больше одного человека — нейросеть иногда может добавить лишнее лицо
+      // • Рекомендуется: на каждом фото 1 человек — так соединение получится точнее
+      // 
+      // 📤 КАК ОТПРАВЛЯТЬ:
+      // • РОВНО 2 изображения
+      // • Можно отправить одним альбомом из 2 фото или по одному сообщению
+      // • Принимаются как фото, так и документ
+      // • Форматы: JPG/JPEG/PNG
+      // 
+      // ℹ️ Если случайно пришлёте больше 2 — бот автоматически возьмёт первые два, а остальные проигнорирует.`;
+      //   
+      //   await this.sendMessage(ctx, instructions);
+      //   return;
+      // }
       
       if (text === '✨ Купить генерации') {
         await this.handleBuyGenerations(ctx);
@@ -915,6 +1017,44 @@ export class TelegramService {
     // If no translation found, return the original prompt
     // RunwayML should handle Russian text reasonably well
     return russianPrompt;
+  }
+
+  private translateAnimationPrompt(russianPrompt: string): string {
+    // Переводим русские описания анимации на английский
+    const translations: { [key: string]: string } = {
+      'улыбаются': 'smiling',
+      'обнимаются': 'hugging',
+      'кивает': 'nodding',
+      'моргает': 'blinking',
+      'поворачивает голову': 'turning head',
+      'идут навстречу': 'walking towards each other',
+      'идут': 'walking',
+      'танцует': 'dancing',
+      'бегает': 'running',
+      'говорит': 'speaking',
+      'машет': 'waving',
+      'дышит': 'breathing',
+      'мужчина слева': 'man on the left',
+      'женщина справа': 'woman on the right',
+      'ребёнок в центре': 'child in the center',
+      'люди на фото': 'people in the photo'
+    };
+    
+    let translated = russianPrompt.toLowerCase();
+    
+    // Заменяем фразы
+    for (const [russian, english] of Object.entries(translations)) {
+      if (translated.includes(russian)) {
+        translated = translated.replace(russian, english);
+      }
+    }
+    
+    // Добавляем базовую часть если нужно
+    if (!translated.includes('animate')) {
+      translated = `animate this image with ${translated}`;
+    }
+    
+    return translated;
   }
 
   private async handleCallbackQuery(ctx: Context) {
@@ -2055,6 +2195,74 @@ ${packageListText}
       
     } catch (error) {
       console.error('Error handling successful payment:', error);
+    }
+  }
+
+  private async requestAnimationPrompt(ctx: Context): Promise<void> {
+    const message = `Теперь напишите, как оживить фото:
+
+Примеры:
+• "Люди на фото улыбаются и обнимаются 🤗"
+• "Мужчина слегка кивает и улыбается 😊"
+• "Девушка моргает и слегка поворачивает голову 💫"
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре».
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его.`;
+
+    await this.sendMessage(ctx, message);
+    
+    // Устанавливаем флаг ожидания промпта
+    const user = await this.userService.getOrCreateUser(ctx.from!);
+    const state = this.combineAndAnimateState.get(user.telegram_id) || {};
+    state.waitingForAnimationPrompt = true;
+    this.combineAndAnimateState.set(user.telegram_id, state);
+  }
+
+
+  private async createCombineAndAnimateOrder(
+    ctx: Context, 
+    user: any, 
+    photos: string[], 
+    state: { combineType?: string; animationType?: string; combinePrompt?: string; animationPrompt?: string }
+  ): Promise<void> {
+    try {
+      // Загружаем все фото в S3
+      const photoUrls: string[] = [];
+      for (const fileId of photos) {
+        const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+        photoUrls.push(s3Url);
+      }
+      
+      // Формируем промпты
+      // Промпт для объединения - всегда стандартный (совмещает 2 фото и рисует сцену с нуля)
+      const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
+      
+      // Промпт для анимации - берем из пользовательского ввода
+      let animationPrompt = state.animationPrompt || 'animate this image with subtle movements and breathing effect';
+      
+      // Переводим русский промпт на английский для лучшего понимания AI
+      animationPrompt = this.translateAnimationPrompt(animationPrompt);
+      
+      // Создаем заказ
+      const order = await this.orderService.createCombineAndAnimateOrder(
+        user.id,
+        photoUrls,
+        combinePrompt,
+        animationPrompt
+      );
+      
+      // Очищаем состояние
+      this.combineAndAnimatePhotos.delete(user.telegram_id);
+      this.combineAndAnimateState.delete(user.telegram_id);
+      
+      // Отправляем запрос на оплату
+      await this.sendPaymentRequest(ctx, order);
+      
+    } catch (error) {
+      console.error('Error creating combine and animate order:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при создании заказа. Попробуйте позже.');
     }
   }
 

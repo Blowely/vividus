@@ -453,4 +453,112 @@ export class RunwayService {
       client.release();
     }
   }
+
+  // Создает изображение из текста с несколькими референсными изображениями
+  async createImageFromTextWithReferences(
+    prompt: string,
+    referenceImages: string[],
+    orderId: string,
+    aspectRatio?: string
+  ): Promise<string> {
+    try {
+      console.log('🎨 Creating combined image with RunwayML text_to_image API...');
+      console.log('Prompt:', prompt);
+      console.log('Reference images count:', referenceImages.length);
+      
+      // Определяем соотношение сторон, если не указано
+      let ratio = aspectRatio || '16:9';
+      
+      // Если есть референсные изображения, используем их для определения соотношения
+      if (referenceImages.length > 0) {
+        const metadata = await this.getImageMetadata(referenceImages[0]);
+        if (metadata) {
+          const bestRatio = this.getBestRatioForGen4Turbo(metadata.aspectRatio);
+          ratio = bestRatio;
+        }
+      }
+
+      // Подготавливаем запрос для text_to_image с референсами
+      const requestBody: any = {
+        prompt: prompt,
+        ratio: ratio,
+        seed: Math.floor(Math.random() * 1000000),
+        contentModeration: {
+          publicFigureThreshold: 'auto'
+        }
+      };
+
+      // Добавляем референсные изображения (Runway поддерживает до 10 референсов)
+      if (referenceImages.length > 0) {
+        // Ограничиваем до 10 референсов (лимит Runway)
+        const limitedReferences = referenceImages.slice(0, 10);
+        requestBody.referenceImages = limitedReferences;
+      }
+
+      const response = await axios.post(`${this.baseUrl}/text_to_image`, requestBody, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'X-Runway-Version': '2024-11-06'
+        }
+      });
+
+      console.log('RunwayML text_to_image response:', response.data);
+      const generationId = response.data.id || response.data.generationId;
+      
+      // Save job to database
+      await this.saveJob(orderId, generationId, 'text_to_image');
+      
+      // Immediately check status for debugging
+      console.log('🔍 Checking initial status for text_to_image:', generationId);
+      try {
+        const status = await this.checkJobStatus(generationId);
+        console.log('Initial text_to_image status:', status);
+      } catch (statusError) {
+        console.log('Status check failed, but text_to_image generation was created');
+      }
+      
+      return generationId;
+    } catch (error: any) {
+      console.error('Error creating combined image:', error);
+      console.error('Error details:', error.response?.data);
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to create combined image';
+      const translatedError = this.translateRunwayError(errorMessage);
+      
+      const translatedErrorObj = new Error(translatedError);
+      (translatedErrorObj as any).originalError = errorMessage;
+      throw translatedErrorObj;
+    }
+  }
+
+  // Скачивает сгенерированное изображение
+  async downloadImage(generationId: string, outputPath: string): Promise<string> {
+    try {
+      const jobStatus = await this.checkJobStatus(generationId);
+      
+      if (jobStatus.status === 'succeeded' && jobStatus.output && jobStatus.output.length > 0) {
+        const imageUrl = jobStatus.output[0];
+        
+        // Download image
+        const response = await axios.get(imageUrl, {
+          responseType: 'stream'
+        });
+        
+        const fs = require('fs');
+        const writer = fs.createWriteStream(outputPath);
+        response.data.pipe(writer);
+        
+        return new Promise((resolve, reject) => {
+          writer.on('finish', () => resolve(imageUrl));
+          writer.on('error', reject);
+        });
+      } else {
+        throw new Error('Image not ready or failed');
+      }
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      throw new Error('Failed to download image');
+    }
+  }
 }
