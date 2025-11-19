@@ -209,7 +209,11 @@ export class ProcessorService {
               } else {
                 // Обновляем статус заказа на failed
                 await this.orderService.updateOrderStatus(orderId, 'failed' as any);
-                await this.notifyUser(user.telegram_id, `❌ Произошла ошибка при создании видео. Попробуйте позже.`);
+                
+                // Переводим ошибку для пользователя
+                const errorMessage = error?.message || error?.response?.data?.error || error?.response?.data?.detail || 'Произошла ошибка при создании видео';
+                const translatedError = this.translateFalError(errorMessage);
+                await this.notifyUser(user.telegram_id, `❌ ${translatedError}`);
               }
             }
           })();
@@ -834,17 +838,31 @@ export class ProcessorService {
             for (const generationId of generationIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
-                failedErrors.push(jobInfo.error);
+                // Убираем failureCode из сообщения, если есть
+                let errorMsg = jobInfo.error;
+                if (errorMsg.includes('|failureCode:')) {
+                  errorMsg = errorMsg.split('|failureCode:')[0];
+                }
+                failedErrors.push(errorMsg);
               } else {
                 const isFalJob = generationId.startsWith('fal_');
                 const job = isFalJob
                   ? await this.falService.getJobByRequestId(generationId)
                   : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
-                  failedErrors.push(job.error_message);
+                  // Убираем failureCode из сообщения, если есть
+                  let errorMsg = job.error_message;
+                  if (errorMsg.includes('|failureCode:')) {
+                    errorMsg = errorMsg.split('|failureCode:')[0];
+                  }
+                  failedErrors.push(errorMsg);
+                } else {
+                  // Если нет конкретной ошибки, добавляем общую
+                  failedErrors.push('Не удалось сгенерировать видео');
                 }
               }
             }
+            console.log(`❌ Все джобы провалились для заказа ${orderId}. Ошибки:`, failedErrors);
             await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
           return; // Завершаем мониторинг
@@ -933,7 +951,12 @@ export class ProcessorService {
             for (const generationId of generationIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
-                failedErrors.push(jobInfo.error);
+                // Убираем failureCode из сообщения, если есть
+                let errorMsg = jobInfo.error;
+                if (errorMsg.includes('|failureCode:')) {
+                  errorMsg = errorMsg.split('|failureCode:')[0];
+                }
+                failedErrors.push(errorMsg);
               } else {
                 // Проверяем БД на наличие ошибок
                 const isFalJob = generationId.startsWith('fal_');
@@ -941,10 +964,19 @@ export class ProcessorService {
                   ? await this.falService.getJobByRequestId(generationId)
                   : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
-                  failedErrors.push(job.error_message);
+                  // Убираем failureCode из сообщения, если есть
+                  let errorMsg = job.error_message;
+                  if (errorMsg.includes('|failureCode:')) {
+                    errorMsg = errorMsg.split('|failureCode:')[0];
+                  }
+                  failedErrors.push(errorMsg);
+                } else {
+                  // Если нет конкретной ошибки, добавляем общую
+                  failedErrors.push('Не удалось сгенерировать видео');
                 }
               }
             }
+            console.log(`❌ Все джобы провалились для заказа ${orderId} (таймаут). Ошибки:`, failedErrors);
             await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
         } else if (attempts >= maxAttempts && !hasNotifiedUser) {
@@ -970,7 +1002,12 @@ export class ProcessorService {
             for (const generationId of generationIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
-                failedErrors.push(jobInfo.error);
+                // Убираем failureCode из сообщения, если есть
+                let errorMsg = jobInfo.error;
+                if (errorMsg.includes('|failureCode:')) {
+                  errorMsg = errorMsg.split('|failureCode:')[0];
+                }
+                failedErrors.push(errorMsg);
               } else {
                 // Проверяем БД на наличие ошибок
                 const isFalJob = generationId.startsWith('fal_');
@@ -978,10 +1015,19 @@ export class ProcessorService {
                   ? await this.falService.getJobByRequestId(generationId)
                   : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
-                  failedErrors.push(job.error_message);
+                  // Убираем failureCode из сообщения, если есть
+                  let errorMsg = job.error_message;
+                  if (errorMsg.includes('|failureCode:')) {
+                    errorMsg = errorMsg.split('|failureCode:')[0];
+                  }
+                  failedErrors.push(errorMsg);
+                } else {
+                  // Если нет конкретной ошибки, добавляем общую
+                  failedErrors.push('Превышено время ожидания генерации видео');
                 }
               }
             }
+            console.log(`❌ Таймаут для заказа ${orderId}. Ошибки:`, failedErrors);
             await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
         }
@@ -1242,7 +1288,10 @@ export class ProcessorService {
 
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
-      // Для заказов animate_v2 (из broadcast-bot) не отправляем уведомления
+      // Определяем, является ли заказ fal.ai (для основного бота)
+      const isFalOrder = order?.custom_prompt?.startsWith('fal:');
+
+      // Для заказов animate_v2 (из broadcast-bot) не отправляем уведомления в основной бот
       if (order.order_type === 'animate_v2') {
         console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Уведомления не отправляются в основной бот.`);
         return;
@@ -1255,7 +1304,7 @@ export class ProcessorService {
         await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
       }
 
-      // Проверяем ошибки на наличие модерации
+      // Проверяем ошибки на наличие модерации и других специфичных ошибок
       let errorMessage = '❌ Не удалось создать видео. Попробуйте другое изображение.';
       
       if (errors.length > 0) {
@@ -1270,13 +1319,24 @@ export class ProcessorService {
         });
         
         if (moderationError) {
-          // Переводим ошибку модерации
-          errorMessage = `❌ ${this.translateRunwayError(moderationError)}`;
+          // Переводим ошибку модерации (используем соответствующий метод перевода)
+          if (isFalOrder) {
+            errorMessage = `❌ ${this.translateFalError(moderationError)}`;
+          } else {
+            errorMessage = `❌ ${this.translateRunwayError(moderationError)}`;
+          }
         } else {
           // Используем первую доступную переведенную ошибку
-          const translatedError = this.translateRunwayError(errors[0]);
-          if (translatedError !== errors[0]) {
-            errorMessage = `❌ ${translatedError}`;
+          if (isFalOrder) {
+            const translatedError = this.translateFalError(errors[0]);
+            if (translatedError !== errors[0]) {
+              errorMessage = `❌ ${translatedError}`;
+            }
+          } else {
+            const translatedError = this.translateRunwayError(errors[0]);
+            if (translatedError !== errors[0]) {
+              errorMessage = `❌ ${translatedError}`;
+            }
           }
         }
       }
@@ -1379,6 +1439,49 @@ export class ProcessorService {
     } catch (error) {
       console.error(`Error handling job failure ${generationId}:`, error);
     }
+  }
+
+  private translateFalError(errorMessage: string | undefined | null): string {
+    if (!errorMessage || typeof errorMessage !== 'string') {
+      return 'Ошибка при обработке видео. Попробуйте позже.';
+    }
+    
+    const errorLower = errorMessage.toLowerCase();
+    
+    // Модерация контента
+    if (errorLower.includes('content moderation') || 
+        errorLower.includes('moderation') || 
+        errorLower.includes('not passed moderation') ||
+        errorLower.includes('did not pass')) {
+      return 'Картинка или промпт (текстовый запрос) не прошли модерацию.';
+    }
+    
+    // Неподдерживаемый формат
+    if (errorLower.includes('invalid format') || errorLower.includes('unsupported format')) {
+      return 'Неподдерживаемый формат изображения. Пожалуйста, отправьте фото в формате JPG или PNG.';
+    }
+    
+    // Размер файла
+    if (errorLower.includes('file size') || errorLower.includes('too large') || errorLower.includes('too small')) {
+      return 'Неподходящий размер изображения. Пожалуйста, отправьте фото другого размера.';
+    }
+    
+    // Общая ошибка валидации
+    if (errorLower.includes('validation') || errorLower.includes('invalid')) {
+      return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
+    }
+    
+    // Ошибка генерации
+    if (errorLower.includes('generation failed') || errorLower.includes('failed to generate')) {
+      return 'Не удалось сгенерировать видео. Попробуйте другое изображение или измените промпт.';
+    }
+    
+    // Ошибка API
+    if (errorLower.includes('api error') || errorLower.includes('service unavailable')) {
+      return 'Сервис временно недоступен. Попробуйте позже.';
+    }
+    
+    return 'Ошибка при обработке видео. Попробуйте позже.';
   }
 
   private translateRunwayError(errorMessage: string | undefined | null): string {

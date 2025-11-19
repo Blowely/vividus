@@ -104,12 +104,8 @@ export class TelegramService {
   private getMainReplyKeyboard(userId: number): any {
     const keyboard = [];
     
-    // Первая строка - для админов две кнопки, для обычных пользователей одна
-    if (this.isAdmin(userId)) {
-      keyboard.push([Markup.button.text('🎬 Оживить фото'), Markup.button.text('🎬 Оживить v2')]);
-    } else {
-      keyboard.push([Markup.button.text('🎬 Оживить фото')]);
-    }
+    // Первая строка - кнопка новой нейросети для всех пользователей
+    keyboard.push([Markup.button.text('🎬 Оживить фото (NEW)')]);
     
     keyboard.push([Markup.button.text('✨ Купить генерации'), Markup.button.text('❓ Поддержка')]);
 
@@ -815,26 +811,17 @@ export class TelegramService {
       }
       
       // Обрабатываем команды от reply кнопок
-      if (text === '🎬 Оживить фото') {
+      // Оживить фото (NEW) - новая нейросеть для всех пользователей
+      if (text === '🎬 Оживить фото (NEW)') {
+        console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить фото (NEW)"`);
+        const userId = ctx.from!.id;
+        const state = { waitingForPhoto: true, waitingForPrompt: false };
+        this.animateV2State.set(userId, state);
+        console.log(`✅ Состояние animateV2State установлено для пользователя ${userId}`);
+        console.log(`   Проверка сразу после set: ${JSON.stringify(this.animateV2State.get(userId))}`);
+        console.log(`   Все ключи и типы:`, Array.from(this.animateV2State.keys()).map(k => `${k} (${typeof k})`));
         await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
         return;
-      }
-      
-      // Оживить v2 - только для админов
-      if (text === '🎬 Оживить v2') {
-        console.log(`👤 Пользователь ${ctx.from!.id} (тип: ${typeof ctx.from!.id}) нажал "Оживить v2", isAdmin: ${this.isAdmin(ctx.from!.id)}`);
-        if (this.isAdmin(ctx.from!.id)) {
-          const userId = ctx.from!.id;
-          const state = { waitingForPhoto: true, waitingForPrompt: false };
-          this.animateV2State.set(userId, state);
-          console.log(`✅ Состояние animateV2State установлено для пользователя ${userId}`);
-          console.log(`   Проверка сразу после set: ${JSON.stringify(this.animateV2State.get(userId))}`);
-          console.log(`   Все ключи и типы:`, Array.from(this.animateV2State.keys()).map(k => `${k} (${typeof k})`));
-          await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации (v2 - новая нейросеть)!');
-          return;
-        } else {
-          console.log(`❌ Пользователь ${ctx.from!.id} не является админом`);
-        }
       }
       
       // Временно отключено - перенесено в broadcast-bot
