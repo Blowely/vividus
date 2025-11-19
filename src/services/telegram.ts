@@ -363,10 +363,11 @@ export class TelegramService {
       }
       
       // Проверяем, находимся ли мы в режиме "Оживить v2"
-      console.log(`📸 Обработка фото от пользователя ${user.telegram_id} (ctx.from.id: ${ctx.from!.id})`);
-      console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()));
+      console.log(`📸 Обработка фото от пользователя ${user.telegram_id} (тип: ${typeof user.telegram_id}), ctx.from.id: ${ctx.from!.id} (тип: ${typeof ctx.from!.id})`);
+      console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()).map(k => `${k} (${typeof k})`));
+      console.log(`   user.telegram_id === ctx.from!.id: ${user.telegram_id === ctx.from!.id}`);
       const animateV2State = this.animateV2State.get(user.telegram_id);
-      console.log(`   animateV2State для ${user.telegram_id}:`, animateV2State);
+      console.log(`   animateV2State для ${user.telegram_id}:`, JSON.stringify(animateV2State));
       if (animateV2State && animateV2State.waitingForPhoto) {
         console.log(`✅ Режим Оживить v2 активен для пользователя ${user.telegram_id}`);
         // Сохраняем fileId и запрашиваем промпт
@@ -791,10 +792,14 @@ export class TelegramService {
       
       // Оживить v2 - только для админов
       if (text === '🎬 Оживить v2') {
-        console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить v2", isAdmin: ${this.isAdmin(ctx.from!.id)}`);
+        console.log(`👤 Пользователь ${ctx.from!.id} (тип: ${typeof ctx.from!.id}) нажал "Оживить v2", isAdmin: ${this.isAdmin(ctx.from!.id)}`);
         if (this.isAdmin(ctx.from!.id)) {
-          this.animateV2State.set(ctx.from!.id, { waitingForPhoto: true, waitingForPrompt: false });
-          console.log(`✅ Состояние animateV2State установлено для пользователя ${ctx.from!.id}`);
+          const userId = ctx.from!.id;
+          const state = { waitingForPhoto: true, waitingForPrompt: false };
+          this.animateV2State.set(userId, state);
+          console.log(`✅ Состояние animateV2State установлено для пользователя ${userId}`);
+          console.log(`   Проверка сразу после set: ${JSON.stringify(this.animateV2State.get(userId))}`);
+          console.log(`   Все ключи и типы:`, Array.from(this.animateV2State.keys()).map(k => `${k} (${typeof k})`));
           await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации (v2 - новая нейросеть)!');
           return;
         } else {
