@@ -679,7 +679,8 @@ export class ProcessorService {
 
         // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
-          console.log(`✅ Animate_v2 заказ ${orderId} завершен. Отправляю результат...`);
+          const orderType = isAnimateV2 ? 'animate_v2' : 'fal.ai';
+          console.log(`✅ ${orderType} заказ ${orderId} завершен. Отправляю результат...`);
           console.log(`   completedCount: ${completedCount}, failedCount: ${failedCount}, allFinished: ${allFinished}`);
           hasNotifiedUser = true;
           
@@ -694,6 +695,7 @@ export class ProcessorService {
                 undefined,
                 `🔄 Генерация видео...\n\n${progressBar} 100%`
               );
+              console.log(`   ✅ Прогресс-бар обновлен до 100% перед отправкой результата`);
             } catch (error) {
               console.error('Error updating progress to 100%:', error);
             }
@@ -1023,6 +1025,36 @@ export class ProcessorService {
       if (order && order.order_type === 'animate_v2') {
         console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Отправляю результат в broadcast-bot...`);
         await this.sendAnimateV2ResultToBroadcastBot(telegramId, videos);
+        return;
+      }
+
+      // Для fal.ai заказов (основной бот) НЕ списываем генерации (для админов)
+      const isFalOrder = order?.custom_prompt?.startsWith('fal:');
+      if (isFalOrder) {
+        console.log(`✅ Заказ ${orderId} (fal.ai) успешно завершен. Отправляю результат в основной бот...`);
+        // Отправляем видео в основной бот
+        for (const video of videos) {
+          if (video.url) {
+            try {
+              await this.bot.telegram.sendVideo(telegramId, video.url, {
+                caption: `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+                parse_mode: 'HTML'
+              });
+            } catch (error) {
+              console.error(`Error sending video:`, error);
+              await this.bot.telegram.sendMessage(
+                telegramId,
+                `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+                { parse_mode: 'HTML' }
+              );
+            }
+          }
+        }
+        // Отправляем сообщение о возможности следующего заказа
+        await this.bot.telegram.sendMessage(
+          telegramId,
+          '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
+        );
         return;
       }
 
