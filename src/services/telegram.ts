@@ -27,6 +27,7 @@ export class TelegramService {
   private combineAndAnimateState: Map<number, { combineType?: string; animationType?: string; combinePrompt?: string; animationPrompt?: string; waitingForCombinePrompt?: boolean; waitingForAnimationPrompt?: boolean }> = new Map(); // userId -> состояние
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
+  private animateV2State: Map<number, { waitingForPhoto: boolean; waitingForPrompt: boolean; photoFileId?: string }> = new Map(); // userId -> состояние для Оживить v2
 
   constructor() {
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
@@ -108,7 +109,9 @@ export class TelegramService {
 
     // Добавляем кнопки для админов
     if (this.isAdmin(userId)) {
+      keyboard.push([Markup.button.text('🎬 Оживить v2')]);
       keyboard.push([Markup.button.text('📊 Статистика')]);
+      keyboard.push([Markup.button.text('📈 Аналитика по кампаниям')]);
     }
 
     return {
@@ -367,6 +370,27 @@ export class TelegramService {
       if (mediaGroupId) {
         // Это медиа-группа - обрабатываем через handleMediaGroup логику
         await this.handleMediaGroupPhoto(ctx, user, fileId, mediaGroupId);
+        return;
+      }
+      
+      // Проверяем, находимся ли мы в режиме "Оживить v2"
+      const animateV2State = this.animateV2State.get(user.telegram_id);
+      if (animateV2State && animateV2State.waitingForPhoto) {
+        // Сохраняем fileId и запрашиваем промпт
+        this.animateV2State.set(user.telegram_id, { 
+          waitingForPhoto: false, 
+          waitingForPrompt: true, 
+          photoFileId: fileId 
+        });
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "дышит"
+
+✅ Заказ создан
+
+🎬 Начинаю генерацию видео...
+
+⏳ Это займет 2-5 минут.`);
+        // Создаем заказ и запускаем обработку
+        await this.createAnimateV2Order(ctx, user, fileId);
         return;
       }
       
@@ -767,6 +791,13 @@ export class TelegramService {
       // Обрабатываем команды от reply кнопок
       if (text === '🎬 Оживить фото') {
         await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
+        return;
+      }
+      
+      // Оживить v2 - только для админов
+      if (text === '🎬 Оживить v2' && this.isAdmin(ctx.from!.id)) {
+        this.animateV2State.set(ctx.from!.id, { waitingForPhoto: true, waitingForPrompt: false });
+        await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации (v2 - новая нейросеть)!');
         return;
       }
       
@@ -1250,6 +1281,29 @@ export class TelegramService {
   private isAdmin(userId: number): boolean {
     const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
     return adminIds.includes(userId);
+  }
+
+  private async createAnimateV2Order(ctx: Context, user: any, fileId: string): Promise<void> {
+    try {
+      // Загружаем фото в S3
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      
+      // Создаем заказ типа animate_v2 с базовым промптом "дышит"
+      const order = await this.orderService.createAnimateV2Order(user.id, s3Url, 'animate this image with subtle movements and breathing effect');
+      await this.orderService.updateOrderStatus(order.id, 'processing' as any);
+      
+      // Очищаем состояние
+      this.animateV2State.delete(user.telegram_id);
+      
+      // Запускаем обработку заказа
+      const { ProcessorService } = await import('./processor');
+      const processorService = new ProcessorService();
+      await processorService.processOrder(order.id);
+      
+    } catch (error) {
+      console.error('Error creating animate v2 order:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при создании заказа. Попробуйте позже.');
+    }
   }
 
   private async showCampaignStats(ctx: Context, campaignName: string) {

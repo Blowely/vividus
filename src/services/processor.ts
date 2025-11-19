@@ -1128,7 +1128,7 @@ export class ProcessorService {
         if (video.url) {
           try {
             await broadcastBot.telegram.sendVideo(telegramId, video.url, {
-              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+              caption: `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
               parse_mode: 'HTML'
             });
           } catch (error) {
@@ -1136,7 +1136,7 @@ export class ProcessorService {
             // Если не удалось отправить видео, отправляем ссылку
             await broadcastBot.telegram.sendMessage(
               telegramId,
-              `📹 Результат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+              `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
               { parse_mode: 'HTML' }
             );
           }
