@@ -138,6 +138,16 @@ export class FalService {
 
   async checkJobStatus(systemRequestId: string): Promise<any> {
     try {
+      // Для временных джобов (fal_temp_) возвращаем PENDING
+      if (systemRequestId.startsWith('fal_temp_')) {
+        return {
+          status: 'PENDING',
+          video: undefined,
+          output: undefined,
+          error: undefined
+        };
+      }
+      
       // Для синхронных запросов (fal_sync_) сразу возвращаем статус из БД
       if (systemRequestId.startsWith('fal_sync_')) {
         const job = await this.getJobByRequestId(systemRequestId);

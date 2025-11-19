@@ -142,7 +142,28 @@ export class ProcessorService {
           // Запускаем вызов fal.ai АСИНХРОННО (не блокируем event loop)
           const cleanPrompt = order.custom_prompt.replace(/^fal:/, '');
           
-          console.log(`👀 Запускаю вызов fal.ai асинхронно, мониторинг начнется после создания джоба...`);
+          // Создаем временный generationId для немедленного запуска мониторинга
+          const tempGenerationId = `fal_temp_${orderId}_${Date.now()}`;
+          generationIds = [tempGenerationId];
+          
+          // Создаем временный джоб в БД, чтобы мониторинг мог его найти
+          const client = await (await import('../config/database')).default.connect();
+          try {
+            await client.query(
+              `INSERT INTO did_jobs (order_id, did_job_id, status, model) 
+               VALUES ($1, $2, $3, $4) 
+               ON CONFLICT (did_job_id) DO NOTHING`,
+              [orderId, tempGenerationId, 'pending', 'hailuo-2.3-fast']
+            );
+            console.log(`   ✅ Создан временный джоб в БД: ${tempGenerationId}`);
+          } finally {
+            client.release();
+          }
+          
+          console.log(`👀 Запускаю мониторинг СРАЗУ с временным джобом ${tempGenerationId}, вызов fal.ai выполняется асинхронно...`);
+          
+          // Запускаем мониторинг СРАЗУ (интервал начнет работать немедленно)
+          this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
           
           // Запускаем вызов fal.ai асинхронно (не ждем ответа, не блокируем event loop)
           (async () => {
@@ -154,20 +175,28 @@ export class ProcessorService {
               );
               console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
               
-              // После создания джоба запускаем мониторинг
-              const generationIds = [requestId];
-              await this.orderService.updateOrderResult(orderId, generationIds[0]);
-              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
-              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              // Обновляем временный джоб на реальный в БД
+              const client = await (await import('../config/database')).default.connect();
+              try {
+                await client.query(
+                  `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
+                  [requestId, tempGenerationId, orderId]
+                );
+                console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+              } finally {
+                client.release();
+              }
+              
+              // Обновляем order result
+              await this.orderService.updateOrderResult(orderId, requestId);
             } catch (error: any) {
               console.error('Error in async fal.ai call:', error);
               // Проверяем, может джоб все-таки создан
               const falJobs = await this.falService.getJobsByOrderId(orderId);
               if (falJobs.length > 0) {
-                const generationIds = falJobs.map(job => job.did_job_id);
-                await this.orderService.updateOrderResult(orderId, generationIds[0]);
-                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
-                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+                const realGenerationIds = falJobs.map(job => job.did_job_id);
+                await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
+                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов.`);
               } else {
                 // Обновляем статус заказа на failed
                 await this.orderService.updateOrderStatus(orderId, 'failed' as any);
