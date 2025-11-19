@@ -496,9 +496,10 @@ export class ProcessorService {
       // Update order status
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
 
-      // Для заказов animate_v2 (из broadcast-bot) не списываем генерации и не отправляем уведомления
+      // Для заказов animate_v2 (из broadcast-bot) отправляем результат в broadcast-bot
       if (order && order.order_type === 'animate_v2') {
-        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Генерации не списываются, уведомления не отправляются.`);
+        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Отправляю результат в broadcast-bot...`);
+        await this.sendAnimateV2ResultToBroadcastBot(telegramId, videos);
         return;
       }
 
@@ -612,9 +613,10 @@ export class ProcessorService {
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
 
-      // Для заказов animate_v2 (из broadcast-bot) не списываем генерации и не отправляем уведомления
+      // Для заказов animate_v2 (из broadcast-bot) отправляем результат в broadcast-bot
       if (order && order.order_type === 'animate_v2') {
-        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Генерации не списываются, уведомления не отправляются.`);
+        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Отправляю результат в broadcast-bot...`);
+        await this.sendAnimateV2ResultToBroadcastBot(telegramId, [{ url: videoUrl }]);
         return;
       }
 
@@ -852,6 +854,57 @@ export class ProcessorService {
     const empty = '░'.repeat(emptyBlocks);
     
     return `[${filled}${empty}]`;
+  }
+
+  private async sendAnimateV2ResultToBroadcastBot(telegramId: number, videos: Array<{ url: string; model?: string }>): Promise<void> {
+    try {
+      // Создаем экземпляр broadcast-bot для отправки уведомлений
+      const broadcastBotToken = process.env.BROADCAST_BOT_TOKEN;
+      if (!broadcastBotToken) {
+        console.error('BROADCAST_BOT_TOKEN not set, cannot send notification to broadcast-bot');
+        return;
+      }
+
+      const { Telegraf } = await import('telegraf');
+      const broadcastBot = new Telegraf(broadcastBotToken);
+
+      // Отправляем уведомление о готовности
+      await broadcastBot.telegram.sendMessage(telegramId, '✅ Ваше видео готово! Отправляю...');
+
+      // Отправляем все видео
+      for (const video of videos) {
+        if (video.url) {
+          try {
+            await broadcastBot.telegram.sendVideo(telegramId, video.url, {
+              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}`
+            });
+          } catch (error) {
+            console.error(`Error sending video to broadcast-bot:`, error);
+            // Если не удалось отправить видео, отправляем ссылку
+            await broadcastBot.telegram.sendMessage(
+              telegramId,
+              `📹 Видео: <a href="${video.url}">Скачать</a>`,
+              { parse_mode: 'HTML' }
+            );
+          }
+        }
+      }
+
+      // Сообщение о возможности отправить следующее фото
+      setTimeout(async () => {
+        try {
+          await broadcastBot.telegram.sendMessage(
+            telegramId,
+            '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
+          );
+        } catch (error) {
+          console.error(`Error sending next photo message to broadcast-bot:`, error);
+        }
+      }, 2000);
+
+    } catch (error) {
+      console.error(`Error sending animate_v2 result to broadcast-bot:`, error);
+    }
   }
 
   async processPendingOrders(): Promise<void> {

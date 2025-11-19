@@ -138,7 +138,25 @@ export class FalService {
 
   async checkJobStatus(systemRequestId: string): Promise<any> {
     try {
-      // Извлекаем оригинальный request_id из БД
+      // Для синхронных запросов (fal_sync_) сразу возвращаем статус из БД
+      if (systemRequestId.startsWith('fal_sync_')) {
+        const job = await this.getJobByRequestId(systemRequestId);
+        if (!job) {
+          throw new Error('Job not found');
+        }
+        
+        // Возвращаем статус из БД
+        return {
+          status: job.status === DidJobStatus.COMPLETED ? 'COMPLETED' : 
+                  job.status === DidJobStatus.FAILED ? 'FAILED' : 
+                  job.status === DidJobStatus.PROCESSING ? 'PROCESSING' : 'PENDING',
+          video: job.result_url ? { url: job.result_url } : undefined,
+          output: job.result_url ? [job.result_url] : undefined,
+          error: job.error_message
+        };
+      }
+      
+      // Для асинхронных запросов используем API
       const job = await this.getJobByRequestId(systemRequestId);
       if (!job || !job.error_message) {
         throw new Error('Job not found or no original request_id stored');
