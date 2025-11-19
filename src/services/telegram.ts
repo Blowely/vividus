@@ -278,18 +278,6 @@ export class TelegramService {
     // Получаем баланс генераций
     const user = await this.userService.getOrCreateUser(ctx.from!);
     const generations = await this.userService.getUserGenerations(ctx.from!.id);
-    
-    // Создаем reply клавиатуру (кнопки под полем ввода)
-      const keyboard = [
-      [Markup.button.text('🎬 Оживить фото')],
-      // [Markup.button.text('🔀 Объединить и оживить')], // Временно отключено, перенесено в broadcast-bot
-      [Markup.button.text('✨ Купить генерации'),Markup.button.text('❓ Поддержка')],
-      ];
-
-    // Добавляем кнопки для админов
-      if (this.isAdmin(ctx.from!.id)) {
-      keyboard.push([Markup.button.text('📊 Статистика')]);
-      }
 
     // Сначала отправляем приветственное видео
     try {
@@ -308,10 +296,7 @@ export class TelegramService {
     // Для приветствия всегда отправляем новое сообщение (не редактируем)
     try {
       const message = await ctx.reply(welcomeMessage, {
-          reply_markup: {
-          keyboard: keyboard,
-          resize_keyboard: true
-          }
+          reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
         });
       // Сохраняем message_id для последующих сообщений
       if (ctx.from) {
@@ -379,7 +364,9 @@ export class TelegramService {
       
       // Проверяем, находимся ли мы в режиме "Оживить v2"
       const animateV2State = this.animateV2State.get(user.telegram_id);
+      console.log(`📸 Обработка фото от пользователя ${user.telegram_id}, animateV2State:`, animateV2State);
       if (animateV2State && animateV2State.waitingForPhoto) {
+        console.log(`✅ Режим Оживить v2 активен для пользователя ${user.telegram_id}`);
         // Сохраняем fileId и запрашиваем промпт
         this.animateV2State.set(user.telegram_id, { 
           waitingForPhoto: false, 
@@ -799,10 +786,16 @@ export class TelegramService {
       }
       
       // Оживить v2 - только для админов
-      if (text === '🎬 Оживить v2' && this.isAdmin(ctx.from!.id)) {
-        this.animateV2State.set(ctx.from!.id, { waitingForPhoto: true, waitingForPrompt: false });
-        await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации (v2 - новая нейросеть)!');
-        return;
+      if (text === '🎬 Оживить v2') {
+        console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить v2", isAdmin: ${this.isAdmin(ctx.from!.id)}`);
+        if (this.isAdmin(ctx.from!.id)) {
+          this.animateV2State.set(ctx.from!.id, { waitingForPhoto: true, waitingForPrompt: false });
+          console.log(`✅ Состояние animateV2State установлено для пользователя ${ctx.from!.id}`);
+          await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации (v2 - новая нейросеть)!');
+          return;
+        } else {
+          console.log(`❌ Пользователь ${ctx.from!.id} не является админом`);
+        }
       }
       
       // Временно отключено - перенесено в broadcast-bot
