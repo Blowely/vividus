@@ -649,10 +649,11 @@ async function createAnimateV2Order(
       try {
         const client = await (await import('../config/database')).default.connect();
         try {
-          // Сохраняем и промпт, и message_id в JSON формате
+          // Сохраняем и промпт, и message_id, и startTime в JSON формате
           const metadata = {
             prompt: englishPrompt || null,
-            progressMessageId: progressMessageId
+            progressMessageId: progressMessageId,
+            startTime: Date.now() // Запоминаем время начала для фейкового прогресса
           };
           await client.query(
             `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
@@ -664,6 +665,82 @@ async function createAnimateV2Order(
       } catch (error) {
         console.error('Error saving progress message_id:', error);
       }
+      
+      // Сразу обновляем прогресс до 1%, чтобы пользователь видел движение немедленно
+      setTimeout(async () => {
+        try {
+          const progressBar1 = createProgressBar(1);
+          await bot.telegram.editMessageText(
+            ctx.from!.id,
+            progressMessageId,
+            undefined,
+            `🔄 Генерация видео...\n\n${progressBar1} 1%`
+          );
+        } catch (error) {
+          console.error('Error updating initial progress:', error);
+        }
+      }, 500); // Через полсекунды обновляем до 1%
+      
+      // Запускаем таймер для фейкового прогресса, который будет работать независимо от API
+      const startFakeProgress = async () => {
+        const startTime = Date.now();
+        const updateInterval = setInterval(async () => {
+          try {
+            // Проверяем, не завершился ли заказ
+            const client = await (await import('../config/database')).default.connect();
+            let orderStatus;
+            try {
+              const result = await client.query('SELECT status FROM orders WHERE id = $1', [order.id]);
+              orderStatus = result.rows[0]?.status;
+            } finally {
+              client.release();
+            }
+            
+            // Если заказ завершен, останавливаем таймер
+            if (orderStatus === 'completed' || orderStatus === 'failed') {
+              clearInterval(updateInterval);
+              return;
+            }
+            
+            // Вычисляем фейковый прогресс
+            const elapsed = Date.now() - startTime;
+            let fakeProgress = 1;
+            
+            if (elapsed < 120000) {
+              // Первые 2 минуты - плавный рост от 1 до 70%
+              fakeProgress = 1 + Math.min(69, Math.round((elapsed / 120000) * 69));
+            } else if (elapsed < 150000) {
+              // Следующие 30 секунд - рост от 70% до 85%
+              const extraTime = elapsed - 120000;
+              fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
+            } else if (elapsed < 180000) {
+              // Следующие 30 секунд - медленный рост от 85% до 95%
+              const extraTime = elapsed - 150000;
+              fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+            } else {
+              // После 3 минут - держим на 95% до завершения
+              fakeProgress = 95;
+            }
+            
+            // Обновляем прогресс-бар
+            const progressBarFake = createProgressBar(fakeProgress);
+            await bot.telegram.editMessageText(
+              ctx.from!.id,
+              progressMessageId,
+              undefined,
+              `🔄 Генерация видео...\n\n${progressBarFake} ${fakeProgress}%`
+            );
+          } catch (error: any) {
+            // Игнорируем ошибки редактирования (например, если сообщение уже изменено)
+            if (error?.response?.error_code !== 400) {
+              console.error('Error updating fake progress:', error);
+            }
+          }
+        }, 3000); // Обновляем каждые 3 секунды
+      };
+      
+      // Запускаем фейковый прогресс асинхронно
+      startFakeProgress().catch(console.error);
     }
     
     // Запускаем обработку заказа
