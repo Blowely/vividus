@@ -363,15 +363,16 @@ export class TelegramService {
       }
       
       // Проверяем, находимся ли мы в режиме "Оживить v2"
-      console.log(`📸 Обработка фото от пользователя ${user.telegram_id} (тип: ${typeof user.telegram_id}), ctx.from.id: ${ctx.from!.id} (тип: ${typeof ctx.from!.id})`);
-      console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()).map(k => `${k} (${typeof k})`));
-      console.log(`   user.telegram_id === ctx.from!.id: ${user.telegram_id === ctx.from!.id}`);
-      const animateV2State = this.animateV2State.get(user.telegram_id);
-      console.log(`   animateV2State для ${user.telegram_id}:`, JSON.stringify(animateV2State));
+      // ВАЖНО: используем ctx.from!.id (number), а не user.telegram_id (может быть string)
+      const userId = ctx.from!.id;
+      console.log(`📸 Обработка фото от пользователя ${userId}`);
+      console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()));
+      const animateV2State = this.animateV2State.get(userId);
+      console.log(`   animateV2State для ${userId}:`, JSON.stringify(animateV2State));
       if (animateV2State && animateV2State.waitingForPhoto) {
-        console.log(`✅ Режим Оживить v2 активен для пользователя ${user.telegram_id}`);
+        console.log(`✅ Режим Оживить v2 активен для пользователя ${userId}`);
         // Сохраняем fileId и запрашиваем промпт
-        this.animateV2State.set(user.telegram_id, { 
+        this.animateV2State.set(userId, { 
           waitingForPhoto: false, 
           waitingForPrompt: true, 
           photoFileId: fileId 
@@ -1300,8 +1301,8 @@ export class TelegramService {
       
       await this.orderService.updateOrderStatus(order.id, 'processing' as any);
       
-      // Очищаем состояние
-      this.animateV2State.delete(user.telegram_id);
+      // Очищаем состояние (используем ctx.from!.id, number)
+      this.animateV2State.delete(ctx.from!.id);
       
       // Запускаем обработку заказа
       const { ProcessorService } = await import('./processor');
