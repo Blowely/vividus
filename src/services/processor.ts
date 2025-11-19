@@ -539,11 +539,51 @@ export class ProcessorService {
             }
           }
           
-          // Останавливаем интервал, если заказ завершен
+          // Проверяем статус заказа и реальных джобов
           const orderData = await this.orderService.getOrder(orderId);
           if (orderData?.status === 'completed' || orderData?.status === 'failed') {
             console.log(`🛑 Останавливаю фейковый прогресс, заказ завершен`);
             clearInterval(fakeProgressInterval);
+            return;
+          }
+          
+          // Для fal.ai заказов проверяем, не готово ли видео
+          if (isFalOrder) {
+            try {
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
+              const realFalJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
+              const completedJob = realFalJobs.find(job => job.status === 'completed' && job.result_url);
+              
+              if (completedJob && completedJob.result_url) {
+                console.log(`🎬 Видео готово! Останавливаю фейковый прогресс и отправляю результат...`);
+                clearInterval(fakeProgressInterval);
+                
+                // Обновляем прогресс-бар до 100%
+                if (progressMessageId) {
+                  try {
+                    const progressBar = this.createProgressBar(100);
+                    await this.bot.telegram.editMessageText(
+                      telegramId,
+                      progressMessageId,
+                      undefined,
+                      `🔄 Генерация видео...\n\n${progressBar} 100%`
+                    );
+                  } catch (error) {
+                    console.error('Error updating progress to 100%:', error);
+                  }
+                }
+                
+                // Отправляем видео сразу
+                await this.handleMultipleJobsSuccess(
+                  [completedJob.did_job_id],
+                  telegramId,
+                  orderId,
+                  [{ url: completedJob.result_url }]
+                );
+              }
+            } catch (error) {
+              console.error('Error checking fal.ai job status in interval:', error);
+            }
           }
         } catch (error) {
           console.error('Error in fake progress interval:', error);
@@ -558,6 +598,19 @@ export class ProcessorService {
       try {
         attempts++;
 
+        // Для fal.ai заказов проверяем, не создан ли уже реальный джоб (вместо временного)
+        if (isFalOrder) {
+          const falJobs = await this.falService.getJobsByOrderId(orderId);
+          const realFalJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
+          if (realFalJobs.length > 0 && generationIds.some(id => id.startsWith('fal_temp_'))) {
+            // Обновляем generationIds на реальные джобы
+            const realGenerationIds = realFalJobs.map(job => job.did_job_id);
+            console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIds.join(', ')} → ${realGenerationIds.join(', ')}`);
+            generationIds = realGenerationIds;
+            await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
+          }
+        }
+        
         // Проверяем статус всех джобов
         const statusPromises = generationIds.map(async (generationId) => {
           try {
