@@ -461,6 +461,7 @@ export class ProcessorService {
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
     let lastFakeProgressUpdate = 0;
     let fakeProgressInterval: NodeJS.Timeout | null = null; // Сохраняем ссылку на интервал
+    let fakeProgressStopped = false; // Флаг для остановки обновлений интервала
     
     console.log(`📊 Инициализация мониторинга: isAnimateV2=${isAnimateV2}, isFalOrder=${isFalOrder}, useFakeProgress=${useFakeProgress}, progressMessageId=${progressMessageId}, startTime=${startTime}`);
     
@@ -491,6 +492,11 @@ export class ProcessorService {
       // Запускаем отдельный интервал для обновления фейкового прогресса каждые 2 секунды
       fakeProgressInterval = setInterval(async () => {
         try {
+          // Проверяем флаг остановки - если установлен, не обновляем прогресс
+          if (fakeProgressStopped) {
+            return;
+          }
+          
           // Проверяем, есть ли progressMessageId (может быть установлен позже)
           if (!progressMessageId) {
             const orderData = await this.orderService.getOrder(orderId);
@@ -521,8 +527,8 @@ export class ProcessorService {
             currentFakeProgress = 95;
           }
           
-          // Обновляем только если прогресс увеличился
-          if (currentFakeProgress > lastFakeProgressUpdate) {
+          // Обновляем только если прогресс увеличился И интервал не остановлен
+          if (currentFakeProgress > lastFakeProgressUpdate && !fakeProgressStopped) {
             lastFakeProgressUpdate = currentFakeProgress;
             const progressBar = this.createProgressBar(currentFakeProgress);
             const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${currentFakeProgress}%`;
@@ -544,6 +550,7 @@ export class ProcessorService {
           const orderData = await this.orderService.getOrder(orderId);
           if (orderData?.status === 'completed' || orderData?.status === 'failed') {
             console.log(`🛑 Останавливаю фейковый прогресс, заказ завершен`);
+            fakeProgressStopped = true;
             if (fakeProgressInterval) {
               clearInterval(fakeProgressInterval);
               fakeProgressInterval = null;
@@ -571,12 +578,14 @@ export class ProcessorService {
                 }
                 
                 console.log(`🎬 Видео готово! Останавливаю фейковый прогресс и отправляю результат...`);
+                // Устанавливаем флаг остановки СРАЗУ, чтобы интервал не обновлял прогресс
+                fakeProgressStopped = true;
                 if (fakeProgressInterval) {
                   clearInterval(fakeProgressInterval);
                   fakeProgressInterval = null;
                 }
                 
-                // Обновляем прогресс-бар до 100%
+                // Обновляем прогресс-бар до 100% (после остановки интервала)
                 if (progressMessageId) {
                   try {
                     const progressBar = this.createProgressBar(100);
@@ -586,6 +595,7 @@ export class ProcessorService {
                       undefined,
                       `🔄 Генерация видео...\n\n${progressBar} 100%`
                     );
+                    console.log(`✅ Прогресс-бар обновлен до 100% в интервале`);
                   } catch (error) {
                     console.error('Error updating progress to 100%:', error);
                   }
@@ -758,7 +768,8 @@ export class ProcessorService {
           if (currentOrder?.status === 'completed') {
             console.log(`⚠️ Заказ ${orderId} уже завершен, пропускаю отправку из основного цикла`);
             hasNotifiedUser = true;
-            // Останавливаем интервал фейкового прогресса, если он еще работает
+            // Устанавливаем флаг остановки и останавливаем интервал
+            fakeProgressStopped = true;
             if (fakeProgressInterval) {
               clearInterval(fakeProgressInterval);
               fakeProgressInterval = null;
@@ -771,12 +782,16 @@ export class ProcessorService {
           console.log(`   completedCount: ${completedCount}, failedCount: ${failedCount}, allFinished: ${allFinished}`);
           hasNotifiedUser = true;
           
-          // Останавливаем интервал фейкового прогресса СРАЗУ, чтобы он не обновлял прогресс-бар
+          // Устанавливаем флаг остановки и останавливаем интервал СРАЗУ, чтобы он не обновлял прогресс-бар
+          fakeProgressStopped = true;
           if (fakeProgressInterval) {
             console.log(`🛑 Останавливаю интервал фейкового прогресса из основного цикла`);
             clearInterval(fakeProgressInterval);
             fakeProgressInterval = null;
           }
+          
+          // Небольшая задержка, чтобы гарантировать, что интервал не перезапишет прогресс-бар
+          await new Promise(resolve => setTimeout(resolve, 100));
           
           // Обновляем прогресс-бар до 100% перед отправкой результата
           if (progressMessageId) {
