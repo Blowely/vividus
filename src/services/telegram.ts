@@ -111,7 +111,6 @@ export class TelegramService {
     if (this.isAdmin(userId)) {
       keyboard.push([Markup.button.text('🎬 Оживить v2')]);
       keyboard.push([Markup.button.text('📊 Статистика')]);
-      keyboard.push([Markup.button.text('📈 Аналитика по кампаниям')]);
     }
 
     return {
@@ -1290,6 +1289,8 @@ export class TelegramService {
       
       // Создаем заказ типа animate_v2 с базовым промптом "дышит"
       const order = await this.orderService.createAnimateV2Order(user.id, s3Url, 'animate this image with subtle movements and breathing effect');
+      console.log(`📝 Создан заказ animate_v2: ${order.id}, order_type: ${order.order_type}`);
+      
       await this.orderService.updateOrderStatus(order.id, 'processing' as any);
       
       // Очищаем состояние

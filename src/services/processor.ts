@@ -68,20 +68,26 @@ export class ProcessorService {
       // Create videos using RunwayML with all available models - check order type
       let generationIds: string[];
       try {
+        console.log(`🔍 Processing order ${orderId}, order_type: ${order.order_type}, original_file_path: ${order.original_file_path?.substring(0, 50)}...`);
+        
         if (order.order_type === 'combine_and_animate') {
           // Combine and animate order - two-step process
+          console.log(`   → Обработка как combine_and_animate`);
           await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
           return; // Exit early, processing continues in processCombineAndAnimateOrder
         } else if (order.order_type === 'animate_v2') {
           // Animate v2 order - используем fal.ai
+          console.log(`   → Обработка как animate_v2 (fal.ai)`);
           const requestId = await this.falService.createVideoFromImage(
             order.original_file_path,
             orderId,
             order.custom_prompt
           );
           generationIds = [requestId];
+          console.log(`   ✅ Создан fal.ai запрос: ${requestId}`);
         } else if (order.order_type === 'merge' && order.second_file_path) {
           // Merge order - use second image as reference for transition
+          console.log(`   → Обработка как merge (RunwayML)`);
           generationIds = await this.runwayService.createMultipleVideosFromTwoImages(
             order.original_file_path,
             order.second_file_path,
@@ -90,6 +96,7 @@ export class ProcessorService {
           );
         } else {
           // Single image order - создаем генерации для всех доступных моделей
+          console.log(`   → Обработка как single (RunwayML), order_type: ${order.order_type || 'not set'}`);
           generationIds = await this.runwayService.createMultipleVideosFromImage(
             order.original_file_path,
             orderId,
