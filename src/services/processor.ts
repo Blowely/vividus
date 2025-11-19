@@ -180,6 +180,8 @@ export class ProcessorService {
     // Определяем, является ли заказ animate_v2 (для отправки в broadcast-bot)
     const order = await this.orderService.getOrder(orderId);
     const isAnimateV2 = order?.order_type === 'animate_v2';
+    // Определяем, использует ли заказ fal.ai (для фейкового прогресса в основном боте)
+    const isFalOrder = order?.custom_prompt?.startsWith('fal:') || false;
     const broadcastBotToken = isAnimateV2 ? process.env.BROADCAST_BOT_TOKEN : null;
     let broadcastBot: Telegraf | null = null;
     
@@ -265,8 +267,9 @@ export class ProcessorService {
     // Отправляем начальное сообщение сразу
     await sendInitialProgress();
 
-    // Фейковая имитация прогресса только для animate_v2 (broadcast-bot управляет сам)
-    // Для основного бота используем только реальный прогресс от RunwayML
+    // Фейковая имитация прогресса для animate_v2 (broadcast-bot) и fal.ai заказов (основной бот)
+    // Для обычных RunwayML заказов используем только реальный прогресс
+    const useFakeProgress = isAnimateV2 || isFalOrder;
     let fakeProgress = 0;
     const startTime = Date.now();
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
@@ -460,7 +463,40 @@ export class ProcessorService {
         // Для основного бота показываем прогресс, пока джобы не завершены
         // Для animate_v2 не обновляем прогресс-бар здесь (управляется фейковым таймером в broadcast-bot)
         if (!allFinished && attempts < maxAttempts) {
-          if (!isAnimateV2) {
+          if (!isAnimateV2 && useFakeProgress) {
+            // Для fal.ai заказов в основном боте используем фейковый прогресс
+            const elapsed = Date.now() - startTime;
+            if (elapsed < fakeProgressDuration) {
+              fakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
+            } else if (elapsed < fakeProgressDuration + 30000) {
+              const extraTime = elapsed - fakeProgressDuration;
+              fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
+            } else if (elapsed < fakeProgressDuration + 60000) {
+              const extraTime = elapsed - fakeProgressDuration - 30000;
+              fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+            } else {
+              fakeProgress = 95;
+            }
+            
+            const displayProgress = Math.max(fakeProgress, lastFakeProgressUpdate);
+            
+            if (displayProgress !== lastFakeProgressUpdate && progressMessageId) {
+              lastFakeProgressUpdate = displayProgress;
+              const progressBar = this.createProgressBar(displayProgress);
+              const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
+              
+              try {
+                await this.bot.telegram.editMessageText(
+                  telegramId,
+                  progressMessageId,
+                  undefined,
+                  progressMessage
+                );
+              } catch (error) {
+                console.error('Error editing progress message:', error);
+              }
+            }
+          } else if (!isAnimateV2 && !useFakeProgress) {
             // Только для не-animate_v2 заказов обновляем прогресс (используем ТОЛЬКО реальный прогресс от RunwayML)
             const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
             const displayProgress = realProgress;

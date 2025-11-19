@@ -371,21 +371,50 @@ export class TelegramService {
       console.log(`   animateV2State для ${userId}:`, JSON.stringify(animateV2State));
       if (animateV2State && animateV2State.waitingForPhoto) {
         console.log(`✅ Режим Оживить v2 активен для пользователя ${userId}`);
-        // Сохраняем fileId и запрашиваем промпт
-        this.animateV2State.set(userId, { 
-          waitingForPhoto: false, 
-          waitingForPrompt: true, 
-          photoFileId: fileId 
-        });
-        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "дышит"
-
-✅ Заказ создан
-
-🎬 Начинаю генерацию видео...
-
-⏳ Это займет 2-5 минут.`);
-        // Создаем заказ и запускаем обработку
-        await this.createAnimateV2Order(ctx, user, fileId);
+        
+        // Проверяем наличие caption (текста, прикрепленного к фото)
+        const caption = (ctx.message as any)['caption'];
+        
+        if (caption) {
+          // Если есть caption, сразу обрабатываем его как промпт
+          this.animateV2State.set(userId, { 
+            waitingForPhoto: false, 
+            waitingForPrompt: false, 
+            photoFileId: fileId 
+          });
+          await this.processAnimateV2Prompt(ctx, user, fileId, caption);
+        } else {
+          // Если нет caption, просим ввести промпт
+          this.animateV2State.set(userId, { 
+            waitingForPhoto: false, 
+            waitingForPrompt: true, 
+            photoFileId: fileId 
+          });
+          
+          const promptMessage = '📸 Фото получено!\n\n✍️ Опишите, как вы хотите анимировать изображение.\n\nНапример: "машет рукой", "улыбается", "моргает", "дышит" и т.д.';
+          
+          await this.sendMessage(ctx, promptMessage, {
+            reply_markup: {
+              inline_keyboard: [
+                [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt_v2')],
+                this.getBackButton()
+              ]
+            }
+          });
+          
+          // Отправляем невидимое сообщение с reply-клавиатурой
+          setTimeout(async () => {
+            try {
+              await ctx.reply('\u200B', {
+                reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+              });
+            } catch (e: any) {
+              if (this.isBlockedError(e)) {
+                console.log(`Bot is blocked by user ${ctx.from?.id}, skipping keyboard message`);
+              }
+            }
+          }, 500);
+        }
         return;
       }
       
@@ -875,6 +904,15 @@ export class TelegramService {
         return;
       }
       
+      // Проверяем, ожидает ли пользователь ввода промпта для "Оживить v2"
+      const userId = ctx.from!.id;
+      const animateV2State = this.animateV2State.get(userId);
+      if (animateV2State && animateV2State.waitingForPrompt && animateV2State.photoFileId) {
+        console.log(`✍️ Получен промпт для Оживить v2 от пользователя ${userId}: "${text}"`);
+        await this.processAnimateV2Prompt(ctx, user, animateV2State.photoFileId, text);
+        return;
+      }
+      
       // Check if user has pending photo
       const fileId = this.pendingPrompts.get(user.telegram_id);
       if (!fileId) {
@@ -1120,6 +1158,14 @@ export class TelegramService {
         const user = await this.userService.getOrCreateUser(ctx.from!);
         await this.processPrompt(ctx, user, 'пропустить');
         break;
+      case 'skip_prompt_v2':
+        const userV2 = await this.userService.getOrCreateUser(ctx.from!);
+        const userId = ctx.from!.id;
+        const animateV2State = this.animateV2State.get(userId);
+        if (animateV2State && animateV2State.photoFileId) {
+          await this.processAnimateV2Prompt(ctx, userV2, animateV2State.photoFileId, 'пропустить');
+        }
+        break;
       case 'skip_prompt_merge':
         const userMerge = await this.userService.getOrCreateUser(ctx.from!);
         await this.processMergePrompt(ctx, userMerge, 'пропустить');
@@ -1288,6 +1334,55 @@ export class TelegramService {
   private isAdmin(userId: number): boolean {
     const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
     return adminIds.includes(userId);
+  }
+
+  private async processAnimateV2Prompt(ctx: Context, user: any, fileId: string, promptText: string): Promise<void> {
+    try {
+      const userId = ctx.from!.id;
+      
+      // Загружаем фото в S3
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      
+      // Обрабатываем промпт
+      let processedPrompt = promptText.toLowerCase().trim();
+      const originalPrompt = promptText;
+      
+      if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
+        processedPrompt = 'animate this image with subtle movements and breathing effect';
+      } else {
+        // Переводим промпт
+        let translatedPrompt = this.translatePrompt(processedPrompt);
+        translatedPrompt = translatedPrompt.replace(/^animate this image with\s*/i, '');
+        processedPrompt = `animate this image with ${translatedPrompt}`;
+      }
+      
+      // Создаем заказ с префиксом fal: для использования fal.ai
+      const order = await this.orderService.createOrder(
+        user.id, 
+        s3Url, 
+        `fal:${processedPrompt}`
+      );
+      
+      await this.orderService.updateOrderStatus(order.id, 'processing' as any);
+      
+      // Очищаем состояние
+      this.animateV2State.delete(userId);
+      
+      // Отображаем промпт пользователю
+      const displayPrompt = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
+        ? 'дышит' 
+        : originalPrompt;
+      await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
+      
+      // Запускаем обработку заказа
+      const { ProcessorService } = await import('./processor');
+      const processorService = new ProcessorService();
+      await processorService.processOrder(order.id);
+      
+    } catch (error) {
+      console.error('Error processing animate v2 prompt:', error);
+      await this.sendMessage(ctx, '❌ Произошла ошибка при создании заказа. Попробуйте позже.');
+    }
   }
 
   private async createAnimateV2Order(ctx: Context, user: any, fileId: string): Promise<void> {
