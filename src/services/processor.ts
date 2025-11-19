@@ -178,13 +178,57 @@ export class ProcessorService {
     let lastProgressPercent: number | null = null;
 
     // Отправляем начальное сообщение с прогресс-баром сразу при старте
-    // Для animate_v2 не отправляем, так как оно уже отправлено в createAnimateV2Order
+    // Для animate_v2 прогресс-бар уже отправлен в createAnimateV2Order, нужно получить его message_id
     const sendInitialProgress = async () => {
       if (isAnimateV2) {
-        // Для animate_v2 сообщение уже отправлено, пропускаем
+        // Для animate_v2 пытаемся получить message_id из custom_prompt (где мы его сохранили)
+        try {
+          const orderData = await this.orderService.getOrder(orderId);
+          if (orderData?.custom_prompt) {
+            try {
+              const parsed = JSON.parse(orderData.custom_prompt);
+              if (parsed.progressMessageId) {
+                progressMessageId = parsed.progressMessageId;
+                // Восстанавливаем промпт пользователя из метаданных, если он там есть
+                if (parsed.prompt && orderData.custom_prompt !== parsed.prompt) {
+                  // Обновляем custom_prompt, оставляя только промпт (message_id больше не нужен после получения)
+                  const client = await (await import('../config/database')).default.connect();
+                  try {
+                    await client.query(
+                      `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
+                      [parsed.prompt || null, orderId]
+                    );
+                  } finally {
+                    client.release();
+                  }
+                }
+                return; // Прогресс-бар уже отправлен, просто используем его message_id
+              }
+            } catch (e) {
+              // custom_prompt не JSON, игнорируем
+            }
+          }
+        } catch (error) {
+          console.error('Error getting progress message_id from order:', error);
+        }
+        
+        // Если не удалось получить message_id, отправляем новое сообщение
+        const botToUse = broadcastBot || this.bot;
+        const progressBar = this.createProgressBar(0);
+        const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
+        
+        try {
+          const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
+          if (message && 'message_id' in message) {
+            progressMessageId = (message as any).message_id;
+          }
+        } catch (error) {
+          console.error('Error sending initial progress message for animate_v2:', error);
+        }
         return;
       }
       
+      // Для не-animate_v2 отправляем как обычно
       const botToUse = this.bot;
       const progressBar = this.createProgressBar(0);
       const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
@@ -199,7 +243,7 @@ export class ProcessorService {
       }
     };
 
-    // Отправляем начальное сообщение сразу (только для не-animate_v2)
+    // Отправляем начальное сообщение сразу
     await sendInitialProgress();
 
     // Фейковая имитация прогресса для лучшего UX
@@ -336,6 +380,8 @@ export class ProcessorService {
           if (lastProgressPercent !== displayProgress) {
             lastProgressPercent = displayProgress;
             const progressBar = this.createProgressBar(displayProgress);
+            
+            // Для animate_v2 и не-animate_v2 используем одинаковый формат (только прогресс-бар)
             const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
 
             // Для animate_v2 отправляем в broadcast-bot, иначе в основной бот
@@ -350,15 +396,14 @@ export class ProcessorService {
                   progressMessage
                 );
               } catch (error) {
-                // Если не удалось отредактировать (например, для animate_v2 первое сообщение),
-                // отправляем новое сообщение
+                // Если не удалось отредактировать, отправляем новое сообщение
                 const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
                 if (message && 'message_id' in message) {
                   progressMessageId = (message as any).message_id;
                 }
               }
             } else {
-              // Для animate_v2 отправляем новое сообщение с прогрессом (первое сообщение уже было отправлено в createAnimateV2Order)
+              // Если по какой-то причине progressMessageId не установлен, отправляем новое сообщение
               const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
               if (message && 'message_id' in message) {
                 progressMessageId = (message as any).message_id;

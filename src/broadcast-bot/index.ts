@@ -623,7 +623,10 @@ async function createAnimateV2Order(
     // Обновляем статус на processing для немедленной обработки
     await orderService.updateOrderStatus(order.id, 'processing' as any);
     
-    // Создаем прогресс-бар (0%)
+    // Отправляем сообщение о создании заказа (без прогресс-бара)
+    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...`);
+    
+    // Сразу отправляем прогресс-бар отдельным сообщением
     const createProgressBar = (percent: number): string => {
       const totalBlocks = 10;
       const filledBlocks = Math.round((percent / 100) * totalBlocks);
@@ -634,7 +637,34 @@ async function createAnimateV2Order(
     };
     
     const progressBar = createProgressBar(0);
-    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...\n\n🔄 Генерация видео...\n\n${progressBar} 0%`);
+    const progressMessage = await ctx.reply(`🔄 Генерация видео...\n\n${progressBar} 0%`);
+    
+    // Сохраняем message_id прогресс-бара в базе данных для последующего обновления
+    const progressMessageId = progressMessage && 'message_id' in progressMessage 
+      ? (progressMessage as any).message_id 
+      : null;
+    
+    if (progressMessageId) {
+      // Сохраняем message_id в метаданных заказа вместе с промптом пользователя
+      try {
+        const client = await (await import('../config/database')).default.connect();
+        try {
+          // Сохраняем и промпт, и message_id в JSON формате
+          const metadata = {
+            prompt: englishPrompt || null,
+            progressMessageId: progressMessageId
+          };
+          await client.query(
+            `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
+            [JSON.stringify(metadata), order.id]
+          );
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Error saving progress message_id:', error);
+      }
+    }
     
     // Запускаем обработку заказа
     try {
