@@ -177,6 +177,73 @@ export class ProcessorService {
     let hasNotifiedUser = false;
     let lastProgressPercent: number | null = null;
 
+    // Отправляем начальное сообщение с прогресс-баром сразу при старте
+    const sendInitialProgress = async () => {
+      const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+      const progressBar = this.createProgressBar(0);
+      const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
+      
+      try {
+        const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
+        if (message && 'message_id' in message) {
+          progressMessageId = (message as any).message_id;
+        }
+      } catch (error) {
+        console.error('Error sending initial progress message:', error);
+      }
+    };
+
+    // Отправляем начальное сообщение сразу
+    await sendInitialProgress();
+
+    // Проверяем, есть ли синхронные fal.ai запросы, которые уже готовы
+    const checkSyncJobs = async () => {
+      for (const generationId of generationIds) {
+        if (generationId.startsWith('fal_sync_')) {
+          try {
+            const jobStatus = await this.falService.checkJobStatus(generationId);
+            if (jobStatus.status === 'COMPLETED' && jobStatus.video?.url) {
+              // Синхронный запрос готов сразу - обновляем прогресс до 100% и отправляем результат
+              const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+              const progressBar = this.createProgressBar(100);
+              const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 100%`;
+              
+              if (progressMessageId) {
+                try {
+                  await botToUse.telegram.editMessageText(
+                    telegramId,
+                    progressMessageId,
+                    undefined,
+                    progressMessage
+                  );
+                } catch (error) {
+                  console.error('Error updating progress to 100%:', error);
+                }
+              }
+              
+              // Сразу отправляем результат
+              await this.handleMultipleJobsSuccess(
+                generationIds, 
+                telegramId, 
+                orderId, 
+                [{ url: jobStatus.video.url }]
+              );
+              return true; // Завершаем мониторинг
+            }
+          } catch (error) {
+            console.error(`Error checking sync job ${generationId}:`, error);
+          }
+        }
+      }
+      return false;
+    };
+
+    // Проверяем синхронные запросы сразу
+    const syncJobReady = await checkSyncJobs();
+    if (syncJobReady) {
+      return; // Завершаем мониторинг, результат уже отправлен
+    }
+
     const checkStatus = async () => {
       try {
         attempts++;
