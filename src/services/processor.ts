@@ -371,42 +371,38 @@ export class ProcessorService {
         const allFinished = completedCount + failedCount === generationIds.length;
 
         // Всегда показываем прогресс, пока фейковый прогресс < 100%
+        // Для animate_v2 не обновляем прогресс-бар здесь (управляется фейковым таймером в broadcast-bot)
         if (fakeProgress < 100 && attempts < maxAttempts) {
-          // Используем реальный прогресс, если есть, иначе фейковый
-          const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
-          const displayProgress = realProgress > 0 ? Math.max(realProgress, fakeProgress) : fakeProgress;
-          
-          // Обновляем сообщение только если процент изменился
-          if (lastProgressPercent !== displayProgress) {
-            lastProgressPercent = displayProgress;
-            const progressBar = this.createProgressBar(displayProgress);
+          if (!isAnimateV2) {
+            // Только для не-animate_v2 заказов обновляем прогресс
+            const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
+            const displayProgress = realProgress > 0 ? Math.max(realProgress, fakeProgress) : fakeProgress;
             
-            // Для animate_v2 и не-animate_v2 используем одинаковый формат (только прогресс-бар)
-            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
+            // Обновляем сообщение только если процент изменился
+            if (lastProgressPercent !== displayProgress) {
+              lastProgressPercent = displayProgress;
+              const progressBar = this.createProgressBar(displayProgress);
+              const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
 
-            // Для animate_v2 отправляем в broadcast-bot, иначе в основной бот
-            const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
-
-            if (progressMessageId) {
-              try {
-                await botToUse.telegram.editMessageText(
-                  telegramId,
-                  progressMessageId,
-                  undefined,
-                  progressMessage
-                );
-              } catch (error) {
-                // Если не удалось отредактировать, отправляем новое сообщение
-                const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
+              if (progressMessageId) {
+                try {
+                  await this.bot.telegram.editMessageText(
+                    telegramId,
+                    progressMessageId,
+                    undefined,
+                    progressMessage
+                  );
+                } catch (error) {
+                  const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+                  if (message && 'message_id' in message) {
+                    progressMessageId = (message as any).message_id;
+                  }
+                }
+              } else {
+                const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
                 if (message && 'message_id' in message) {
                   progressMessageId = (message as any).message_id;
                 }
-              }
-            } else {
-              // Если по какой-то причине progressMessageId не установлен, отправляем новое сообщение
-              const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
-              if (message && 'message_id' in message) {
-                progressMessageId = (message as any).message_id;
               }
             }
           }
