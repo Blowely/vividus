@@ -196,53 +196,11 @@ export class ProcessorService {
     // Отправляем начальное сообщение сразу
     await sendInitialProgress();
 
-    // Проверяем, есть ли синхронные fal.ai запросы, которые уже готовы
-    const checkSyncJobs = async () => {
-      for (const generationId of generationIds) {
-        if (generationId.startsWith('fal_sync_')) {
-          try {
-            const jobStatus = await this.falService.checkJobStatus(generationId);
-            if (jobStatus.status === 'COMPLETED' && jobStatus.video?.url) {
-              // Синхронный запрос готов сразу - обновляем прогресс до 100% и отправляем результат
-              const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
-              const progressBar = this.createProgressBar(100);
-              const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 100%`;
-              
-              if (progressMessageId) {
-                try {
-                  await botToUse.telegram.editMessageText(
-                    telegramId,
-                    progressMessageId,
-                    undefined,
-                    progressMessage
-                  );
-                } catch (error) {
-                  console.error('Error updating progress to 100%:', error);
-                }
-              }
-              
-              // Сразу отправляем результат
-              await this.handleMultipleJobsSuccess(
-                generationIds, 
-                telegramId, 
-                orderId, 
-                [{ url: jobStatus.video.url }]
-              );
-              return true; // Завершаем мониторинг
-            }
-          } catch (error) {
-            console.error(`Error checking sync job ${generationId}:`, error);
-          }
-        }
-      }
-      return false;
-    };
-
-    // Проверяем синхронные запросы сразу
-    const syncJobReady = await checkSyncJobs();
-    if (syncJobReady) {
-      return; // Завершаем мониторинг, результат уже отправлен
-    }
+    // Фейковая имитация прогресса для лучшего UX
+    let fakeProgress = 0;
+    const startTime = Date.now();
+    const fakeProgressDuration = 120000; // 2 минуты для плавного роста
+    let lastFakeProgressUpdate = 0;
 
     const checkStatus = async () => {
       try {
@@ -340,10 +298,68 @@ export class ProcessorService {
           }
         }
 
+        // Вычисляем фейковый прогресс для лучшего UX (всегда, независимо от статуса)
+        const elapsed = Date.now() - startTime;
+        
+        if (elapsed < fakeProgressDuration) {
+          // Первые 2 минуты - плавный рост от 0 до 70%
+          fakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
+        } else if (elapsed < fakeProgressDuration + 30000) {
+          // Следующие 30 секунд - рваный рост от 70% до 85%
+          const extraTime = elapsed - fakeProgressDuration;
+          fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
+        } else if (elapsed < fakeProgressDuration + 60000) {
+          // Следующие 30 секунд - медленный рост от 85% до 95%
+          const extraTime = elapsed - fakeProgressDuration - 30000;
+          fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+        } else {
+          // После 3 минут - резкое завершение до 100%
+          fakeProgress = 100;
+        }
+
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
         const allFinished = completedCount + failedCount === generationIds.length;
 
-        if (allFinished && !hasNotifiedUser) {
+        // Всегда показываем прогресс, пока фейковый прогресс < 100%
+        if (fakeProgress < 100 && attempts < maxAttempts) {
+          // Используем реальный прогресс, если есть, иначе фейковый
+          const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
+          const displayProgress = realProgress > 0 ? Math.max(realProgress, fakeProgress) : fakeProgress;
+          
+          // Обновляем сообщение только если процент изменился
+          if (lastProgressPercent !== displayProgress) {
+            lastProgressPercent = displayProgress;
+            const progressBar = this.createProgressBar(displayProgress);
+            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
+
+            // Для animate_v2 отправляем в broadcast-bot, иначе в основной бот
+            const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+
+            if (progressMessageId) {
+              try {
+                await botToUse.telegram.editMessageText(
+                  telegramId,
+                  progressMessageId,
+                  undefined,
+                  progressMessage
+                );
+              } catch (error) {
+                const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
+                if (message && 'message_id' in message) {
+                  progressMessageId = (message as any).message_id;
+                }
+              }
+            } else {
+              const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
+              if (message && 'message_id' in message) {
+                progressMessageId = (message as any).message_id;
+              }
+            }
+          }
+
+          setTimeout(checkStatus, 5000);
+        } else if (fakeProgress >= 100 && allFinished && !hasNotifiedUser) {
+          // Фейковый прогресс достиг 100% - отправляем результат
           hasNotifiedUser = true;
           
           // Собираем все успешные результаты
@@ -381,42 +397,6 @@ export class ProcessorService {
             }
             await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
-        } else if (!allFinished && attempts < maxAttempts) {
-          // Обновляем прогресс
-          const avgProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
-          
-          // Обновляем сообщение только если процент изменился
-          if (lastProgressPercent !== avgProgress) {
-            lastProgressPercent = avgProgress;
-            const progressBar = this.createProgressBar(avgProgress);
-            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${avgProgress}%`;
-
-            // Для animate_v2 отправляем в broadcast-bot, иначе в основной бот
-            const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
-
-            if (progressMessageId) {
-              try {
-                await botToUse.telegram.editMessageText(
-                  telegramId,
-                  progressMessageId,
-                  undefined,
-                  progressMessage
-                );
-              } catch (error) {
-                const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
-                if (message && 'message_id' in message) {
-                  progressMessageId = (message as any).message_id;
-                }
-              }
-            } else {
-              const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
-              if (message && 'message_id' in message) {
-                progressMessageId = (message as any).message_id;
-              }
-            }
-          }
-
-          setTimeout(checkStatus, 5000);
         } else if (attempts >= maxAttempts && !hasNotifiedUser) {
           hasNotifiedUser = true;
           // Таймаут - отправляем то, что готово
