@@ -350,7 +350,7 @@ export class ProcessorService {
         const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
         if (message && 'message_id' in message) {
           progressMessageId = (message as any).message_id;
-          console.log(`📊 Отправлено начальное сообщение с прогресс-баром. message_id: ${progressMessageId}`);
+          console.log(`📊 Отправлено начальное сообщение с прогресс-баром1 message_id: ${progressMessageId}`);
         }
       } catch (error) {
         console.error('Error sending initial progress message:', error);
