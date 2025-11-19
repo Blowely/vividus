@@ -555,6 +555,14 @@ export class ProcessorService {
               const completedJob = realFalJobs.find(job => job.status === 'completed' && job.result_url);
               
               if (completedJob && completedJob.result_url) {
+                // Проверяем, не отправлен ли уже результат (защита от дублирования)
+                const orderData = await this.orderService.getOrder(orderId);
+                if (orderData?.status === 'completed') {
+                  console.log(`⚠️ Заказ уже завершен, пропускаю отправку из интервала`);
+                  clearInterval(fakeProgressInterval);
+                  return;
+                }
+                
                 console.log(`🎬 Видео готово! Останавливаю фейковый прогресс и отправляю результат...`);
                 clearInterval(fakeProgressInterval);
                 
@@ -573,7 +581,7 @@ export class ProcessorService {
                   }
                 }
                 
-                // Отправляем видео сразу
+                // Отправляем видео сразу (только если заказ еще не завершен)
                 await this.handleMultipleJobsSuccess(
                   [completedJob.did_job_id],
                   telegramId,
@@ -732,6 +740,14 @@ export class ProcessorService {
 
         // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
+          // Дополнительная проверка: убеждаемся, что заказ еще не завершен (защита от дублирования)
+          const currentOrder = await this.orderService.getOrder(orderId);
+          if (currentOrder?.status === 'completed') {
+            console.log(`⚠️ Заказ ${orderId} уже завершен, пропускаю отправку из основного цикла`);
+            hasNotifiedUser = true;
+            return;
+          }
+          
           const orderType = isAnimateV2 ? 'animate_v2' : 'fal.ai';
           console.log(`✅ ${orderType} заказ ${orderId} завершен. Отправляю результат...`);
           console.log(`   completedCount: ${completedCount}, failedCount: ${failedCount}, allFinished: ${allFinished}`);
@@ -1068,6 +1084,12 @@ export class ProcessorService {
       // Получаем заказ для проверки способа оплаты
       const order = await this.orderService.getOrder(orderId);
       console.log(`   order found: ${order ? 'да' : 'нет'}, order_type: ${order?.order_type}, current status: ${order?.status}`);
+      
+      // Защита от дублирования: если заказ уже завершен, не отправляем снова
+      if (order?.status === 'completed') {
+        console.log(`⚠️ Заказ ${orderId} уже завершен, пропускаю отправку результата (защита от дублирования)`);
+        return;
+      }
       
       // Update order status
       console.log(`   Обновляю статус заказа ${orderId} на 'completed'...`);
