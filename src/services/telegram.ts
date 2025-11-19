@@ -749,6 +749,8 @@ export class TelegramService {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       const text = (ctx.message as any).text;
       
+      console.log(`📝 handleText: пользователь ${ctx.from!.id}, текст: "${text}"`);
+      
       // Проверяем, ожидает ли пользователь ввода email
       if (this.waitingForEmail.has(ctx.from!.id)) {
         await this.processEmailInput(ctx, text);

@@ -350,8 +350,8 @@ export class ProcessorService {
               totalProgress += jobStatus.progress;
             } else {
               // Для fal.ai без прогресса симулируем прогресс на основе времени
-              // Примерно 2-3 минуты на генерацию
-              const estimatedProgress = Math.min(95, Math.round((attempts / 30) * 100));
+              // Примерно 2-3 минуты на генерацию (используем десятичный формат 0-1, как RunwayML)
+              const estimatedProgress = Math.min(0.95, (attempts / 30));
               totalProgress += estimatedProgress;
             }
           }
