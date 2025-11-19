@@ -997,6 +997,56 @@ export class ProcessorService {
       const { Telegraf } = await import('telegraf');
       const broadcastBot = new Telegraf(broadcastBotToken);
 
+      // Получаем progressMessageId из заказа
+      let progressMessageId: number | null = null;
+      try {
+        // Находим заказ по telegramId
+        const client = await (await import('../config/database')).default.connect();
+        let orderId: string | null = null;
+        try {
+          const result = await client.query(
+            `SELECT o.id, o.custom_prompt FROM orders o 
+             JOIN users u ON o.user_id = u.id 
+             WHERE u.telegram_id = $1 AND o.order_type = 'animate_v2' 
+             ORDER BY o.created_at DESC LIMIT 1`,
+            [telegramId]
+          );
+          if (result.rows[0]) {
+            orderId = result.rows[0].id;
+            const customPrompt = result.rows[0].custom_prompt;
+            if (customPrompt) {
+              try {
+                const parsed = JSON.parse(customPrompt);
+                if (parsed.progressMessageId) {
+                  progressMessageId = parsed.progressMessageId;
+                }
+              } catch (e) {
+                // Игнорируем, если не JSON
+              }
+            }
+          }
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Error getting progressMessageId:', error);
+      }
+
+      // Обновляем прогресс-бар до 100%
+      if (progressMessageId) {
+        try {
+          const progressBar = this.createProgressBar(100);
+          await broadcastBot.telegram.editMessageText(
+            telegramId,
+            progressMessageId,
+            undefined,
+            `🔄 Генерация видео...\n\n${progressBar} 100%`
+          );
+        } catch (error) {
+          console.error('Error updating progress to 100%:', error);
+        }
+      }
+
       // Отправляем уведомление о готовности
       await broadcastBot.telegram.sendMessage(telegramId, '✅ Ваше видео готово! Отправляю...');
 
@@ -1005,14 +1055,15 @@ export class ProcessorService {
         if (video.url) {
           try {
             await broadcastBot.telegram.sendVideo(telegramId, video.url, {
-              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}`
+              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}\n\n<a href="${video.url}">ссылка</a>`,
+              parse_mode: 'HTML'
             });
           } catch (error) {
             console.error(`Error sending video to broadcast-bot:`, error);
             // Если не удалось отправить видео, отправляем ссылку
             await broadcastBot.telegram.sendMessage(
               telegramId,
-              `📹 Видео: <a href="${video.url}">Скачать</a>`,
+              `📹 Видео: <a href="${video.url}">ссылка</a>`,
               { parse_mode: 'HTML' }
             );
           }
