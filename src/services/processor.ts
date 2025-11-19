@@ -374,6 +374,21 @@ export class ProcessorService {
         if (isAnimateV2 && allFinished && !hasNotifiedUser) {
           hasNotifiedUser = true;
           
+          // Обновляем прогресс-бар до 100% перед отправкой результата
+          if (progressMessageId && broadcastBot) {
+            try {
+              const progressBar = this.createProgressBar(100);
+              await broadcastBot.telegram.editMessageText(
+                telegramId,
+                progressMessageId,
+                undefined,
+                `🔄 Генерация видео...\n\n${progressBar} 100%`
+              );
+            } catch (error) {
+              console.error('Error updating progress to 100%:', error);
+            }
+          }
+          
           // Собираем все успешные результаты
           const successfulVideos: Array<{ url: string; model?: string }> = [];
           for (const generationId of generationIds) {
@@ -1096,7 +1111,7 @@ export class ProcessorService {
         if (video.url) {
           try {
             await broadcastBot.telegram.sendVideo(telegramId, video.url, {
-              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}\n\n<a href="${video.url}">ссылка</a>`,
+              caption: `🎬 Видео готово!${video.model ? `\nМодель: ${video.model}` : ''}\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
               parse_mode: 'HTML'
             });
           } catch (error) {
@@ -1104,7 +1119,7 @@ export class ProcessorService {
             // Если не удалось отправить видео, отправляем ссылку
             await broadcastBot.telegram.sendMessage(
               telegramId,
-              `📹 Видео: <a href="${video.url}">ссылка</a>`,
+              `📹 Результат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
               { parse_mode: 'HTML' }
             );
           }
