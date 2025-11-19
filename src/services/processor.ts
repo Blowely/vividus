@@ -178,8 +178,14 @@ export class ProcessorService {
     let lastProgressPercent: number | null = null;
 
     // Отправляем начальное сообщение с прогресс-баром сразу при старте
+    // Для animate_v2 не отправляем, так как оно уже отправлено в createAnimateV2Order
     const sendInitialProgress = async () => {
-      const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+      if (isAnimateV2) {
+        // Для animate_v2 сообщение уже отправлено, пропускаем
+        return;
+      }
+      
+      const botToUse = this.bot;
       const progressBar = this.createProgressBar(0);
       const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
       
@@ -193,7 +199,7 @@ export class ProcessorService {
       }
     };
 
-    // Отправляем начальное сообщение сразу
+    // Отправляем начальное сообщение сразу (только для не-animate_v2)
     await sendInitialProgress();
 
     // Фейковая имитация прогресса для лучшего UX
@@ -344,12 +350,15 @@ export class ProcessorService {
                   progressMessage
                 );
               } catch (error) {
+                // Если не удалось отредактировать (например, для animate_v2 первое сообщение),
+                // отправляем новое сообщение
                 const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
                 if (message && 'message_id' in message) {
                   progressMessageId = (message as any).message_id;
                 }
               }
             } else {
+              // Для animate_v2 отправляем новое сообщение с прогрессом (первое сообщение уже было отправлено в createAnimateV2Order)
               const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
               if (message && 'message_id' in message) {
                 progressMessageId = (message as any).message_id;

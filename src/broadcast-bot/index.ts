@@ -623,7 +623,18 @@ async function createAnimateV2Order(
     // Обновляем статус на processing для немедленной обработки
     await orderService.updateOrderStatus(order.id, 'processing' as any);
     
-    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...`);
+    // Создаем прогресс-бар (0%)
+    const createProgressBar = (percent: number): string => {
+      const totalBlocks = 10;
+      const filledBlocks = Math.round((percent / 100) * totalBlocks);
+      const emptyBlocks = totalBlocks - filledBlocks;
+      const filled = '█'.repeat(filledBlocks);
+      const empty = '░'.repeat(emptyBlocks);
+      return `[${filled}${empty}]`;
+    };
+    
+    const progressBar = createProgressBar(0);
+    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...\n\n🔄 Генерация видео...\n\n${progressBar} 0%`);
     
     // Запускаем обработку заказа
     try {
