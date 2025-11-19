@@ -363,8 +363,10 @@ export class TelegramService {
       }
       
       // Проверяем, находимся ли мы в режиме "Оживить v2"
+      console.log(`📸 Обработка фото от пользователя ${user.telegram_id} (ctx.from.id: ${ctx.from!.id})`);
+      console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()));
       const animateV2State = this.animateV2State.get(user.telegram_id);
-      console.log(`📸 Обработка фото от пользователя ${user.telegram_id}, animateV2State:`, animateV2State);
+      console.log(`   animateV2State для ${user.telegram_id}:`, animateV2State);
       if (animateV2State && animateV2State.waitingForPhoto) {
         console.log(`✅ Режим Оживить v2 активен для пользователя ${user.telegram_id}`);
         // Сохраняем fileId и запрашиваем промпт
