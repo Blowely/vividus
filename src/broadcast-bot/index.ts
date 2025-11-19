@@ -617,7 +617,23 @@ async function createAnimateV2Order(
     // Очищаем состояние
     animateV2State.delete(ctx.from!.id);
     
-    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\nЗаказ будет обработан автоматически.`);
+    // Обновляем статус на processing для немедленной обработки
+    await orderService.updateOrderStatus(order.id, 'processing' as any);
+    
+    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...`);
+    
+    // Запускаем обработку заказа
+    try {
+      const { ProcessorService } = await import('../services/processor');
+      const processorService = new ProcessorService();
+      // Запускаем асинхронно, чтобы не блокировать ответ
+      processorService.processOrder(order.id).catch((processError) => {
+        console.error('Error processing order:', processError);
+      });
+    } catch (processError) {
+      console.error('Error starting order processing:', processError);
+      await ctx.reply('⚠️ Заказ создан, но произошла ошибка при запуске обработки. Заказ будет обработан автоматически позже.');
+    }
     
   } catch (error) {
     console.error('Error creating animate v2 order:', error);
