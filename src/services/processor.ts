@@ -246,7 +246,8 @@ export class ProcessorService {
     // Отправляем начальное сообщение сразу
     await sendInitialProgress();
 
-    // Фейковая имитация прогресса для лучшего UX
+    // Фейковая имитация прогресса только для animate_v2 (broadcast-bot управляет сам)
+    // Для основного бота используем только реальный прогресс от RunwayML
     let fakeProgress = 0;
     const startTime = Date.now();
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
@@ -348,23 +349,29 @@ export class ProcessorService {
           }
         }
 
-        // Вычисляем фейковый прогресс для лучшего UX (всегда, независимо от статуса)
-        const elapsed = Date.now() - startTime;
-        
-        if (elapsed < fakeProgressDuration) {
-          // Первые 2 минуты - плавный рост от 0 до 70%
-          fakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
-        } else if (elapsed < fakeProgressDuration + 30000) {
-          // Следующие 30 секунд - рваный рост от 70% до 85%
-          const extraTime = elapsed - fakeProgressDuration;
-          fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
-        } else if (elapsed < fakeProgressDuration + 60000) {
-          // Следующие 30 секунд - медленный рост от 85% до 95%
-          const extraTime = elapsed - fakeProgressDuration - 30000;
-          fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+        // Вычисляем фейковый прогресс только для animate_v2
+        // Для основного бота не используем фейковый прогресс
+        if (isAnimateV2) {
+          const elapsed = Date.now() - startTime;
+          
+          if (elapsed < fakeProgressDuration) {
+            // Первые 2 минуты - плавный рост от 0 до 70%
+            fakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
+          } else if (elapsed < fakeProgressDuration + 30000) {
+            // Следующие 30 секунд - рваный рост от 70% до 85%
+            const extraTime = elapsed - fakeProgressDuration;
+            fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
+          } else if (elapsed < fakeProgressDuration + 60000) {
+            // Следующие 30 секунд - медленный рост от 85% до 95%
+            const extraTime = elapsed - fakeProgressDuration - 30000;
+            fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+          } else {
+            // После 3 минут - резкое завершение до 100%
+            fakeProgress = 100;
+          }
         } else {
-          // После 3 минут - резкое завершение до 100%
-          fakeProgress = 100;
+          // Для основного бота fakeProgress остается 0, используем только реальный прогресс
+          fakeProgress = 0;
         }
 
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
@@ -431,13 +438,13 @@ export class ProcessorService {
           return; // Завершаем мониторинг
         }
 
-        // Всегда показываем прогресс, пока фейковый прогресс < 100%
+        // Для основного бота показываем прогресс, пока джобы не завершены
         // Для animate_v2 не обновляем прогресс-бар здесь (управляется фейковым таймером в broadcast-bot)
-        if (fakeProgress < 100 && attempts < maxAttempts) {
+        if (!allFinished && attempts < maxAttempts) {
           if (!isAnimateV2) {
-            // Только для не-animate_v2 заказов обновляем прогресс
+            // Только для не-animate_v2 заказов обновляем прогресс (используем ТОЛЬКО реальный прогресс от RunwayML)
             const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
-            const displayProgress = realProgress > 0 ? Math.max(realProgress, fakeProgress) : fakeProgress;
+            const displayProgress = realProgress;
             
             // Обновляем сообщение только если процент изменился
             if (lastProgressPercent !== displayProgress) {
@@ -469,8 +476,8 @@ export class ProcessorService {
           }
 
           setTimeout(checkStatus, 5000);
-        } else if (fakeProgress >= 100 && allFinished && !hasNotifiedUser) {
-          // Фейковый прогресс достиг 100% - отправляем результат
+        } else if (!isAnimateV2 && allFinished && !hasNotifiedUser) {
+          // Для основного бота: все джобы завершены - отправляем результат
           hasNotifiedUser = true;
           
           // Собираем все успешные результаты
