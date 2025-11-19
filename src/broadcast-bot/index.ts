@@ -598,8 +598,11 @@ async function createAnimateV2Order(
     // Получаем или создаем пользователя (админа)
     const user = await userService.getOrCreateUser(ctx.from!);
     
-    // Загружаем фото в S3
-    const s3Url = await fileService.downloadTelegramFileToS3(photoFileId);
+    // Получаем ссылку на файл через broadcast-bot (используем правильный токен)
+    const fileLink = await bot.telegram.getFileLink(photoFileId);
+    
+    // Загружаем фото в S3 через URL
+    const s3Url = await fileService.downloadFileFromUrlAndUploadToS3(fileLink.toString());
     
     // Переводим промпт на английский, если нужно
     let englishPrompt = prompt;

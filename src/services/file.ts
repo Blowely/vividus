@@ -242,6 +242,43 @@ export class FileService {
     }
   }
 
+  async downloadFileFromUrlAndUploadToS3(url: string): Promise<string> {
+    try {
+      // Download file directly to memory
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer'
+      });
+      
+      // Check file size
+      if (response.data.byteLength > this.maxFileSize) {
+        throw new Error(`File too large: ${response.data.byteLength} bytes (max: ${this.maxFileSize})`);
+      }
+      
+      // Convert to Buffer
+      let buffer = Buffer.from(response.data);
+      
+      // Обрабатываем изображение для соответствия требованиям Runway API
+      buffer = await this.processImageForRunway(buffer);
+      
+      // Generate unique filename
+      const timestamp = Date.now();
+      const extension = '.jpg'; // Всегда сохраняем как JPEG после обработки
+      const filename = `${timestamp}_${Date.now()}${extension}`;
+      
+      // Determine content type (всегда JPEG после обработки)
+      const contentType = 'image/jpeg';
+      
+      // Upload to S3 directly from memory
+      const s3Url = await this.s3Service.uploadFile(buffer, filename, contentType);
+      
+      return s3Url;
+      
+    } catch (error) {
+      console.error('Error downloading file from URL and uploading to S3:', error);
+      throw new Error('Failed to download and upload file');
+    }
+  }
+
   async uploadToS3(filePath: string): Promise<string> {
     try {
       const filename = path.basename(filePath);
