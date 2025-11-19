@@ -88,6 +88,32 @@ export class ProcessorService {
         } else if (order.custom_prompt && order.custom_prompt.startsWith('fal:')) {
           // Заказ с префиксом fal: - используем fal.ai для основного бота
           console.log(`   → Обработка с fal.ai (основной бот)`);
+          
+          // Отправляем прогресс-бар СРАЗУ, до вызова API (чтобы пользователь видел его сразу)
+          try {
+            const progressBar = this.createProgressBar(0);
+            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
+            const message = await this.bot.telegram.sendMessage(user.telegram_id, progressMessage);
+            if (message && 'message_id' in message) {
+              // Сохраняем message_id в заказе для последующего обновления
+              const progressMessageId = (message as any).message_id;
+              console.log(`📊 Отправлено начальное сообщение с прогресс-баром для fal.ai ДО вызова API. message_id: ${progressMessageId}`);
+              
+              // Сохраняем progressMessageId в custom_prompt (временно, для мониторинга)
+              const client = await (await import('../config/database')).default.connect();
+              try {
+                await client.query(
+                  `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
+                  [`${order.custom_prompt}|progressMessageId:${progressMessageId}`, orderId]
+                );
+              } finally {
+                client.release();
+              }
+            }
+          } catch (error) {
+            console.error('Error sending initial progress message before fal.ai call:', error);
+          }
+          
           const cleanPrompt = order.custom_prompt.replace(/^fal:/, '');
           const requestId = await this.falService.createVideoFromImage(
             order.original_file_path,
@@ -152,17 +178,18 @@ export class ProcessorService {
       const allJobs = [...runwayJobs, ...falJobs];
       
       if (allJobs.length > 0) {
-        console.log(`⚠️ Ошибка при обработке заказа, но найдено ${allJobs.length} джобов. Продолжаю мониторинг...`);
+        console.log(`⚠️ Ошибка при обработке заказа (возможно таймаут), но найдено ${allJobs.length} джобов в БД. Продолжаю мониторинг без показа ошибки пользователю...`);
         const generationIds = allJobs.map(job => job.did_job_id);
         await this.orderService.updateOrderResult(orderId, generationIds[0]);
         const order = await this.orderService.getOrder(orderId);
         if (order) {
           const user = await this.userService.getUserById(order.user_id);
           if (user) {
+            // НЕ обновляем статус на failed, продолжаем мониторинг
             this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
           }
         }
-        return; // Не показываем ошибку, если джобы найдены
+        return; // Не показываем ошибку и не обновляем статус на failed, если джобы найдены
       }
       
       // Update order status to failed
@@ -269,8 +296,36 @@ export class ProcessorService {
         return;
       }
       
-      // Для fal.ai заказов в основном боте отправляем прогресс-бар сразу
+      // Для fal.ai заказов в основном боте пытаемся получить progressMessageId из custom_prompt
       if (isFalOrder) {
+        try {
+          const orderData = await this.orderService.getOrder(orderId);
+          if (orderData?.custom_prompt) {
+            // Проверяем формат: fal:prompt|progressMessageId:123
+            const progressMatch = orderData.custom_prompt.match(/progressMessageId:(\d+)/);
+            if (progressMatch) {
+              progressMessageId = parseInt(progressMatch[1], 10);
+              console.log(`📊 Получен progressMessageId из заказа для fal.ai: ${progressMessageId}`);
+              
+              // Обновляем custom_prompt, убирая progressMessageId (он больше не нужен)
+              const cleanPrompt = orderData.custom_prompt.replace(/\|progressMessageId:\d+/, '');
+              const client = await (await import('../config/database')).default.connect();
+              try {
+                await client.query(
+                  `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
+                  [cleanPrompt, orderId]
+                );
+              } finally {
+                client.release();
+              }
+              return; // Прогресс-бар уже отправлен, просто используем его message_id
+            }
+          }
+        } catch (error) {
+          console.error('Error getting progress message_id from fal.ai order:', error);
+        }
+        
+        // Если не удалось получить message_id, отправляем новое сообщение
         const progressBar = this.createProgressBar(0);
         const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
         
