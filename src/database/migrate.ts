@@ -24,10 +24,10 @@ async function runMigrations() {
     for (const migrationFile of migrationFiles) {
       console.log(`\n📄 Applying ${migrationFile}...`);
       const migrationPath = join(migrationsDir, migrationFile);
-      const migrationSQL = readFileSync(migrationPath, 'utf8');
-      
+    const migrationSQL = readFileSync(migrationPath, 'utf8');
+    
       try {
-        await client.query(migrationSQL);
+    await client.query(migrationSQL);
         console.log(`✅ ${migrationFile} applied successfully!`);
       } catch (error: any) {
         // If error is about "already exists" or "IF NOT EXISTS", it's safe to continue

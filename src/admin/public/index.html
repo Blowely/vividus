@@ -2658,56 +2658,56 @@
                 
                 <div id="campaigns-active-content">
                     <h2 style="margin-bottom: 20px;">📈 Аналитика по кампаниям</h2>
-                    ${campaigns.length > 0 ? `
-                        <div class="table-wrapper">
-                            <table>
-                                <thead>
+                ${campaigns.length > 0 ? `
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Кампания</th>
+                                    <th>Пользователи</th>
+                                    <th>Выручка (₽)</th>
+                                    <th>Выручка (⭐)</th>
+                                    <th>Заказы</th>
+                                    <th>Конверсия (%)</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${campaigns.map(c => {
+                                    const campaignName = c.campaign_name || '';
+                                    const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                    return `
                                     <tr>
-                                        <th>Кампания</th>
-                                        <th>Пользователи</th>
-                                        <th>Выручка (₽)</th>
-                                        <th>Выручка (⭐)</th>
-                                        <th>Заказы</th>
-                                        <th>Конверсия (%)</th>
-                                        <th>Действия</th>
+                                        <td>${campaignName || 'Без кампании'}</td>
+                                        <td>${c.total_users || 0}</td>
+                                        <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
+                                        <td>${c.total_payments_stars || 0}</td>
+                                        <td>${c.completed_orders || 0}</td>
+                                        <td>${parseFloat(c.conversion_rate || 0).toFixed(2)}%</td>
+                                        <td class="actions">
+                                            ${campaignName && campaignName !== 'Без кампании' ? `
+                                                <button class="btn btn-danger btn-sm" onclick="resetCampaignStats('${safeCampaignName}')" style="margin-right: 5px;">🔄 Сбросить</button>
+                                                <button class="btn btn-danger btn-sm" onclick="deleteCampaign('${safeCampaignName}')">🗑️ Удалить</button>
+                                            ` : '<span style="color: #999;">-</span>'}
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    ${campaigns.map(c => {
-                                        const campaignName = c.campaign_name || '';
-                                        const safeCampaignName = campaignName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                                        return `
-                                        <tr>
-                                            <td>${campaignName || 'Без кампании'}</td>
-                                            <td>${c.total_users || 0}</td>
-                                            <td>${parseFloat(c.total_payments_rub || 0).toFixed(2)}</td>
-                                            <td>${c.total_payments_stars || 0}</td>
-                                            <td>${c.completed_orders || 0}</td>
-                                            <td>${parseFloat(c.conversion_rate || 0).toFixed(2)}%</td>
-                                            <td class="actions">
-                                                ${campaignName && campaignName !== 'Без кампании' ? `
-                                                    <button class="btn btn-danger btn-sm" onclick="resetCampaignStats('${safeCampaignName}')" style="margin-right: 5px;">🔄 Сбросить</button>
-                                                    <button class="btn btn-danger btn-sm" onclick="deleteCampaign('${safeCampaignName}')">🗑️ Удалить</button>
-                                                ` : '<span style="color: #999;">-</span>'}
-                                            </td>
-                                        </tr>
-                                    `;
-                                    }).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        ${campaigns.length > 0 ? `
-                            <div style="margin-top: 40px;">
-                                <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                    <h3 style="margin-bottom: 15px; font-size: 16px;">Выручка по кампаниям</h3>
-                                    <div style="position: relative; height: 350px;">
-                                        <canvas id="campaignsChart"></canvas>
-                                    </div>
+                                `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    ${campaigns.length > 0 ? `
+                        <div style="margin-top: 40px;">
+                            <div class="analytics-chart-container" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                <h3 style="margin-bottom: 15px; font-size: 16px;">Выручка по кампаниям</h3>
+                                <div style="position: relative; height: 350px;">
+                                    <canvas id="campaignsChart"></canvas>
                                 </div>
                             </div>
-                        ` : ''}
-                    ` : '<p style="color: #999;">Данных по кампаниям нет</p>'}
+                        </div>
+                    ` : ''}
+                ` : '<p style="color: #999;">Данных по кампаниям нет</p>'}
                 </div>
                 
                 <div id="campaigns-deleted-content" style="display: none;">

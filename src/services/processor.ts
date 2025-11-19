@@ -76,12 +76,23 @@ export class ProcessorService {
           await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
           return; // Exit early, processing continues in processCombineAndAnimateOrder
         } else if (order.order_type === 'animate_v2') {
-          // Animate v2 order - используем fal.ai
-          console.log(`   → Обработка как animate_v2 (fal.ai)`);
+          // Animate v2 order - используем fal.ai (для broadcast-bot)
+          console.log(`   → Обработка как animate_v2 (fal.ai для broadcast-bot)`);
           const requestId = await this.falService.createVideoFromImage(
             order.original_file_path,
             orderId,
             order.custom_prompt
+          );
+          generationIds = [requestId];
+          console.log(`   ✅ Создан fal.ai запрос: ${requestId}`);
+        } else if (order.custom_prompt && order.custom_prompt.startsWith('fal:')) {
+          // Заказ с префиксом fal: - используем fal.ai для основного бота
+          console.log(`   → Обработка с fal.ai (основной бот)`);
+          const cleanPrompt = order.custom_prompt.replace(/^fal:/, '');
+          const requestId = await this.falService.createVideoFromImage(
+            order.original_file_path,
+            orderId,
+            cleanPrompt
           );
           generationIds = [requestId];
           console.log(`   ✅ Создан fal.ai запрос: ${requestId}`);
@@ -342,7 +353,7 @@ export class ProcessorService {
             if (isFalJob) {
               await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
             } else {
-              await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+            await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
             }
           } else {
             processingCount++;
@@ -455,28 +466,28 @@ export class ProcessorService {
             const displayProgress = realProgress;
             
             console.log(`📊 Попытка ${attempts}: processingCount=${processingCount}, realProgress=${realProgress}%, lastProgress=${lastProgressPercent}%, progressMessageId=${progressMessageId}`);
-            
-            // Обновляем сообщение только если процент изменился
+          
+          // Обновляем сообщение только если процент изменился
             if (lastProgressPercent !== displayProgress) {
               console.log(`   Обновляю прогресс с ${lastProgressPercent}% на ${displayProgress}%`);
               lastProgressPercent = displayProgress;
               const progressBar = this.createProgressBar(displayProgress);
               const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
 
-              if (progressMessageId) {
-                try {
-                  await this.bot.telegram.editMessageText(
-                    telegramId,
-                    progressMessageId,
-                    undefined,
-                    progressMessage
-                  );
+            if (progressMessageId) {
+              try {
+                await this.bot.telegram.editMessageText(
+                  telegramId,
+                  progressMessageId,
+                  undefined,
+                  progressMessage
+                );
                   console.log(`   ✅ Прогресс обновлен до ${displayProgress}%`);
                 } catch (error: any) {
                   console.error(`   ❌ Ошибка редактирования сообщения:`, error?.message);
                   // Если не удалось отредактировать, НЕ отправляем новое сообщение (избегаем дублирования)
-                }
-              } else {
+              }
+            } else {
                 console.log(`   ⚠️ progressMessageId не установлен, пропускаю обновление`);
               }
             }

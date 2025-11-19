@@ -1295,9 +1295,14 @@ export class TelegramService {
       // Загружаем фото в S3
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
       
-      // Создаем заказ типа animate_v2 с базовым промптом "дышит"
-      const order = await this.orderService.createAnimateV2Order(user.id, s3Url, 'animate this image with subtle movements and breathing effect');
-      console.log(`📝 Создан заказ animate_v2: ${order.id}, order_type: ${order.order_type}`);
+      // Создаем обычный заказ (single), но сохраняем в custom_prompt маркер для fal.ai
+      // Используем префикс "fal:" чтобы ProcessorService использовал fal.ai вместо RunwayML
+      const order = await this.orderService.createOrder(
+        user.id, 
+        s3Url, 
+        'fal:animate this image with subtle movements and breathing effect'
+      );
+      console.log(`📝 Создан заказ для fal.ai: ${order.id}, order_type: ${order.order_type}`);
       
       await this.orderService.updateOrderStatus(order.id, 'processing' as any);
       
