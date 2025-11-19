@@ -158,6 +158,18 @@ export class ProcessorService {
 
   private async monitorMultipleJobs(generationIds: string[], telegramId: number, orderId: string): Promise<void> {
     console.log(`🔍 Мониторинг ${generationIds.length} джобов для заказа ${orderId}:`, generationIds);
+    
+    // Определяем, является ли заказ animate_v2 (для отправки в broadcast-bot)
+    const order = await this.orderService.getOrder(orderId);
+    const isAnimateV2 = order?.order_type === 'animate_v2';
+    const broadcastBotToken = isAnimateV2 ? process.env.BROADCAST_BOT_TOKEN : null;
+    let broadcastBot: Telegraf | null = null;
+    
+    if (isAnimateV2 && broadcastBotToken) {
+      const { Telegraf } = await import('telegraf');
+      broadcastBot = new Telegraf(broadcastBotToken);
+    }
+    
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     const jobStatuses: Map<string, { status?: string; videoUrl?: string; error?: string }> = new Map();
     let attempts = 0;
@@ -195,6 +207,18 @@ export class ProcessorService {
           if (!jobStatus) continue;
 
           const status = jobStatus.status;
+          
+          // Для синхронных fal.ai запросов (fal_sync_) сразу помечаем как завершенные
+          if (generationId.startsWith('fal_sync_') && status === 'COMPLETED') {
+            completedCount++;
+            const videoUrl = jobStatus.output?.[0] || jobStatus.video?.url;
+            jobStatuses.set(generationId, {
+              status: 'COMPLETED',
+              videoUrl,
+              error: undefined
+            });
+            continue;
+          }
           
           // Формируем полное сообщение об ошибке с failureCode, если есть
           let errorMessage: string | undefined;
@@ -240,6 +264,11 @@ export class ProcessorService {
             processingCount++;
             if (jobStatus.progress !== undefined) {
               totalProgress += jobStatus.progress;
+            } else {
+              // Для fal.ai без прогресса симулируем прогресс на основе времени
+              // Примерно 2-3 минуты на генерацию
+              const estimatedProgress = Math.min(95, Math.round((attempts / 30) * 100));
+              totalProgress += estimatedProgress;
             }
           }
         }
@@ -295,22 +324,25 @@ export class ProcessorService {
             const progressBar = this.createProgressBar(avgProgress);
             const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${avgProgress}%`;
 
+            // Для animate_v2 отправляем в broadcast-bot, иначе в основной бот
+            const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+
             if (progressMessageId) {
               try {
-                await this.bot.telegram.editMessageText(
+                await botToUse.telegram.editMessageText(
                   telegramId,
                   progressMessageId,
                   undefined,
                   progressMessage
                 );
               } catch (error) {
-                const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+                const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
                 if (message && 'message_id' in message) {
                   progressMessageId = (message as any).message_id;
                 }
               }
             } else {
-              const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+              const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
               if (message && 'message_id' in message) {
                 progressMessageId = (message as any).message_id;
               }
