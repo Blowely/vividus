@@ -149,13 +149,22 @@ export class ProcessorService {
           // Создаем временный джоб в БД, чтобы мониторинг мог его найти
           const client = await (await import('../config/database')).default.connect();
           try {
-            await client.query(
-              `INSERT INTO did_jobs (order_id, did_job_id, status, model) 
-               VALUES ($1, $2, $3, $4) 
-               ON CONFLICT (did_job_id) DO NOTHING`,
-              [orderId, tempGenerationId, 'pending', 'hailuo-2.3-fast']
+            // Проверяем, не существует ли уже такой джоб
+            const checkResult = await client.query(
+              `SELECT did_job_id FROM did_jobs WHERE did_job_id = $1`,
+              [tempGenerationId]
             );
-            console.log(`   ✅ Создан временный джоб в БД: ${tempGenerationId}`);
+            
+            if (checkResult.rows.length === 0) {
+              await client.query(
+                `INSERT INTO did_jobs (order_id, did_job_id, status, model) 
+                 VALUES ($1, $2, $3, $4)`,
+                [orderId, tempGenerationId, 'pending', 'hailuo-2.3-fast']
+              );
+              console.log(`   ✅ Создан временный джоб в БД: ${tempGenerationId}`);
+            } else {
+              console.log(`   ⚠️ Временный джоб уже существует: ${tempGenerationId}`);
+            }
           } finally {
             client.release();
           }
