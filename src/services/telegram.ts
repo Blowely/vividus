@@ -102,14 +102,19 @@ export class TelegramService {
   }
 
   private getMainReplyKeyboard(userId: number): any {
-    const keyboard = [
-      [Markup.button.text('🎬 Оживить фото')],
-      [Markup.button.text('✨ Купить генерации'), Markup.button.text('❓ Поддержка')],
-    ];
+    const keyboard = [];
+    
+    // Первая строка - для админов две кнопки, для обычных пользователей одна
+    if (this.isAdmin(userId)) {
+      keyboard.push([Markup.button.text('🎬 Оживить фото'), Markup.button.text('🎬 Оживить v2')]);
+    } else {
+      keyboard.push([Markup.button.text('🎬 Оживить фото')]);
+    }
+    
+    keyboard.push([Markup.button.text('✨ Купить генерации'), Markup.button.text('❓ Поддержка')]);
 
     // Добавляем кнопки для админов
     if (this.isAdmin(userId)) {
-      keyboard.push([Markup.button.text('🎬 Оживить v2')]);
       keyboard.push([Markup.button.text('📊 Статистика')]);
     }
 
