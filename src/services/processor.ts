@@ -372,6 +372,8 @@ export class ProcessorService {
 
         // Для animate_v2: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if (isAnimateV2 && allFinished && !hasNotifiedUser) {
+          console.log(`✅ Animate_v2 заказ ${orderId} завершен. Отправляю результат...`);
+          console.log(`   completedCount: ${completedCount}, failedCount: ${failedCount}, allFinished: ${allFinished}`);
           hasNotifiedUser = true;
           
           // Обновляем прогресс-бар до 100% перед отправкой результата
@@ -393,6 +395,7 @@ export class ProcessorService {
           const successfulVideos: Array<{ url: string; model?: string }> = [];
           for (const generationId of generationIds) {
             const jobInfo = jobStatuses.get(generationId);
+            console.log(`   Проверяю generationId: ${generationId}, status: ${jobInfo?.status}, videoUrl: ${jobInfo?.videoUrl ? 'есть' : 'нет'}`);
             if (jobInfo?.videoUrl) {
               const isFalJob = generationId.startsWith('fal_');
               const job = isFalJob 
@@ -401,8 +404,10 @@ export class ProcessorService {
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
+          console.log(`   successfulVideos.length: ${successfulVideos.length}`);
 
           if (successfulVideos.length > 0) {
+            console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
             await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
@@ -675,11 +680,16 @@ export class ProcessorService {
 
   private async handleMultipleJobsSuccess(generationIds: string[], telegramId: number, orderId: string, videos: Array<{ url: string; model?: string }>): Promise<void> {
     try {
+      console.log(`🎯 handleMultipleJobsSuccess вызвана для заказа ${orderId}`);
+      
       // Получаем заказ для проверки способа оплаты
       const order = await this.orderService.getOrder(orderId);
+      console.log(`   order found: ${order ? 'да' : 'нет'}, order_type: ${order?.order_type}, current status: ${order?.status}`);
       
       // Update order status
+      console.log(`   Обновляю статус заказа ${orderId} на 'completed'...`);
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
+      console.log(`   ✅ Статус заказа ${orderId} обновлен на 'completed'`);
 
       // Для заказов animate_v2 (из broadcast-bot) отправляем результат в broadcast-bot
       if (order && order.order_type === 'animate_v2') {
