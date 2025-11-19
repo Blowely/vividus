@@ -171,7 +171,7 @@ export class FileService {
     }
   }
 
-  async downloadTelegramFileToS3(fileId: string): Promise<string> {
+  async downloadTelegramFileToS3(fileId: string, skipProcessing: boolean = false): Promise<string> {
     try {
       // Get file info from Telegram
       const botToken = process.env.TELEGRAM_BOT_TOKEN!;
@@ -186,7 +186,7 @@ export class FileService {
       
       // Generate unique filename
       const timestamp = Date.now();
-      const extension = '.jpg'; // Всегда сохраняем как JPEG после обработки
+      const extension = skipProcessing ? path.extname(filePath) || '.jpg' : '.jpg';
       const filename = `${timestamp}_${fileId}${extension}`;
       
       // Download file directly to memory
@@ -202,11 +202,15 @@ export class FileService {
       // Convert to Buffer
       let buffer = Buffer.from(response.data);
       
-      // Обрабатываем изображение для соответствия требованиям Runway API
-      buffer = await this.processImageForRunway(buffer);
+      // Обрабатываем изображение только если не пропущена обработка (для fal.ai отправляем как есть)
+      if (!skipProcessing) {
+        buffer = await this.processImageForRunway(buffer);
+      }
       
-      // Determine content type (всегда JPEG после обработки)
-      const contentType = 'image/jpeg';
+      // Determine content type
+      const contentType = skipProcessing 
+        ? response.headers['content-type'] || 'image/jpeg'
+        : 'image/jpeg';
       
       // Upload to S3 directly from memory
       const s3Url = await this.s3Service.uploadFile(buffer, filename, contentType);
@@ -242,7 +246,7 @@ export class FileService {
     }
   }
 
-  async downloadFileFromUrlAndUploadToS3(url: string): Promise<string> {
+  async downloadFileFromUrlAndUploadToS3(url: string, skipProcessing: boolean = false): Promise<string> {
     try {
       // Download file directly to memory
       const response = await axios.get(url, {
@@ -257,16 +261,20 @@ export class FileService {
       // Convert to Buffer
       let buffer = Buffer.from(response.data);
       
-      // Обрабатываем изображение для соответствия требованиям Runway API
-      buffer = await this.processImageForRunway(buffer);
+      // Обрабатываем изображение только если не пропущена обработка (для fal.ai отправляем как есть)
+      if (!skipProcessing) {
+        buffer = await this.processImageForRunway(buffer);
+      }
       
       // Generate unique filename
       const timestamp = Date.now();
-      const extension = '.jpg'; // Всегда сохраняем как JPEG после обработки
+      const extension = skipProcessing ? path.extname(new URL(url).pathname) || '.jpg' : '.jpg';
       const filename = `${timestamp}_${Date.now()}${extension}`;
       
-      // Determine content type (всегда JPEG после обработки)
-      const contentType = 'image/jpeg';
+      // Determine content type
+      const contentType = skipProcessing 
+        ? response.headers['content-type'] || 'image/jpeg'
+        : 'image/jpeg';
       
       // Upload to S3 directly from memory
       const s3Url = await this.s3Service.uploadFile(buffer, filename, contentType);

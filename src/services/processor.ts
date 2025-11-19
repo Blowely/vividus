@@ -133,9 +133,11 @@ export class ProcessorService {
         const falJobs = await this.falService.getJobsByOrderId(orderId);
         const allJobs = [...runwayJobs, ...falJobs];
         if (allJobs.length > 0) {
+          console.log(`⚠️ Ошибка при создании генерации, но найдено ${allJobs.length} джобов в БД. Продолжаю мониторинг...`);
           generationIds = allJobs.map(job => job.did_job_id);
           await this.orderService.updateOrderResult(orderId, generationIds[0]);
           this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+          return; // Не пробрасываем ошибку, если джобы найдены
         } else {
           throw error; // Если не создано ни одной генерации, пробрасываем ошибку
         }
@@ -143,6 +145,25 @@ export class ProcessorService {
 
     } catch (error: any) {
       console.error(`Error processing order ${orderId}:`, error);
+      
+      // Проверяем, есть ли уже созданные джобы (возможно, запрос успешен, но был таймаут)
+      const runwayJobs = await this.runwayService.getJobsByOrderId(orderId);
+      const falJobs = await this.falService.getJobsByOrderId(orderId);
+      const allJobs = [...runwayJobs, ...falJobs];
+      
+      if (allJobs.length > 0) {
+        console.log(`⚠️ Ошибка при обработке заказа, но найдено ${allJobs.length} джобов. Продолжаю мониторинг...`);
+        const generationIds = allJobs.map(job => job.did_job_id);
+        await this.orderService.updateOrderResult(orderId, generationIds[0]);
+        const order = await this.orderService.getOrder(orderId);
+        if (order) {
+          const user = await this.userService.getUserById(order.user_id);
+          if (user) {
+            this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+          }
+        }
+        return; // Не показываем ошибку, если джобы найдены
+      }
       
       // Update order status to failed
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
@@ -248,7 +269,24 @@ export class ProcessorService {
         return;
       }
       
-      // Для не-animate_v2 отправляем как обычно
+      // Для fal.ai заказов в основном боте отправляем прогресс-бар сразу
+      if (isFalOrder) {
+        const progressBar = this.createProgressBar(0);
+        const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
+        
+        try {
+          const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
+          if (message && 'message_id' in message) {
+            progressMessageId = (message as any).message_id;
+            console.log(`📊 Отправлено начальное сообщение с прогресс-баром для fal.ai. message_id: ${progressMessageId}`);
+          }
+        } catch (error) {
+          console.error('Error sending initial progress message for fal.ai:', error);
+        }
+        return;
+      }
+      
+      // Для не-animate_v2 и не-fal.ai отправляем как обычно
       const botToUse = this.bot;
       const progressBar = this.createProgressBar(0);
       const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
@@ -274,6 +312,24 @@ export class ProcessorService {
     const startTime = Date.now();
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
     let lastFakeProgressUpdate = 0;
+    
+    // Для fal.ai заказов сразу обновляем прогресс до 1% через 0.5 секунды
+    if (isFalOrder && progressMessageId) {
+      setTimeout(async () => {
+        try {
+          const progressBar = this.createProgressBar(1);
+          await this.bot.telegram.editMessageText(
+            telegramId,
+            progressMessageId!,
+            undefined,
+            `🔄 Генерация видео...\n\n${progressBar} 1%`
+          );
+          lastFakeProgressUpdate = 1;
+        } catch (error) {
+          console.error('Error updating progress to 1%:', error);
+        }
+      }, 500);
+    }
 
     const checkStatus = async () => {
       try {
@@ -399,17 +455,18 @@ export class ProcessorService {
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
         const allFinished = completedCount + failedCount === generationIds.length;
 
-        // Для animate_v2: если видео готово, отправляем сразу, не ждем фейкового прогресса
-        if (isAnimateV2 && allFinished && !hasNotifiedUser) {
+        // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
+        if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
           console.log(`✅ Animate_v2 заказ ${orderId} завершен. Отправляю результат...`);
           console.log(`   completedCount: ${completedCount}, failedCount: ${failedCount}, allFinished: ${allFinished}`);
           hasNotifiedUser = true;
           
           // Обновляем прогресс-бар до 100% перед отправкой результата
-          if (progressMessageId && broadcastBot) {
+          if (progressMessageId) {
             try {
               const progressBar = this.createProgressBar(100);
-              await broadcastBot.telegram.editMessageText(
+              const botToUse = isAnimateV2 && broadcastBot ? broadcastBot : this.bot;
+              await botToUse.telegram.editMessageText(
                 telegramId,
                 progressMessageId,
                 undefined,

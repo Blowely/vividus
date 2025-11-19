@@ -1340,8 +1340,8 @@ export class TelegramService {
     try {
       const userId = ctx.from!.id;
       
-      // Загружаем фото в S3
-      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      // Загружаем фото в S3 без обработки (для fal.ai отправляем как есть)
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
       
       // Обрабатываем промпт
       let processedPrompt = promptText.toLowerCase().trim();
@@ -1370,7 +1370,7 @@ export class TelegramService {
       
       // Отображаем промпт пользователю
       const displayPrompt = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
-        ? 'дышит' 
+        ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
         : originalPrompt;
       await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
       
