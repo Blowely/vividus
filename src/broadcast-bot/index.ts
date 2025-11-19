@@ -25,6 +25,9 @@ const waitingForBroadcast = new Map<number, BroadcastData>();
 const combineAndAnimatePhotos = new Map<number, string[]>(); // userId -> fileId[]
 const combineAndAnimateState = new Map<number, { animationPrompt?: string; waitingForAnimationPrompt?: boolean }>(); // userId -> состояние
 
+// Состояние для режима "Оживить фото v2"
+const animateV2State = new Map<number, { photoFileId?: string; waitingForPrompt?: boolean; prompt?: string }>(); // userId -> состояние
+
 const userService = new UserService();
 const orderService = new OrderService();
 const fileService = new FileService();
@@ -41,6 +44,7 @@ bot.start(async (ctx) => {
   }
 
   const keyboard = Markup.keyboard([
+    [Markup.button.text('🎬 Оживить фото v2')],
     [Markup.button.text('🔀 Объединить и оживить')],
     [Markup.button.text('📨 Рассылка')]
   ]).resize();
@@ -144,6 +148,12 @@ bot.on('text', async (ctx) => {
 
   const text = ctx.message.text;
   
+  // Обработка кнопки "Оживить фото v2"
+  if (text === '🎬 Оживить фото v2') {
+    await handleAnimateV2(ctx);
+    return;
+  }
+  
   // Обработка кнопки "Объединить и оживить"
   if (text === '🔀 Объединить и оживить') {
     await handleCombineAndAnimate(ctx);
@@ -153,6 +163,24 @@ bot.on('text', async (ctx) => {
   // Обработка кнопки "Рассылка" - возвращаемся к обычному режиму
   if (text === '📨 Рассылка') {
     await ctx.reply('📨 Режим рассылки активен. Отправьте сообщение для рассылки.');
+    return;
+  }
+  
+  // Проверяем, ожидает ли пользователь промпт для анимации v2
+  const v2State = animateV2State.get(ctx.from!.id);
+  if (v2State && v2State.waitingForPrompt) {
+    if (!v2State.photoFileId) {
+      await ctx.reply('❌ Фото не найдено. Начните заново.');
+      animateV2State.delete(ctx.from!.id);
+      return;
+    }
+    
+    v2State.prompt = text;
+    v2State.waitingForPrompt = false;
+    animateV2State.set(ctx.from!.id, v2State);
+    
+    await ctx.reply('Готовлю видео, это займет до 5 минут...');
+    await createAnimateV2Order(ctx, v2State.photoFileId, v2State.prompt);
     return;
   }
   
@@ -191,6 +219,22 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  // Проверяем, находимся ли мы в режиме "Оживить фото v2"
+  const v2State = animateV2State.get(ctx.from!.id);
+  if (v2State && !v2State.photoFileId) {
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const fileId = photo.file_id;
+    
+    v2State.photoFileId = fileId;
+    animateV2State.set(ctx.from!.id, v2State);
+    
+    await ctx.reply('Фото принято! Теперь опишите, как оживить фото:\n\nПримеры:\n• "Люди улыбаются и машут рукой"\n• "Легкое движение волос на ветру"\n• "Моргание и легкий поворот головы"');
+    
+    v2State.waitingForPrompt = true;
+    animateV2State.set(ctx.from!.id, v2State);
+    return;
+  }
+  
   // Проверяем, находимся ли мы в режиме объединить и оживить
   const combinePhotos = combineAndAnimatePhotos.get(ctx.from!.id);
   if (combinePhotos !== undefined) {
@@ -439,6 +483,24 @@ bot.catch((err, ctx) => {
   console.error('Bot error:', err);
 });
 
+// Обработчик для режима "Оживить фото v2"
+async function handleAnimateV2(ctx: Context) {
+  animateV2State.set(ctx.from!.id, {});
+  
+  const instructions = `🎬 ОЖИВИТЬ ФОТО V2
+
+Используется новая нейросеть fal.ai (MiniMax Hailuo 2.3 Fast) для генерации видео из фото.
+
+📸 КАК ЭТО РАБОТАЕТ:
+1. Отправьте одно фото
+2. Опишите, как оживить фото (или используйте базовую анимацию)
+3. Получите видео через 2-5 минут!
+
+📤 ОТПРАВЬТЕ ФОТО:`;
+  
+  await ctx.reply(instructions);
+}
+
 // Обработчик для режима "Объединить и оживить"
 async function handleCombineAndAnimate(ctx: Context) {
   combineAndAnimatePhotos.set(ctx.from!.id, []);
@@ -525,6 +587,42 @@ function translateAnimationPrompt(russianPrompt: string): string {
   }
   
   return translated;
+}
+
+async function createAnimateV2Order(
+  ctx: Context,
+  photoFileId: string,
+  prompt?: string
+) {
+  try {
+    // Получаем или создаем пользователя (админа)
+    const user = await userService.getOrCreateUser(ctx.from!);
+    
+    // Загружаем фото в S3
+    const s3Url = await fileService.downloadTelegramFileToS3(photoFileId);
+    
+    // Переводим промпт на английский, если нужно
+    let englishPrompt = prompt;
+    if (prompt) {
+      englishPrompt = translateAnimationPrompt(prompt);
+    }
+    
+    // Создаем заказ
+    const order = await orderService.createAnimateV2Order(
+      user.id,
+      s3Url,
+      englishPrompt
+    );
+    
+    // Очищаем состояние
+    animateV2State.delete(ctx.from!.id);
+    
+    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\nЗаказ будет обработан автоматически.`);
+    
+  } catch (error) {
+    console.error('Error creating animate v2 order:', error);
+    await ctx.reply('❌ Произошла ошибка при создании заказа. Попробуйте позже.');
+  }
 }
 
 async function createCombineAndAnimateOrder(

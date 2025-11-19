@@ -68,6 +68,23 @@ export class OrderService {
     }
   }
 
+  async createAnimateV2Order(userId: number, filePath: string, customPrompt?: string): Promise<Order> {
+    const client = await pool.connect();
+    
+    try {
+      const result = await client.query(
+        `INSERT INTO orders (user_id, original_file_path, status, custom_prompt, order_type) 
+         VALUES ($1, $2, $3, $4, 'animate_v2') 
+         RETURNING *`,
+        [userId, filePath, OrderStatus.PAYMENT_REQUIRED, customPrompt]
+      );
+      
+      return result.rows[0];
+    } finally {
+      client.release();
+    }
+  }
+
   async updateOrderCombinedImage(orderId: string, combinedImagePath: string): Promise<void> {
     const client = await pool.connect();
     

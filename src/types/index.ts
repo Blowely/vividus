@@ -17,7 +17,7 @@ export interface Order {
   status: OrderStatus;
   original_file_path: string;
   second_file_path?: string;
-  order_type?: 'single' | 'merge' | 'combine_and_animate';
+  order_type?: 'single' | 'merge' | 'combine_and_animate' | 'animate_v2';
   did_job_id?: string;
   custom_prompt?: string;
   combine_prompt?: string; // Промпт для объединения фото

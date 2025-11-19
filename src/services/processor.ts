@@ -1,4 +1,5 @@
 import { RunwayService } from './runway';
+import { FalService } from './fal';
 import { OrderService } from './order';
 import { FileService } from './file';
 import { UserService } from './user';
@@ -10,6 +11,7 @@ config();
 
 export class ProcessorService {
   private runwayService: RunwayService;
+  private falService: FalService;
   private orderService: OrderService;
   private fileService: FileService;
   private userService: UserService;
@@ -18,6 +20,7 @@ export class ProcessorService {
 
   constructor() {
     this.runwayService = new RunwayService();
+    this.falService = new FalService();
     this.orderService = new OrderService();
     this.fileService = new FileService();
     this.userService = new UserService();
@@ -69,6 +72,14 @@ export class ProcessorService {
           // Combine and animate order - two-step process
           await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
           return; // Exit early, processing continues in processCombineAndAnimateOrder
+        } else if (order.order_type === 'animate_v2') {
+          // Animate v2 order - используем fal.ai
+          const requestId = await this.falService.createVideoFromImage(
+            order.original_file_path,
+            orderId,
+            order.custom_prompt
+          );
+          generationIds = [requestId];
         } else if (order.order_type === 'merge' && order.second_file_path) {
           // Merge order - use second image as reference for transition
           generationIds = await this.runwayService.createMultipleVideosFromTwoImages(
@@ -100,9 +111,11 @@ export class ProcessorService {
         this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
       } catch (error: any) {
         // Если хотя бы одна генерация создана, продолжаем мониторинг
-        const jobs = await this.runwayService.getJobsByOrderId(orderId);
-        if (jobs.length > 0) {
-          generationIds = jobs.map(job => job.did_job_id);
+        const runwayJobs = await this.runwayService.getJobsByOrderId(orderId);
+        const falJobs = await this.falService.getJobsByOrderId(orderId);
+        const allJobs = [...runwayJobs, ...falJobs];
+        if (allJobs.length > 0) {
+          generationIds = allJobs.map(job => job.did_job_id);
           await this.orderService.updateOrderResult(orderId, generationIds[0]);
           this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
         } else {
@@ -153,7 +166,11 @@ export class ProcessorService {
         // Проверяем статус всех джобов
         const statusPromises = generationIds.map(async (generationId) => {
           try {
-            const jobStatus = await this.runwayService.checkJobStatus(generationId);
+            // Определяем, какой сервис использовать по префиксу
+            const isFalJob = generationId.startsWith('fal_');
+            const jobStatus = isFalJob 
+              ? await this.falService.checkJobStatus(generationId)
+              : await this.runwayService.checkJobStatus(generationId);
             return { generationId, jobStatus };
           } catch (error) {
             console.error(`Error checking status for ${generationId}:`, error);
@@ -182,20 +199,37 @@ export class ProcessorService {
             }
           }
           
+          // Определяем URL видео в зависимости от формата ответа (Runway или fal.ai)
+          const videoUrl = status === 'SUCCEEDED' || status === 'COMPLETED' 
+            ? (jobStatus.output?.[0] || jobStatus.video?.url)
+            : undefined;
+          
           jobStatuses.set(generationId, {
             status,
-            videoUrl: status === 'SUCCEEDED' ? jobStatus.output?.[0] : undefined,
+            videoUrl,
             error: errorMessage
           });
 
-          if (status === 'SUCCEEDED') {
+          if (status === 'SUCCEEDED' || status === 'COMPLETED') {
             completedCount++;
-            // Обновляем статус джоба в БД
-            await this.runwayService.updateJobStatus(generationId, 'completed' as any, jobStatus.output?.[0]);
+            // Определяем URL видео в зависимости от формата ответа
+            const videoUrl = jobStatus.output?.[0] || jobStatus.video?.url;
+            // Определяем, какой сервис использовать
+            const isFalJob = generationId.startsWith('fal_');
+            if (isFalJob) {
+              await this.falService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+            } else {
+              await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+            }
           } else if (status === 'FAILED') {
             failedCount++;
-            // Сохраняем ошибку в БД (errorMessage уже содержит failureCode, если был)
-            await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+            // Определяем, какой сервис использовать
+            const isFalJob = generationId.startsWith('fal_');
+            if (isFalJob) {
+              await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+            } else {
+              await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
+            }
           } else {
             processingCount++;
             if (jobStatus.progress !== undefined) {
@@ -215,7 +249,10 @@ export class ProcessorService {
           for (const generationId of generationIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const job = await this.runwayService.getJobByGenerationId(generationId);
+              const isFalJob = generationId.startsWith('fal_');
+              const job = isFalJob 
+                ? await this.falService.getJobByRequestId(generationId)
+                : await this.runwayService.getJobByGenerationId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
@@ -231,7 +268,10 @@ export class ProcessorService {
                 failedErrors.push(jobInfo.error);
               } else {
                 // Проверяем БД на наличие ошибок
-                const job = await this.runwayService.getJobByGenerationId(generationId);
+                const isFalJob = generationId.startsWith('fal_');
+                const job = isFalJob
+                  ? await this.falService.getJobByRequestId(generationId)
+                  : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
                   failedErrors.push(job.error_message);
                 }
@@ -279,7 +319,10 @@ export class ProcessorService {
           for (const generationId of generationIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const job = await this.runwayService.getJobByGenerationId(generationId);
+              const isFalJob = generationId.startsWith('fal_');
+              const job = isFalJob
+                ? await this.falService.getJobByRequestId(generationId)
+                : await this.runwayService.getJobByGenerationId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
@@ -295,7 +338,10 @@ export class ProcessorService {
                 failedErrors.push(jobInfo.error);
               } else {
                 // Проверяем БД на наличие ошибок
-                const job = await this.runwayService.getJobByGenerationId(generationId);
+                const isFalJob = generationId.startsWith('fal_');
+                const job = isFalJob
+                  ? await this.falService.getJobByRequestId(generationId)
+                  : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
                   failedErrors.push(job.error_message);
                 }
@@ -313,7 +359,10 @@ export class ProcessorService {
           for (const generationId of generationIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const job = await this.runwayService.getJobByGenerationId(generationId);
+              const isFalJob = generationId.startsWith('fal_');
+              const job = isFalJob
+                ? await this.falService.getJobByRequestId(generationId)
+                : await this.runwayService.getJobByGenerationId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
@@ -329,7 +378,10 @@ export class ProcessorService {
                 failedErrors.push(jobInfo.error);
               } else {
                 // Проверяем БД на наличие ошибок
-                const job = await this.runwayService.getJobByGenerationId(generationId);
+                const isFalJob = generationId.startsWith('fal_');
+                const job = isFalJob
+                  ? await this.falService.getJobByRequestId(generationId)
+                  : await this.runwayService.getJobByGenerationId(generationId);
                 if (job?.error_message) {
                   failedErrors.push(job.error_message);
                 }
