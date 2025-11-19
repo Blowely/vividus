@@ -134,6 +134,12 @@ export class ProcessorService {
       if (order) {
         const user = await this.userService.getUserById(order.user_id);
         if (user) {
+          // Для заказов animate_v2 (из broadcast-bot) не отправляем уведомления в основной бот
+          if (order.order_type === 'animate_v2') {
+            console.log(`⚠️ Заказ ${orderId} (animate_v2) завершился с ошибкой. Уведомления не отправляются в основной бот.`);
+            return;
+          }
+          
           // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
           const hasPayment = await this.orderService.hasPayment(orderId);
           if (!hasPayment) {
@@ -490,6 +496,12 @@ export class ProcessorService {
       // Update order status
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
 
+      // Для заказов animate_v2 (из broadcast-bot) не списываем генерации и не отправляем уведомления
+      if (order && order.order_type === 'animate_v2') {
+        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Генерации не списываются, уведомления не отправляются.`);
+        return;
+      }
+
       // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
       // Списываем генерации только после успешной генерации
       if (order) {
@@ -543,6 +555,12 @@ export class ProcessorService {
 
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
+      // Для заказов animate_v2 (из broadcast-bot) не отправляем уведомления
+      if (order.order_type === 'animate_v2') {
+        console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Уведомления не отправляются в основной бот.`);
+        return;
+      }
+
       const hasPayment = await this.orderService.hasPayment(orderId);
       if (!hasPayment) {
         await this.userService.returnGenerations(telegramId, 1);
@@ -593,6 +611,12 @@ export class ProcessorService {
 
       // Update job status
       await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+
+      // Для заказов animate_v2 (из broadcast-bot) не списываем генерации и не отправляем уведомления
+      if (order && order.order_type === 'animate_v2') {
+        console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Генерации не списываются, уведомления не отправляются.`);
+        return;
+      }
 
       // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
       // Списываем генерации только после успешной генерации

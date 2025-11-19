@@ -64,17 +64,14 @@ export class FalService {
       
       const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
       
-      // Submit request using fal.ai queue API
+      // Submit request using fal.ai API (direct model endpoint)
       const response = await axios.post(
-        `${this.baseUrl}/fal/queue/submit`,
+        `${this.baseUrl}/${this.modelId}`,
         {
-          model: this.modelId,
-          input: {
-            prompt: prompt,
-            image_url: imageUrl,
-            duration: duration,
-            prompt_optimizer: true
-          }
+          prompt: prompt,
+          image_url: imageUrl,
+          duration: duration,
+          prompt_optimizer: true
         },
         {
           headers: {
@@ -86,21 +83,35 @@ export class FalService {
 
       console.log('fal.ai response:', response.data);
       
-      // fal.ai возвращает request_id
-      const requestId = response.data.request_id;
+      // fal.ai может вернуть либо request_id (для асинхронных), либо сразу результат
+      let requestId: string;
+      let systemRequestId: string;
       
-      if (!requestId) {
-        throw new Error('No request_id in response from fal.ai');
+      if (response.data.request_id) {
+        // Асинхронный запрос
+        requestId = response.data.request_id;
+        systemRequestId = `fal_${requestId}`;
+        
+        // Save job to database
+        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+        
+        // Сохраняем оригинальный request_id в error_message для последующего использования
+        await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+      } else if (response.data.video && response.data.video.url) {
+        // Синхронный ответ - сразу готово
+        const videoUrl = response.data.video.url;
+        systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Save job to database
+        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+        
+        // Сразу помечаем как завершенное
+        await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+        
+        return systemRequestId;
+      } else {
+        throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
       }
-      
-      // Создаем уникальный ID для нашей системы
-      const systemRequestId = `fal_${requestId}`;
-      
-      // Save job to database
-      await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-      
-      // Сохраняем оригинальный request_id в error_message для последующего использования
-      await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
       
       // Immediately check status for debugging
       console.log('🔍 Checking initial status for:', systemRequestId);
