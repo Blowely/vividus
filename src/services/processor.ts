@@ -423,6 +423,8 @@ export class ProcessorService {
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
     let lastFakeProgressUpdate = 0;
     
+    console.log(`📊 Инициализация мониторинга: isAnimateV2=${isAnimateV2}, isFalOrder=${isFalOrder}, useFakeProgress=${useFakeProgress}, startTime=${startTime}`);
+    
     // Для fal.ai заказов сразу обновляем прогресс до 1% через 0.5 секунды
     if (isFalOrder && progressMessageId) {
       setTimeout(async () => {
@@ -537,9 +539,8 @@ export class ProcessorService {
           }
         }
 
-        // Вычисляем фейковый прогресс только для animate_v2
-        // Для основного бота не используем фейковый прогресс
-        if (isAnimateV2) {
+        // Вычисляем фейковый прогресс для animate_v2 и fal.ai заказов
+        if (useFakeProgress) {
           const elapsed = Date.now() - startTime;
           
           if (elapsed < fakeProgressDuration) {
@@ -554,11 +555,11 @@ export class ProcessorService {
             const extraTime = elapsed - fakeProgressDuration - 30000;
             fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
           } else {
-            // После 3 минут - резкое завершение до 100%
-            fakeProgress = 100;
+            // После 3 минут - держим на 95% до реального завершения
+            fakeProgress = 95;
           }
         } else {
-          // Для основного бота fakeProgress остается 0, используем только реальный прогресс
+          // Для обычных заказов fakeProgress остается 0, используем только реальный прогресс
           fakeProgress = 0;
         }
 
@@ -631,23 +632,11 @@ export class ProcessorService {
         // Для animate_v2 не обновляем прогресс-бар здесь (управляется фейковым таймером в broadcast-bot)
         if (!allFinished && attempts < maxAttempts) {
           if (!isAnimateV2 && useFakeProgress) {
-            // Для fal.ai заказов в основном боте используем фейковый прогресс
-            const elapsed = Date.now() - startTime;
-            if (elapsed < fakeProgressDuration) {
-              fakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
-            } else if (elapsed < fakeProgressDuration + 30000) {
-              const extraTime = elapsed - fakeProgressDuration;
-              fakeProgress = 70 + Math.round((extraTime / 30000) * 15);
-            } else if (elapsed < fakeProgressDuration + 60000) {
-              const extraTime = elapsed - fakeProgressDuration - 30000;
-              fakeProgress = 85 + Math.round((extraTime / 30000) * 10);
-            } else {
-              fakeProgress = 95;
-            }
-            
+            // Для fal.ai заказов в основном боте используем уже вычисленный фейковый прогресс
             const displayProgress = Math.max(fakeProgress, lastFakeProgressUpdate);
             
-            if (displayProgress !== lastFakeProgressUpdate && progressMessageId) {
+            if (displayProgress > lastFakeProgressUpdate && progressMessageId) {
+              console.log(`📊 Обновляю фейковый прогресс для fal.ai: ${lastFakeProgressUpdate}% → ${displayProgress}%`);
               lastFakeProgressUpdate = displayProgress;
               const progressBar = this.createProgressBar(displayProgress);
               const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
