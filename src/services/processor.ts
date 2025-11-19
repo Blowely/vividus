@@ -251,10 +251,13 @@ export class ProcessorService {
     const startTime = Date.now();
     const fakeProgressDuration = 120000; // 2 минуты для плавного роста
     let lastFakeProgressUpdate = 0;
+    
+    console.log(`✅ Начало мониторинга для заказа ${orderId}, progressMessageId: ${progressMessageId}`);
 
     const checkStatus = async () => {
       try {
         attempts++;
+        console.log(`📊 Попытка ${attempts}/${maxAttempts} для заказа ${orderId}, fakeProgress: ${fakeProgress}%`);
 
         // Проверяем статус всех джобов
         const statusPromises = generationIds.map(async (generationId) => {
@@ -378,6 +381,7 @@ export class ProcessorService {
           
           // Обновляем сообщение только если процент изменился
           if (lastProgressPercent !== displayProgress) {
+            console.log(`📝 Обновляем прогресс: ${displayProgress}%, message_id: ${progressMessageId}, isAnimateV2: ${isAnimateV2}`);
             lastProgressPercent = displayProgress;
             const progressBar = this.createProgressBar(displayProgress);
             
