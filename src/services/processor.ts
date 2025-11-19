@@ -425,22 +425,73 @@ export class ProcessorService {
     
     console.log(`📊 Инициализация мониторинга: isAnimateV2=${isAnimateV2}, isFalOrder=${isFalOrder}, useFakeProgress=${useFakeProgress}, startTime=${startTime}`);
     
-    // Для fal.ai заказов сразу обновляем прогресс до 1% через 0.5 секунды
+    // Для fal.ai заказов запускаем отдельный интервал для фейкового прогресса
+    // Обновляем сразу и независимо от checkStatus
     if (isFalOrder && progressMessageId) {
-      setTimeout(async () => {
+      // СРАЗУ обновляем до 2% (без задержки!)
+      (async () => {
         try {
-          const progressBar = this.createProgressBar(1);
+          const progressBar = this.createProgressBar(2);
           await this.bot.telegram.editMessageText(
             telegramId,
             progressMessageId!,
             undefined,
-            `🔄 Генерация видео...\n\n${progressBar} 1%`
+            `🔄 Генерация видео...\n\n${progressBar} 2%`
           );
-          lastFakeProgressUpdate = 1;
+          lastFakeProgressUpdate = 2;
+          console.log(`📊 СРАЗУ обновлен прогресс до 2% для fal.ai`);
         } catch (error) {
-          console.error('Error updating progress to 1%:', error);
+          console.error('Error updating progress to 2%:', error);
         }
-      }, 500);
+      })();
+      
+      // Запускаем отдельный интервал для обновления фейкового прогресса каждые 2 секунды
+      const fakeProgressInterval = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          let currentFakeProgress = 0;
+          
+          if (elapsed < fakeProgressDuration) {
+            currentFakeProgress = Math.min(70, Math.round((elapsed / fakeProgressDuration) * 70));
+          } else if (elapsed < fakeProgressDuration + 30000) {
+            const extraTime = elapsed - fakeProgressDuration;
+            currentFakeProgress = 70 + Math.round((extraTime / 30000) * 15);
+          } else if (elapsed < fakeProgressDuration + 60000) {
+            const extraTime = elapsed - fakeProgressDuration - 30000;
+            currentFakeProgress = 85 + Math.round((extraTime / 30000) * 10);
+          } else {
+            currentFakeProgress = 95;
+          }
+          
+          // Обновляем только если прогресс увеличился
+          if (currentFakeProgress > lastFakeProgressUpdate && progressMessageId) {
+            lastFakeProgressUpdate = currentFakeProgress;
+            const progressBar = this.createProgressBar(currentFakeProgress);
+            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${currentFakeProgress}%`;
+            
+            try {
+              await this.bot.telegram.editMessageText(
+                telegramId,
+                progressMessageId,
+                undefined,
+                progressMessage
+              );
+              console.log(`📊 Обновлен фейковый прогресс для fal.ai: ${currentFakeProgress}%`);
+            } catch (error) {
+              console.error('Error updating fake progress:', error);
+            }
+          }
+          
+          // Останавливаем интервал, если заказ завершен
+          const orderData = await this.orderService.getOrder(orderId);
+          if (orderData?.status === 'completed' || orderData?.status === 'failed') {
+            clearInterval(fakeProgressInterval);
+          }
+        } catch (error) {
+          console.error('Error in fake progress interval:', error);
+          clearInterval(fakeProgressInterval);
+        }
+      }, 2000); // Обновляем каждые 2 секунды
     }
 
     const checkStatus = async () => {
