@@ -370,6 +370,47 @@ export class ProcessorService {
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
         const allFinished = completedCount + failedCount === generationIds.length;
 
+        // Для animate_v2: если видео готово, отправляем сразу, не ждем фейкового прогресса
+        if (isAnimateV2 && allFinished && !hasNotifiedUser) {
+          hasNotifiedUser = true;
+          
+          // Собираем все успешные результаты
+          const successfulVideos: Array<{ url: string; model?: string }> = [];
+          for (const generationId of generationIds) {
+            const jobInfo = jobStatuses.get(generationId);
+            if (jobInfo?.videoUrl) {
+              const isFalJob = generationId.startsWith('fal_');
+              const job = isFalJob 
+                ? await this.falService.getJobByRequestId(generationId)
+                : await this.runwayService.getJobByGenerationId(generationId);
+              successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
+            }
+          }
+
+          if (successfulVideos.length > 0) {
+            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+          } else {
+            // Все джобы провалились - собираем все ошибки
+            const failedErrors: string[] = [];
+            for (const generationId of generationIds) {
+              const jobInfo = jobStatuses.get(generationId);
+              if (jobInfo?.error) {
+                failedErrors.push(jobInfo.error);
+              } else {
+                const isFalJob = generationId.startsWith('fal_');
+                const job = isFalJob
+                  ? await this.falService.getJobByRequestId(generationId)
+                  : await this.runwayService.getJobByGenerationId(generationId);
+                if (job?.error_message) {
+                  failedErrors.push(job.error_message);
+                }
+              }
+            }
+            await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
+          }
+          return; // Завершаем мониторинг
+        }
+
         // Всегда показываем прогресс, пока фейковый прогресс < 100%
         // Для animate_v2 не обновляем прогресс-бар здесь (управляется фейковым таймером в broadcast-bot)
         if (fakeProgress < 100 && attempts < maxAttempts) {
