@@ -237,6 +237,7 @@ export class ProcessorService {
         const message = await botToUse.telegram.sendMessage(telegramId, progressMessage);
         if (message && 'message_id' in message) {
           progressMessageId = (message as any).message_id;
+          console.log(`📊 Отправлено начальное сообщение с прогресс-баром. message_id: ${progressMessageId}`);
         }
       } catch (error) {
         console.error('Error sending initial progress message:', error);
@@ -446,8 +447,11 @@ export class ProcessorService {
             const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
             const displayProgress = realProgress;
             
+            console.log(`📊 Попытка ${attempts}: processingCount=${processingCount}, realProgress=${realProgress}%, lastProgress=${lastProgressPercent}%, progressMessageId=${progressMessageId}`);
+            
             // Обновляем сообщение только если процент изменился
             if (lastProgressPercent !== displayProgress) {
+              console.log(`   Обновляю прогресс с ${lastProgressPercent}% на ${displayProgress}%`);
               lastProgressPercent = displayProgress;
               const progressBar = this.createProgressBar(displayProgress);
               const progressMessage = `🔄 Генерация видео...\n\n${progressBar} ${displayProgress}%`;
@@ -460,17 +464,13 @@ export class ProcessorService {
                     undefined,
                     progressMessage
                   );
-                } catch (error) {
-                  const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
-                  if (message && 'message_id' in message) {
-                    progressMessageId = (message as any).message_id;
-                  }
+                  console.log(`   ✅ Прогресс обновлен до ${displayProgress}%`);
+                } catch (error: any) {
+                  console.error(`   ❌ Ошибка редактирования сообщения:`, error?.message);
+                  // Если не удалось отредактировать, НЕ отправляем новое сообщение (избегаем дублирования)
                 }
               } else {
-                const message = await this.bot.telegram.sendMessage(telegramId, progressMessage);
-                if (message && 'message_id' in message) {
-                  progressMessageId = (message as any).message_id;
-                }
+                console.log(`   ⚠️ progressMessageId не установлен, пропускаю обновление`);
               }
             }
           }
