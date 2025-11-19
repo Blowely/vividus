@@ -78,25 +78,50 @@ export class ProcessorService {
         } else if (order.order_type === 'animate_v2') {
           // Animate v2 order - используем fal.ai (для broadcast-bot)
           console.log(`   → Обработка как animate_v2 (fal.ai для broadcast-bot)`);
-          const requestId = await this.falService.createVideoFromImage(
-            order.original_file_path,
-            orderId,
-            order.custom_prompt
-          );
-          generationIds = [requestId];
-          console.log(`   ✅ Создан fal.ai запрос: ${requestId}`);
+          
+          // Запускаем вызов fal.ai асинхронно (не блокируем event loop)
+          console.log(`👀 Запускаю вызов fal.ai асинхронно для animate_v2...`);
+          
+          (async () => {
+            try {
+              const requestId = await this.falService.createVideoFromImage(
+                order.original_file_path,
+                orderId,
+                order.custom_prompt
+              );
+              console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
+              
+              // После создания джоба запускаем мониторинг
+              const generationIds = [requestId];
+              await this.orderService.updateOrderResult(orderId, generationIds[0]);
+              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
+              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+            } catch (error: any) {
+              console.error('Error in async fal.ai call for animate_v2:', error);
+              // Проверяем, может джоб все-таки создан
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
+              if (falJobs.length > 0) {
+                const generationIds = falJobs.map(job => job.did_job_id);
+                await this.orderService.updateOrderResult(orderId, generationIds[0]);
+                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              }
+            }
+          })();
+          
+          return; // Выходим сразу, вызов выполняется асинхронно
         } else if (order.custom_prompt && order.custom_prompt.startsWith('fal:')) {
           // Заказ с префиксом fal: - используем fal.ai для основного бота
           console.log(`   → Обработка с fal.ai (основной бот)`);
           
           // Отправляем прогресс-бар СРАЗУ, до вызова API (чтобы пользователь видел его сразу)
+          let progressMessageId: number | null = null;
           try {
             const progressBar = this.createProgressBar(0);
             const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
             const message = await this.bot.telegram.sendMessage(user.telegram_id, progressMessage);
             if (message && 'message_id' in message) {
-              // Сохраняем message_id в заказе для последующего обновления
-              const progressMessageId = (message as any).message_id;
+              progressMessageId = (message as any).message_id;
               console.log(`📊 Отправлено начальное сообщение с прогресс-баром для fal.ai ДО вызова API. message_id: ${progressMessageId}`);
               
               // Сохраняем progressMessageId в custom_prompt (временно, для мониторинга)
@@ -114,14 +139,44 @@ export class ProcessorService {
             console.error('Error sending initial progress message before fal.ai call:', error);
           }
           
+          // Запускаем вызов fal.ai АСИНХРОННО (не блокируем event loop)
           const cleanPrompt = order.custom_prompt.replace(/^fal:/, '');
-          const requestId = await this.falService.createVideoFromImage(
-            order.original_file_path,
-            orderId,
-            cleanPrompt
-          );
-          generationIds = [requestId];
-          console.log(`   ✅ Создан fal.ai запрос: ${requestId}`);
+          
+          console.log(`👀 Запускаю вызов fal.ai асинхронно, мониторинг начнется после создания джоба...`);
+          
+          // Запускаем вызов fal.ai асинхронно (не ждем ответа, не блокируем event loop)
+          (async () => {
+            try {
+              const requestId = await this.falService.createVideoFromImage(
+                order.original_file_path,
+                orderId,
+                cleanPrompt
+              );
+              console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
+              
+              // После создания джоба запускаем мониторинг
+              const generationIds = [requestId];
+              await this.orderService.updateOrderResult(orderId, generationIds[0]);
+              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
+              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+            } catch (error: any) {
+              console.error('Error in async fal.ai call:', error);
+              // Проверяем, может джоб все-таки создан
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
+              if (falJobs.length > 0) {
+                const generationIds = falJobs.map(job => job.did_job_id);
+                await this.orderService.updateOrderResult(orderId, generationIds[0]);
+                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              } else {
+                // Обновляем статус заказа на failed
+                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+                await this.notifyUser(user.telegram_id, `❌ Произошла ошибка при создании видео. Попробуйте позже.`);
+              }
+            }
+          })();
+          
+          return; // Выходим сразу, вызов выполняется асинхронно
         } else if (order.order_type === 'merge' && order.second_file_path) {
           // Merge order - use second image as reference for transition
           console.log(`   → Обработка как merge (RunwayML)`);
