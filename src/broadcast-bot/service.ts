@@ -195,26 +195,29 @@ export class BroadcastService {
           }
         }
         
-        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 50
+        // Обновляем прогресс
         const shouldUpdate = totalUsers <= 10 
           ? true 
-          : (processedCount % 50 === 0 || processedCount === totalUsers);
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
         
         if (shouldUpdate) {
-          // Обновляем асинхронно без ожидания
-          this.adminBot.telegram.editMessageText(
-            adminChatId,
-            progressMessageId,
-            undefined,
-            `🔍 Проверка статуса пользователей...\n\n` +
-            `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
-            `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
-            `✅ Активны: ${activeCount}\n` +
-            `🚫 Заблокировали: ${blockedCount}\n` +
-            `❌ Ошибки: ${errorCount}`
-          ).catch(() => {
+          try {
+            const progressText = `🔍 Проверка статуса пользователей...\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Активны: ${activeCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
             // Игнорируем ошибки обновления
-          });
+          }
         }
         
         // Небольшая задержка чтобы не получить rate limit
@@ -310,27 +313,30 @@ export class BroadcastService {
           errorCount++;
         }
         
-        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 50
+        // Обновляем прогресс
         const shouldUpdate = totalUsers <= 10 
           ? true 
-          : (processedCount % 50 === 0 || processedCount === totalUsers);
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
         
         if (shouldUpdate) {
-          // Обновляем асинхронно без ожидания
-          this.adminBot.telegram.editMessageText(
-            adminChatId,
-            progressMessageId,
-            undefined,
-            `🔍 Проверка статуса органических пользователей...\n\n` +
-            `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
-            `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
-            `✅ Активны: ${activeCount}\n` +
-            `🚫 Заблокировали: ${blockedCount}\n` +
-            `❌ Ошибки: ${errorCount}\n\n` +
-            `ℹ️ Исключены пользователи из кампаний: unu, smm, task_pay`
-          ).catch(() => {
+          try {
+            const progressText = `🔍 Проверка статуса органических пользователей...\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Активны: ${activeCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}\n\n` +
+              `ℹ️ Исключены пользователи из кампаний: unu, smm, task_pay`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
             // Игнорируем ошибки обновления
-          });
+          }
         }
         
         // Небольшая задержка чтобы не получить rate limit
@@ -439,26 +445,29 @@ export class BroadcastService {
           errorCount++;
         }
         
-        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 50
+        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 10
         const shouldUpdate = totalUsers <= 10 
           ? true // Обновляем после каждого для малого количества
-          : (processedCount % 50 === 0 || processedCount === totalUsers); // Для большого - каждые 50
+          : (processedCount % 10 === 0 || processedCount === totalUsers); // Для большого - каждые 10
         
         if (shouldUpdate && progressMessageId) {
-          // Обновляем асинхронно без ожидания, чтобы не блокировать рассылку
-          this.adminBot.telegram.editMessageText(
-            adminChatId,
-            progressMessageId,
-            undefined,
-            `📢 Рассылка в процессе...\n\n` +
-            `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
-            `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
-            `✅ Успешно: ${successCount}\n` +
-            `🚫 Заблокировали: ${blockedCount}\n` +
-            `❌ Ошибки: ${errorCount}`
-          ).catch(() => {
+          try {
+            const progressText = `📢 Рассылка в процессе...\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Успешно: ${successCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
             // Игнорируем ошибки обновления прогресса
-          });
+          }
         }
         
         if (onProgress) {
@@ -587,31 +596,34 @@ export class BroadcastService {
           errorCount++;
         }
         
-        // Обновляем прогресс: для малого количества - после каждого, для большого - каждые 50
+        // Обновляем прогресс
         const shouldUpdate = totalUsers <= 10 
           ? true 
-          : (processedCount % 50 === 0 || processedCount === totalUsers);
+          : (processedCount % 10 === 0 || processedCount === totalUsers);
         
         if (shouldUpdate && progressMessageId) {
-          // Обновляем асинхронно без ожидания, чтобы не блокировать рассылку
-          this.adminBot.telegram.editMessageText(
-            adminChatId,
-            progressMessageId,
-            undefined,
-            `💸 Рассылка неплатящим пользователям в процессе...\n\n` +
-            `👥 Всего неплатящих пользователей: ${totalUsers}\n\n` +
-            `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
-            `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
-            `✅ Успешно: ${successCount}\n` +
-            `🚫 Заблокировали: ${blockedCount}\n` +
-            `❌ Ошибки: ${errorCount}`
-          ).catch(() => {
+          try {
+            const progressText = `💸 Рассылка неплатящим пользователям в процессе...\n\n` +
+              `👥 Всего неплатящих пользователей: ${totalUsers}\n\n` +
+              `📊 Прогресс: ${processedCount}/${totalUsers}\n` +
+              `${this.getProgressBar(processedCount, totalUsers)}\n\n` +
+              `✅ Успешно: ${successCount}\n` +
+              `🚫 Заблокировали: ${blockedCount}\n` +
+              `❌ Ошибки: ${errorCount}`;
+            
+            await this.adminBot.telegram.editMessageText(
+              adminChatId,
+              progressMessageId,
+              undefined,
+              progressText
+            );
+          } catch (error) {
             // Игнорируем ошибки обновления прогресса
-          });
+          }
         }
         
-        // Задержка между отправками (35мс для баланса между скоростью и rate limits)
-        await new Promise(resolve => setTimeout(resolve, 35));
+        // Задержка между отправками (увеличена до 100мс для безопасности от rate limits)
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       // Отправляем финальную статистику
