@@ -546,12 +546,13 @@ export class PaymentService {
                       processedPrompt = `animate this image with ${translatedPrompt}`;
                     }
                     
-                    // Создаем заказ (статус будет установлен в processOrder после проверок)
+                    // Создаем заказ
                     const { OrderService } = await import('./order');
                     const orderService = new OrderService();
                     const order = await orderService.createOrder(userId, s3Url, processedPrompt);
+                    await orderService.updateOrderStatus(order.id, 'processing' as any);
                     
-                    // Запускаем обработку (статус будет установлен в processOrder)
+                    // Запускаем обработку
                     const { ProcessorService } = await import('./processor');
                     const processorService = new ProcessorService();
                     await processorService.processOrder(order.id);
@@ -609,9 +610,12 @@ export class PaymentService {
               console.error(`Error sending payment success notification to user ${user.telegram_id}:`, error);
             }
             
-            // Запускаем обработку заказа (статус будет установлен в processOrder)
+            // Обновляем статус заказа на processing для запуска обработки
             const { OrderService } = await import('./order');
             const orderService = new OrderService();
+            await orderService.updateOrderStatus(orderId, 'processing' as any);
+            
+            // Запускаем обработку заказа
             const { ProcessorService } = await import('./processor');
             const processorService = new ProcessorService();
             await processorService.processOrder(orderId);

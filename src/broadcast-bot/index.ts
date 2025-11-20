@@ -620,6 +620,9 @@ async function createAnimateV2Order(
     // Очищаем состояние
     animateV2State.delete(ctx.from!.id);
     
+    // Обновляем статус на processing для немедленной обработки
+    await orderService.updateOrderStatus(order.id, 'processing' as any);
+    
     // Отправляем сообщение о создании заказа (без прогресс-бара)
     await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...`);
     

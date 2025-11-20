@@ -166,34 +166,10 @@ export class FalService {
         };
       }
       
-      // Для асинхронных запросов сначала проверяем статус в БД
+      // Для асинхронных запросов используем API
       const job = await this.getJobByRequestId(systemRequestId);
-      if (!job) {
-        throw new Error('Job not found');
-      }
-      
-      // Если джоб уже завершен в БД, возвращаем статус из БД (не вызываем API)
-      if (job.status === DidJobStatus.COMPLETED && job.result_url) {
-        return {
-          status: 'COMPLETED',
-          video: { url: job.result_url },
-          output: [job.result_url],
-          error: undefined
-        };
-      }
-      
-      if (job.status === DidJobStatus.FAILED) {
-        return {
-          status: 'FAILED',
-          video: undefined,
-          output: undefined,
-          error: job.error_message || 'Job failed'
-        };
-      }
-      
-      // Если джоб еще не завершен, используем API для проверки статуса
-      if (!job.error_message) {
-        throw new Error('No original request_id stored');
+      if (!job || !job.error_message) {
+        throw new Error('Job not found or no original request_id stored');
       }
       
       const originalRequestId = job.error_message; // Временно храним оригинальный ID здесь

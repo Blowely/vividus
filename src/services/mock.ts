@@ -18,6 +18,9 @@ export class MockService {
     try {
       console.log(`🎭 Mocking successful payment for order: ${orderId}`);
       
+      // Обновляем статус заказа на "processing"
+      await this.orderService.updateOrderStatus(orderId, 'processing' as any);
+      
       // Получаем заказ
       const order = await this.orderService.getOrder(orderId);
       if (!order) {
@@ -32,7 +35,7 @@ export class MockService {
 
       console.log(`✅ Mock payment successful for user: ${user.telegram_id}`);
       
-      // Запускаем обработку заказа (статус будет установлен в processOrder)
+      // Запускаем обработку заказа
       await this.processorService.processOrder(orderId);
       
     } catch (error) {
