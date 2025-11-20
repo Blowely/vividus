@@ -637,6 +637,46 @@ export class ProcessorService {
             // Обновляем generationIds на реальные джобы
             const realGenerationIds = realFalJobs.map(job => job.did_job_id);
             console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIdsRef.ids.join(', ')} → ${realGenerationIds.join(', ')}`);
+            
+            // Обновляем jobStatuses: переносим данные с временного ID на реальный, если они есть
+            for (let i = 0; i < generationIdsRef.ids.length && i < realGenerationIds.length; i++) {
+              const tempId = generationIdsRef.ids[i];
+              const realId = realGenerationIds[i];
+              const tempJobInfo = jobStatuses.get(tempId);
+              if (tempJobInfo) {
+                // Переносим данные с временного ID на реальный
+                jobStatuses.set(realId, tempJobInfo);
+                jobStatuses.delete(tempId);
+                console.log(`   Перенес данные jobStatuses с ${tempId} на ${realId}`);
+              } else if (!jobStatuses.has(realId)) {
+                // Если данных для временного ID нет, проверяем статус реального джоба сразу
+                try {
+                  const jobStatus = await this.falService.checkJobStatus(realId);
+                  if (jobStatus) {
+                    const status = jobStatus.status;
+                    const videoUrl = status === 'SUCCEEDED' || status === 'COMPLETED' 
+                      ? (jobStatus.output?.[0] || jobStatus.video?.url)
+                      : undefined;
+                    let errorMessage: string | undefined;
+                    if (status === 'FAILED') {
+                      errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
+                      if ((jobStatus as any).failureCode) {
+                        errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
+                      }
+                    }
+                    jobStatuses.set(realId, {
+                      status,
+                      videoUrl,
+                      error: errorMessage
+                    });
+                    console.log(`   Проверил статус реального джоба ${realId}: ${status}`);
+                  }
+                } catch (error) {
+                  console.error(`   Ошибка при проверке статуса реального джоба ${realId}:`, error);
+                }
+              }
+            }
+            
             generationIdsRef.ids = realGenerationIds;
             await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
           }
@@ -797,10 +837,35 @@ export class ProcessorService {
           }
           
           // Собираем все успешные результаты
+          // Используем обновленные generationIdsRef.ids вместо исходного массива generationIds
+          const currentGenerationIds = generationIdsRef.ids;
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIds) {
-            const jobInfo = jobStatuses.get(generationId);
+          for (const generationId of currentGenerationIds) {
+            let jobInfo = jobStatuses.get(generationId);
             console.log(`   Проверяю generationId: ${generationId}, status: ${jobInfo?.status}, videoUrl: ${jobInfo?.videoUrl ? 'есть' : 'нет'}`);
+            
+            // Если данных нет в jobStatuses, проверяем статус напрямую (на случай race condition)
+            if (!jobInfo) {
+              try {
+                const jobStatus = await this.falService.checkJobStatus(generationId);
+                if (jobStatus) {
+                  const status = jobStatus.status;
+                  const videoUrl = status === 'SUCCEEDED' || status === 'COMPLETED' 
+                    ? (jobStatus.output?.[0] || jobStatus.video?.url)
+                    : undefined;
+                  jobInfo = {
+                    status,
+                    videoUrl,
+                    error: undefined
+                  };
+                  jobStatuses.set(generationId, jobInfo);
+                  console.log(`   Проверил статус напрямую для ${generationId}: ${status}`);
+                }
+              } catch (error) {
+                console.error(`   Ошибка при проверке статуса для ${generationId}:`, error);
+              }
+            }
+            
             if (jobInfo?.videoUrl) {
               const job = await this.falService.getJobByRequestId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
@@ -810,11 +875,11 @@ export class ProcessorService {
 
           if (successfulVideos.length > 0) {
             console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
-            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(currentGenerationIds, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
             const failedErrors: string[] = [];
-            for (const generationId of generationIds) {
+            for (const generationId of currentGenerationIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
