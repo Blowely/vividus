@@ -206,14 +206,25 @@ export class ProcessorService {
               );
               console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
               
-              // Обновляем временный джоб на реальный в БД
+              // Обновляем временный джоб на реальный в БД или удаляем его, если был создан новый джоб
               const client = await (await import('../config/database')).default.connect();
               try {
-                await client.query(
+                const updateResult = await client.query(
                   `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
                   [requestId, tempGenerationId, orderId]
                 );
-                console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+                
+                if (updateResult.rowCount === 0) {
+                  // Временный джоб не был обновлен - значит был создан новый джоб в saveJob
+                  // Удаляем временный джоб, чтобы не было дубликатов
+                  await client.query(
+                    `DELETE FROM did_jobs WHERE did_job_id = $1 AND order_id = $2`,
+                    [tempGenerationId, orderId]
+                  );
+                  console.log(`   🗑️ Удален временный джоб ${tempGenerationId}, так как был создан новый джоб ${requestId}`);
+                } else {
+                  console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+                }
               } finally {
                 client.release();
               }
@@ -222,6 +233,20 @@ export class ProcessorService {
               await this.orderService.updateOrderResult(orderId, requestId);
             } catch (error: any) {
               console.error('Error in async fal.ai call:', error);
+              // Удаляем временный джоб, если он остался
+              const client = await (await import('../config/database')).default.connect();
+              try {
+                await client.query(
+                  `DELETE FROM did_jobs WHERE did_job_id = $1 AND order_id = $2`,
+                  [tempGenerationId, orderId]
+                );
+                console.log(`   🗑️ Удален временный джоб ${tempGenerationId} после ошибки`);
+              } catch (deleteError) {
+                console.error('Error deleting temp job:', deleteError);
+              } finally {
+                client.release();
+              }
+              
               // Проверяем, может джоб все-таки создан
               const falJobs = await this.falService.getJobsByOrderId(orderId);
               if (falJobs.length > 0) {

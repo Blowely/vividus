@@ -696,10 +696,9 @@ export class TelegramService {
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
       if (userGenerations >= 1) {
-        // Создаем заказ со статусом processing (без оплаты)
+        // Создаем заказ (статус будет установлен в processOrder после проверки генераций)
         // Финальная проверка баланса будет выполнена в processOrder перед началом обработки
         const order = await this.orderService.createOrder(user.id, s3Url, processedPrompt);
-        await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
         // Объединенное сообщение о промпте, создании заказа и начале генерации
         const displayPrompt = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
@@ -707,7 +706,8 @@ export class TelegramService {
           : originalPrompt;
         await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
       
-        // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
+        // Запускаем обработку заказа (статус будет установлен в processOrder после проверки генераций)
+        // Списание генераций произойдет при успешной генерации
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
@@ -953,16 +953,15 @@ export class TelegramService {
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
       if (userGenerations >= 1) {
-        // Создаем merge заказ
+        // Создаем merge заказ (статус будет установлен в processOrder после проверки генераций)
         const order = await this.orderService.createMergeOrder(user.id, firstS3Url, secondS3Url, processedPrompt);
-        await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         
         const displayPromptMerge = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
           : originalPrompt;
         await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPromptMerge}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
         
-        // Запускаем обработку заказа
+        // Запускаем обработку заказа (статус будет установлен в processOrder)
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
@@ -1343,8 +1342,6 @@ export class TelegramService {
         processedPrompt
       );
       
-      await this.orderService.updateOrderStatus(order.id, 'processing' as any);
-      
       // Очищаем состояние
       this.animateV2State.delete(userId);
       
@@ -1354,7 +1351,7 @@ export class TelegramService {
         : originalPrompt;
       await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
       
-      // Запускаем обработку заказа
+      // Запускаем обработку заказа (статус будет установлен в processOrder)
       const { ProcessorService } = await import('./processor');
       const processorService = new ProcessorService();
       await processorService.processOrder(order.id);
@@ -1379,12 +1376,10 @@ export class TelegramService {
       );
       console.log(`📝 Создан заказ для fal.ai: ${order.id}, order_type: ${order.order_type}`);
       
-      await this.orderService.updateOrderStatus(order.id, 'processing' as any);
-      
       // Очищаем состояние (используем ctx.from!.id, number)
       this.animateV2State.delete(ctx.from!.id);
       
-      // Запускаем обработку заказа
+      // Запускаем обработку заказа (статус будет установлен в processOrder)
       const { ProcessorService } = await import('./processor');
       const processorService = new ProcessorService();
       await processorService.processOrder(order.id);
