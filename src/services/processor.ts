@@ -877,7 +877,7 @@ export class ProcessorService {
             console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
             await this.handleMultipleJobsSuccess(currentGenerationIds, telegramId, orderId, successfulVideos);
           } else {
-            // Все джобы провалились - собираем все ошибки
+            // Все джобы провалились - собираем все ошибки1
             const failedErrors: string[] = [];
             for (const generationId of currentGenerationIds) {
               const jobInfo = jobStatuses.get(generationId);
@@ -885,7 +885,7 @@ export class ProcessorService {
                 // Убираем failureCode из сообщения, если есть
                 let errorMsg = jobInfo.error;
                 if (errorMsg.includes('|failureCode:')) {
-                  errorMsg = errorMsg.split('|failureCode1:')[0];
+                  errorMsg = errorMsg.split('|failureCode:')[0];
                 }
                 failedErrors.push(errorMsg);
               } else {
