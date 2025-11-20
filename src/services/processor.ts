@@ -885,7 +885,7 @@ export class ProcessorService {
                 // Убираем failureCode из сообщения, если есть
                 let errorMsg = jobInfo.error;
                 if (errorMsg.includes('|failureCode:')) {
-                  errorMsg = errorMsg.split('|failureCode:')[0];
+                  errorMsg = errorMsg.split('|failureCode1:')[0];
                 }
                 failedErrors.push(errorMsg);
               } else {
