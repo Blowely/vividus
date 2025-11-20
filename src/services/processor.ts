@@ -832,7 +832,8 @@ export class ProcessorService {
         }
 
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
-        const allFinished = completedCount + failedCount === generationIdsRef.ids.length;
+        // Используем idsToCheck.length, так как временные ID уже отфильтрованы
+        const allFinished = idsToCheck.length > 0 && completedCount + failedCount === idsToCheck.length;
 
         // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
@@ -883,9 +884,9 @@ export class ProcessorService {
             }
           }
           
-          // Собираем все успешные результаты
+          // Собираем все успешные результаты (используем idsToCheck, так как временные ID уже отфильтрованы)
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIds) {
+          for (const generationId of idsToCheck) {
             const jobInfo = jobStatuses.get(generationId);
             console.log(`   Проверяю generationId: ${generationId}, status: ${jobInfo?.status}, videoUrl: ${jobInfo?.videoUrl ? 'есть' : 'нет'}`);
             if (jobInfo?.videoUrl) {
@@ -897,11 +898,11 @@ export class ProcessorService {
 
           if (successfulVideos.length > 0) {
             console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
-            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(idsToCheck, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
             const failedErrors: string[] = [];
-            for (const generationId of generationIds) {
+            for (const generationId of idsToCheck) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
@@ -993,9 +994,10 @@ export class ProcessorService {
           // Для основного бота: все джобы завершены - отправляем результат
           hasNotifiedUser = true;
           
-          // Собираем все успешные результаты
+          // Собираем все успешные результаты (используем отфильтрованный список без временных ID)
+          const realIds = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIdsRef.ids) {
+          for (const generationId of realIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
               const job = await this.falService.getJobByRequestId(generationId);
@@ -1004,11 +1006,11 @@ export class ProcessorService {
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(realIds, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
             const failedErrors: string[] = [];
-            for (const generationId of generationIdsRef.ids) {
+            for (const generationId of realIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
@@ -1038,9 +1040,10 @@ export class ProcessorService {
           }
         } else if (attempts >= maxAttempts && !hasNotifiedUser) {
           hasNotifiedUser = true;
-          // Таймаут - отправляем то, что готово
+          // Таймаут - отправляем то, что готово (используем отфильтрованный список без временных ID)
+          const realIds = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIdsRef.ids) {
+          for (const generationId of realIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
               const job = await this.falService.getJobByRequestId(generationId);
@@ -1049,11 +1052,11 @@ export class ProcessorService {
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(realIds, telegramId, orderId, successfulVideos);
           } else {
             // Таймаут - собираем ошибки из провалившихся джобов
             const failedErrors: string[] = [];
-            for (const generationId of generationIdsRef.ids) {
+            for (const generationId of realIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
@@ -1087,8 +1090,10 @@ export class ProcessorService {
         
         if (attempts >= maxAttempts && !hasNotifiedUser) {
           hasNotifiedUser = true;
+          // Используем отфильтрованный список без временных ID
+          const realIds = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIdsRef.ids) {
+          for (const generationId of realIds) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
               const job = await this.falService.getJobByRequestId(generationId);
@@ -1097,11 +1102,11 @@ export class ProcessorService {
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(realIds, telegramId, orderId, successfulVideos);
           } else {
             // Собираем ошибки из провалившихся джобов
             const failedErrors: string[] = [];
-            for (const generationId of generationIdsRef.ids) {
+            for (const generationId of realIds) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 failedErrors.push(jobInfo.error);
