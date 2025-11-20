@@ -73,16 +73,16 @@ export class BroadcastService {
     return `${day}.${month}.${year} ${hours}:${minutes}:${seconds} (МСК)`;
   }
 
-  private async sendToUser(userId: number, broadcastData: BroadcastData): Promise<{ success: boolean; reason?: string }> {
+  private async sendToUser(userId: number, broadcastData: BroadcastData, cachedFileBuffer?: Buffer): Promise<{ success: boolean; reason?: string }> {
     try {
-      if (broadcastData.mediaType && broadcastData.mediaFileId) {
+      if (broadcastData.mediaType && (cachedFileBuffer || broadcastData.mediaFileId)) {
         const options: any = {};
         if (broadcastData.text) {
           options.caption = broadcastData.text;
         }
         
-        // Скачиваем файл через broadcast-бот
-        const fileBuffer = await this.downloadMediaFile(broadcastData.mediaFileId);
+        // Используем кэшированный Buffer или скачиваем файл
+        const fileBuffer = cachedFileBuffer || await this.downloadMediaFile(broadcastData.mediaFileId!);
         
         // Отправляем как Buffer через основной бот
         if (broadcastData.mediaType === 'photo') {
@@ -221,7 +221,7 @@ export class BroadcastService {
         }
         
         // Небольшая задержка чтобы не получить rate limit
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       // Финальная статистика
@@ -340,7 +340,7 @@ export class BroadcastService {
         }
         
         // Небольшая задержка чтобы не получить rate limit
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       // Финальная статистика
@@ -397,6 +397,23 @@ export class BroadcastService {
       
       console.log(`Starting broadcast to ${totalUsers} users`);
       
+      // Скачиваем медиафайл один раз перед началом рассылки (если есть)
+      let cachedFileBuffer: Buffer | undefined;
+      if (broadcastData.mediaType && broadcastData.mediaFileId) {
+        try {
+          console.log(`Downloading media file once for all users...`);
+          cachedFileBuffer = await this.downloadMediaFile(broadcastData.mediaFileId);
+          console.log(`Media file downloaded successfully, size: ${(cachedFileBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+        } catch (error) {
+          console.error('Error downloading media file:', error);
+          await this.adminBot.telegram.sendMessage(
+            adminChatId,
+            '❌ Ошибка при скачивании медиафайла для рассылки'
+          );
+          throw error;
+        }
+      }
+      
       // Отправляем начальное сообщение с прогрессом
       let progressMessageId: number | undefined;
       try {
@@ -416,7 +433,7 @@ export class BroadcastService {
       // Рассылаем сообщения
       for (let i = 0; i < users.length; i++) {
         const user = users[i];
-        const sendResult = await this.sendToUser(user.telegram_id, broadcastData);
+        const sendResult = await this.sendToUser(user.telegram_id, broadcastData, cachedFileBuffer);
         
         processedCount++;
         
@@ -530,6 +547,23 @@ export class BroadcastService {
       
       console.log(`Starting broadcast to ${totalUsers} non-paying users`);
       
+      // Скачиваем медиафайл один раз перед началом рассылки (если есть)
+      let cachedFileBuffer: Buffer | undefined;
+      if (broadcastData.mediaType && broadcastData.mediaFileId) {
+        try {
+          console.log(`Downloading media file once for all users...`);
+          cachedFileBuffer = await this.downloadMediaFile(broadcastData.mediaFileId);
+          console.log(`Media file downloaded successfully, size: ${(cachedFileBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+        } catch (error) {
+          console.error('Error downloading media file:', error);
+          await this.adminBot.telegram.sendMessage(
+            adminChatId,
+            '❌ Ошибка при скачивании медиафайла для рассылки'
+          );
+          throw error;
+        }
+      }
+      
       // Отправляем начальное сообщение с прогрессом
       let progressMessageId: number | undefined;
       try {
@@ -550,7 +584,7 @@ export class BroadcastService {
       // Рассылаем сообщения
       for (let i = 0; i < users.length; i++) {
         const user = users[i];
-        const sendResult = await this.sendToUser(user.telegram_id, broadcastData);
+        const sendResult = await this.sendToUser(user.telegram_id, broadcastData, cachedFileBuffer);
         
         processedCount++;
         
@@ -588,8 +622,8 @@ export class BroadcastService {
           }
         }
         
-        // Задержка между отправками
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Задержка между отправками (увеличена до 100мс для безопасности от rate limits)
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       // Отправляем финальную статистику
