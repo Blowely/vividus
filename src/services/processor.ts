@@ -224,6 +224,25 @@ export class ProcessorService {
                   console.log(`   🗑️ Удален временный джоб ${tempGenerationId}, так как был создан новый джоб ${requestId}`);
                 } else {
                   console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+                  
+                  // Проверяем, нет ли дубликатов (если был создан новый джоб через saveJob)
+                  // Удаляем все дубликаты, оставляя только один джоб с минимальным id
+                  const duplicateCheck = await client.query(
+                    `SELECT id FROM did_jobs WHERE did_job_id = $1 AND order_id = $2 ORDER BY created_at ASC`,
+                    [requestId, orderId]
+                  );
+                  
+                  if (duplicateCheck.rows.length > 1) {
+                    // Есть дубликаты - удаляем все кроме первого (самого старого)
+                    const idsToDelete = duplicateCheck.rows.slice(1).map(row => row.id);
+                    if (idsToDelete.length > 0) {
+                      await client.query(
+                        `DELETE FROM did_jobs WHERE id = ANY($1::uuid[])`,
+                        [idsToDelete]
+                      );
+                      console.log(`   🗑️ Удалено ${idsToDelete.length} дубликатов джоба ${requestId}`);
+                    }
+                  }
                 }
               } finally {
                 client.release();
@@ -652,17 +671,66 @@ export class ProcessorService {
         if (isFalOrder) {
           const falJobs = await this.falService.getJobsByOrderId(orderId);
           const realFalJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
-          if (realFalJobs.length > 0 && generationIdsRef.ids.some(id => id.startsWith('fal_temp_'))) {
-            // Обновляем generationIds на реальные джобы
+          
+          // Проверяем, есть ли временные ID в списке и реальные джобы в БД
+          const hasTempIds = generationIdsRef.ids.some(id => id.startsWith('fal_temp_'));
+          
+          if (realFalJobs.length > 0 && hasTempIds) {
+            // Обновляем generationIds на реальные джобы, убирая временные
             const realGenerationIds = realFalJobs.map(job => job.did_job_id);
-            console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIdsRef.ids.join(', ')} → ${realGenerationIds.join(', ')}`);
-            generationIdsRef.ids = realGenerationIds;
-            await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
+            // Убираем дубликаты и сортируем для консистентности
+            const uniqueRealIds = [...new Set(realGenerationIds)];
+            console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIdsRef.ids.join(', ')} → ${uniqueRealIds.join(', ')}`);
+            generationIdsRef.ids = uniqueRealIds;
+            await this.orderService.updateOrderResult(orderId, uniqueRealIds[0]);
+          } else if (realFalJobs.length > 0) {
+            // Есть реальные джобы, но нет временных в списке - просто убираем дубликаты
+            const realGenerationIds = realFalJobs.map(job => job.did_job_id);
+            const uniqueRealIds = [...new Set(realGenerationIds)];
+            // Обновляем только если список изменился
+            const currentIds = [...new Set(generationIdsRef.ids)];
+            if (currentIds.length !== uniqueRealIds.length || !currentIds.every(id => uniqueRealIds.includes(id))) {
+              console.log(`🔄 Обновляю generationIds, убирая дубликаты: ${generationIdsRef.ids.join(', ')} → ${uniqueRealIds.join(', ')}`);
+              generationIdsRef.ids = uniqueRealIds;
+              await this.orderService.updateOrderResult(orderId, uniqueRealIds[0]);
+            }
+          } else if (hasTempIds && realFalJobs.length === 0) {
+            // Временные ID есть, но реальных джобов нет - проверяем, может временный джоб был обновлен
+            // Ищем джобы, которые могли быть обновлены из временных
+            const tempIds = generationIdsRef.ids.filter(id => id.startsWith('fal_temp_'));
+            for (const tempId of tempIds) {
+              // Проверяем, есть ли джоб с этим order_id, который не является временным
+              const updatedJob = falJobs.find(job => 
+                job.order_id === orderId && 
+                !job.did_job_id.startsWith('fal_temp_') &&
+                job.did_job_id !== tempId
+              );
+              if (updatedJob) {
+                // Временный джоб был обновлен - заменяем его на реальный
+                const index = generationIdsRef.ids.indexOf(tempId);
+                if (index !== -1) {
+                  generationIdsRef.ids[index] = updatedJob.did_job_id;
+                  console.log(`🔄 Заменяю временный ID ${tempId} на реальный ${updatedJob.did_job_id}`);
+                }
+              }
+            }
+            // Убираем оставшиеся временные ID, если они не были заменены
+            generationIdsRef.ids = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
+            if (generationIdsRef.ids.length > 0) {
+              await this.orderService.updateOrderResult(orderId, generationIdsRef.ids[0]);
+            }
           }
         }
         
         // Проверяем статус всех джобов (всегда используем fal.ai)
-        const statusPromises = generationIdsRef.ids.map(async (generationId) => {
+        // Пропускаем временные ID, так как они уже должны быть заменены на реальные
+        const idsToCheck = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
+        if (idsToCheck.length === 0) {
+          console.log(`⚠️ Нет джобов для проверки статуса (все временные были отфильтрованы)`);
+          return;
+        }
+        
+        const statusPromises = idsToCheck.map(async (generationId) => {
           try {
             const jobStatus = await this.falService.checkJobStatus(generationId);
             return { generationId, jobStatus };
