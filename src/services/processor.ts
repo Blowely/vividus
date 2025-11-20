@@ -761,6 +761,8 @@ export class ProcessorService {
               videoUrl,
               error: undefined
             });
+            // Обновляем статус джоба в БД
+            await this.falService.updateJobStatus(generationId, 'completed' as any, videoUrl);
             continue;
           }
           
@@ -1253,6 +1255,30 @@ export class ProcessorService {
         console.log(`✅ Заказ ${orderId} (animate_v2) успешно завершен. Отправляю результат в broadcast-bot...`);
         await this.sendAnimateV2ResultToBroadcastBot(telegramId, videos);
         return;
+      }
+
+      // Обновляем статус всех джобов на completed перед отправкой
+      // Получаем все джобы для этого заказа и обновляем их статус
+      const allJobs = await this.falService.getJobsByOrderId(orderId);
+      const defaultVideoUrl = videos[0]?.url; // Используем первый URL как fallback
+      
+      for (const job of allJobs) {
+        if (job.status !== 'completed') {
+          try {
+            // Используем URL из джоба, если он есть, иначе из videos
+            const videoUrl = job.result_url || defaultVideoUrl;
+            if (videoUrl) {
+              await this.falService.updateJobStatus(job.did_job_id, 'completed' as any, videoUrl);
+              console.log(`   ✅ Обновлен статус джоба ${job.did_job_id} на completed`);
+            } else {
+              console.log(`   ⚠️ Нет URL для джоба ${job.did_job_id}, пропускаю обновление`);
+            }
+          } catch (error) {
+            console.error(`   ⚠️ Ошибка при обновлении статуса джоба ${job.did_job_id}:`, error);
+          }
+        } else {
+          console.log(`   ℹ️ Джоб ${job.did_job_id} уже имеет статус completed`);
+        }
       }
 
       // Отправляем видео пользователю
