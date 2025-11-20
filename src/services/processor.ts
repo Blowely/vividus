@@ -877,7 +877,7 @@ export class ProcessorService {
             console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
             await this.handleMultipleJobsSuccess(currentGenerationIds, telegramId, orderId, successfulVideos);
           } else {
-            // Все джобы провалились - собираем все ошибки1
+            // Все джобы провалились - собираем все ошибки23
             const failedErrors: string[] = [];
             for (const generationId of currentGenerationIds) {
               const jobInfo = jobStatuses.get(generationId);
