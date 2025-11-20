@@ -3,7 +3,6 @@ import { config } from 'dotenv';
 import { UserService } from './user';
 import { OrderService } from './order';
 import { PaymentService } from './payment';
-import { RunwayService } from './runway';
 import { FileService } from './file';
 import { MockService } from './mock';
 import { AnalyticsService } from './analytics';
@@ -16,7 +15,6 @@ export class TelegramService {
   private userService: UserService;
   private orderService: OrderService;
   private paymentService: PaymentService;
-  private runwayService: RunwayService;
   private fileService: FileService;
   private mockService: MockService;
   private analyticsService: AnalyticsService;
@@ -34,7 +32,6 @@ export class TelegramService {
     this.userService = new UserService();
     this.orderService = new OrderService();
     this.paymentService = new PaymentService();
-    this.runwayService = new RunwayService();
     this.fileService = new FileService();
     this.mockService = new MockService();
     this.analyticsService = new AnalyticsService();
@@ -675,7 +672,8 @@ export class TelegramService {
       // Remove from pending prompts
       this.pendingPrompts.delete(user.telegram_id);
       
-      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      // Для fal.ai отправляем изображение как есть (без обработки)
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
       
       // Process the prompt
       let processedPrompt = promptText.toLowerCase().trim();
@@ -940,9 +938,9 @@ export class TelegramService {
       this.pendingPromptsData.delete(user.telegram_id);
       this.pendingPrompts.delete(user.telegram_id);
       
-      // Загружаем оба фото в S3
-      const firstS3Url = await this.fileService.downloadTelegramFileToS3(firstFileId);
-      const secondS3Url = await this.fileService.downloadTelegramFileToS3(secondFileId);
+      // Загружаем оба фото в S3 (для fal.ai отправляем как есть, без обработки)
+      const firstS3Url = await this.fileService.downloadTelegramFileToS3(firstFileId, true);
+      const secondS3Url = await this.fileService.downloadTelegramFileToS3(secondFileId, true);
       
       // Обрабатываем промпт
       let processedPrompt = promptText.toLowerCase().trim();
@@ -1343,11 +1341,11 @@ export class TelegramService {
         processedPrompt = `animate this image with ${translatedPrompt}`;
       }
       
-      // Создаем заказ с префиксом fal: для использования fal.ai
+      // Создаем заказ для использования fal.ai
       const order = await this.orderService.createOrder(
         user.id, 
         s3Url, 
-        `fal:${processedPrompt}`
+        processedPrompt
       );
       
       await this.orderService.updateOrderStatus(order.id, 'processing' as any);
@@ -1375,14 +1373,14 @@ export class TelegramService {
   private async createAnimateV2Order(ctx: Context, user: any, fileId: string): Promise<void> {
     try {
       // Загружаем фото в S3
-      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      // Для fal.ai отправляем изображение как есть (без обработки)
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
       
-      // Создаем обычный заказ (single), но сохраняем в custom_prompt маркер для fal.ai
-      // Используем префикс "fal:" чтобы ProcessorService использовал fal.ai вместо RunwayML
+      // Создаем обычный заказ (single) для fal.ai
       const order = await this.orderService.createOrder(
         user.id, 
         s3Url, 
-        'fal:animate this image with subtle movements and breathing effect'
+        'animate this image with subtle movements and breathing effect'
       );
       console.log(`📝 Создан заказ для fal.ai: ${order.id}, order_type: ${order.order_type}`);
       
@@ -1740,9 +1738,10 @@ export class TelegramService {
         return;
       }
       
-      // Check status via RunwayML API
-      const runwayService = new (await import('./runway')).RunwayService();
-      const status = await runwayService.checkJobStatus(latestOrder.did_job_id);
+      // Check status via fal.ai API
+      const { FalService } = await import('./fal');
+      const falService = new FalService();
+      const status = await falService.checkJobStatus(latestOrder.did_job_id);
       
       if (status.status === 'SUCCEEDED' && status.output && status.output.length > 0) {
         const videoUrl = status.output[0];
@@ -2031,7 +2030,8 @@ ${packageListText}
       // Получаем промпт (если был сохранен)
       const promptText = 'animate this image with subtle movements and breathing effect'; // Можно сохранять промпт отдельно
       
-      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+      // Для fal.ai отправляем изображение как есть (без обработки)
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
       
       // Создаем заказ с оплатой
       const order = await this.orderService.createOrder(user.id, s3Url, promptText);
@@ -2474,7 +2474,8 @@ ${packageListText}
       // Загружаем все фото в S3
       const photoUrls: string[] = [];
       for (const fileId of photos) {
-        const s3Url = await this.fileService.downloadTelegramFileToS3(fileId);
+        // Для fal.ai отправляем изображение как есть (без обработки)
+      const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
         photoUrls.push(s3Url);
       }
       

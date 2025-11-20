@@ -112,31 +112,4 @@ router.post('/yoomoney', async (req, res) => {
   }
 });
 
-// RunwayML webhook for job status updates
-router.post('/runway', async (req, res) => {
-  try {
-    const { id, status, output, error } = req.body;
-    
-    if (!id || !status) {
-      return res.status(400).json({ error: 'Missing required parameters' });
-    }
-
-    // Update job status
-    const { RunwayService } = await import('../services/runway');
-    const runwayService = new RunwayService();
-    
-    await runwayService.updateJobStatus(
-      id, 
-      status as any, 
-      output?.[0], 
-      error
-    );
-
-    res.status(200).json({ status: 'success' });
-  } catch (error) {
-    console.error('Runway webhook error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 export default router;

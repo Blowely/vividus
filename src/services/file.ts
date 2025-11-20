@@ -261,10 +261,8 @@ export class FileService {
       // Convert to Buffer
       let buffer = Buffer.from(response.data);
       
-      // Обрабатываем изображение только если не пропущена обработка (для fal.ai отправляем как есть)
-      if (!skipProcessing) {
-        buffer = await this.processImageForRunway(buffer);
-      }
+      // Для fal.ai отправляем изображение как есть (без обработки)
+      // Обработка больше не требуется, так как все заказы идут через fal.ai
       
       // Generate unique filename
       const timestamp = Date.now();

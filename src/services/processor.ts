@@ -1,4 +1,3 @@
-import { RunwayService } from './runway';
 import { FalService } from './fal';
 import { OrderService } from './order';
 import { FileService } from './file';
@@ -10,7 +9,6 @@ import pool from '../config/database';
 config();
 
 export class ProcessorService {
-  private runwayService: RunwayService;
   private falService: FalService;
   private orderService: OrderService;
   private fileService: FileService;
@@ -19,7 +17,6 @@ export class ProcessorService {
   private readonly MAX_CONCURRENT_ORDERS: number;
 
   constructor() {
-    this.runwayService = new RunwayService();
     this.falService = new FalService();
     this.orderService = new OrderService();
     this.fileService = new FileService();
@@ -65,17 +62,59 @@ export class ProcessorService {
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
-      // Create videos using RunwayML with all available models - check order type
+      // Create videos using fal.ai - check order type
       let generationIds: string[];
       try {
         console.log(`🔍 Processing order ${orderId}, order_type: ${order.order_type}, original_file_path: ${order.original_file_path?.substring(0, 50)}...`);
-        console.log(`   custom_prompt: ${order.custom_prompt?.substring(0, 100) || 'null'}, startsWith('fal:'): ${order.custom_prompt?.startsWith('fal:') || false}`);
+        console.log(`   custom_prompt: ${order.custom_prompt?.substring(0, 100) || 'null'}`);
         
-        // ВАЖНО: Проверяем префикс fal: ПЕРВЫМ, до проверки order_type
-        // Это нужно для заказов "Оживить фото (NEW)" из основного бота
-        if (order.custom_prompt && order.custom_prompt.startsWith('fal:')) {
-          // Заказ с префиксом fal: - используем fal.ai для основного бота
-          console.log(`   → Обработка с fal.ai (основной бот), custom_prompt: ${order.custom_prompt.substring(0, 50)}...`);
+        if (order.order_type === 'combine_and_animate') {
+          // Combine and animate order - two-step process
+          console.log(`   → Обработка как combine_and_animate`);
+          await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
+          return; // Exit early, processing continues in processCombineAndAnimateOrder
+        } else if (order.order_type === 'animate_v2') {
+          // Animate v2 order - используем fal.ai (для broadcast-bot)
+          console.log(`   → Обработка как animate_v2 (fal.ai для broadcast-bot)`);
+          
+          // Запускаем вызов fal.ai асинхронно (не блокируем event loop)
+          console.log(`👀 Запускаю вызов fal.ai асинхронно для animate_v2...`);
+          
+          (async () => {
+            try {
+              const requestId = await this.falService.createVideoFromImage(
+                order.original_file_path,
+                orderId,
+                order.custom_prompt
+              );
+              console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
+              
+              // После создания джоба запускаем мониторинг
+              const generationIds = [requestId];
+              await this.orderService.updateOrderResult(orderId, generationIds[0]);
+              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
+              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+            } catch (error: any) {
+              console.error('Error in async fal.ai call for animate_v2:', error);
+              // Проверяем, может джоб все-таки создан
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
+              if (falJobs.length > 0) {
+                const generationIds = falJobs.map(job => job.did_job_id);
+                await this.orderService.updateOrderResult(orderId, generationIds[0]);
+                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              } else {
+                // Если джоб не создан, обновляем статус заказа на failed
+                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+                console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Статус обновлен на failed.`);
+              }
+            }
+          })();
+          
+          return; // Выходим сразу, вызов выполняется асинхронно
+        } else {
+          // Все заказы обрабатываются через fal.ai
+          console.log(`   → Обработка с fal.ai, order_type: ${order.order_type || 'not set'}`);
           
           // Отправляем прогресс-бар СРАЗУ, до вызова API (чтобы пользователь видел его сразу)
           let progressMessageId: number | null = null;
@@ -90,9 +129,12 @@ export class ProcessorService {
               // Сохраняем progressMessageId в custom_prompt (временно, для мониторинга)
               const client = await (await import('../config/database')).default.connect();
               try {
+                const promptWithProgress = order.custom_prompt 
+                  ? `${order.custom_prompt}|progressMessageId:${progressMessageId}`
+                  : `progressMessageId:${progressMessageId}`;
                 await client.query(
                   `UPDATE orders SET custom_prompt = $1 WHERE id = $2`,
-                  [`${order.custom_prompt}|progressMessageId:${progressMessageId}`, orderId]
+                  [promptWithProgress, orderId]
                 );
               } finally {
                 client.release();
@@ -103,7 +145,7 @@ export class ProcessorService {
           }
           
           // Запускаем вызов fal.ai АСИНХРОННО (не блокируем event loop)
-          const cleanPrompt = order.custom_prompt.replace(/^fal:/, '').split('|progressMessageId:')[0];
+          const cleanPrompt = order.custom_prompt?.split('|progressMessageId:')[0] || 'animate this image with subtle movements and breathing effect';
           
           // Создаем временный generationId для немедленного запуска мониторинга
           const tempGenerationId = `fal_temp_${orderId}_${Date.now()}`;
@@ -175,88 +217,15 @@ export class ProcessorService {
           })();
           
           return; // Выходим сразу, вызов выполняется асинхронно
-        } else if (order.order_type === 'combine_and_animate') {
-          // Combine and animate order - two-step process
-          console.log(`   → Обработка как combine_and_animate`);
-          await this.processCombineAndAnimateOrder(orderId, order, user.telegram_id);
-          return; // Exit early, processing continues in processCombineAndAnimateOrder
-        } else if (order.order_type === 'animate_v2') {
-          // Animate v2 order - используем fal.ai (для broadcast-bot)
-          console.log(`   → Обработка как animate_v2 (fal.ai для broadcast-bot)`);
-          
-          // Запускаем вызов fal.ai асинхронно (не блокируем event loop)
-          console.log(`👀 Запускаю вызов fal.ai асинхронно для animate_v2...`);
-          
-          (async () => {
-            try {
-              const requestId = await this.falService.createVideoFromImage(
-                order.original_file_path,
-                orderId,
-                order.custom_prompt
-              );
-              console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
-              
-              // После создания джоба запускаем мониторинг
-              const generationIds = [requestId];
-              await this.orderService.updateOrderResult(orderId, generationIds[0]);
-              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
-              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
-            } catch (error: any) {
-              console.error('Error in async fal.ai call for animate_v2:', error);
-              // Проверяем, может джоб все-таки создан
-              const falJobs = await this.falService.getJobsByOrderId(orderId);
-              if (falJobs.length > 0) {
-                const generationIds = falJobs.map(job => job.did_job_id);
-                await this.orderService.updateOrderResult(orderId, generationIds[0]);
-                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
-                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
-              }
-            }
-          })();
-          
-          return; // Выходим сразу, вызов выполняется асинхронно
-        } else if (order.order_type === 'merge' && order.second_file_path) {
-          // Merge order - use second image as reference for transition
-          console.log(`   → Обработка как merge (RunwayML)`);
-          generationIds = await this.runwayService.createMultipleVideosFromTwoImages(
-            order.original_file_path,
-            order.second_file_path,
-            orderId,
-            order.custom_prompt
-          );
-        } else {
-          // Single image order - создаем генерации для всех доступных моделей
-          // ВАЖНО: Проверяем, не является ли это заказом с префиксом fal: (должен обрабатываться выше)
-          if (order.custom_prompt && order.custom_prompt.startsWith('fal:')) {
-            console.log(`   ⚠️ ОШИБКА: Заказ с префиксом fal: попал в блок single! Это не должно происходить.`);
-            throw new Error('Заказ с префиксом fal: должен обрабатываться в блоке выше');
-          }
-          console.log(`   → Обработка как single (RunwayML), order_type: ${order.order_type || 'not set'}`);
-          generationIds = await this.runwayService.createMultipleVideosFromImage(
-            order.original_file_path,
-            orderId,
-            order.custom_prompt
-          );
         }
-
-        console.log(`📊 Получено ${generationIds.length} generation IDs для заказа ${orderId}:`, generationIds);
-
-        if (generationIds.length === 0) {
-          throw new Error('Не удалось создать ни одной генерации');
-        }
-
-        // Update order with first generation ID (для обратной совместимости)
-        await this.orderService.updateOrderResult(orderId, generationIds[0]);
-
-        console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
-        // Start monitoring all jobs
-        this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+        
+        // Этот код недостижим для обычных заказов, так как они делают return выше
+        // Оставлен для обратной совместимости, если появятся другие типы заказов
       } catch (error: any) {
         // Если хотя бы одна генерация создана, продолжаем мониторинг
-        const runwayJobs = await this.runwayService.getJobsByOrderId(orderId);
         const falJobs = await this.falService.getJobsByOrderId(orderId);
-        const allJobs = [...runwayJobs, ...falJobs];
-        if (allJobs.length > 0) {
+        const allJobs = [...falJobs];
+        if (allJobs.length > 0 && user) {
           console.log(`⚠️ Ошибка при создании генерации, но найдено ${allJobs.length} джобов в БД. Продолжаю мониторинг...`);
           generationIds = allJobs.map(job => job.did_job_id);
           await this.orderService.updateOrderResult(orderId, generationIds[0]);
@@ -271,9 +240,8 @@ export class ProcessorService {
       console.error(`Error processing order ${orderId}:`, error);
       
       // Проверяем, есть ли уже созданные джобы (возможно, запрос успешен, но был таймаут)
-      const runwayJobs = await this.runwayService.getJobsByOrderId(orderId);
       const falJobs = await this.falService.getJobsByOrderId(orderId);
-      const allJobs = [...runwayJobs, ...falJobs];
+      const allJobs = [...falJobs];
       
       if (allJobs.length > 0) {
         console.log(`⚠️ Ошибка при обработке заказа (возможно таймаут), но найдено ${allJobs.length} джобов в БД. Продолжаю мониторинг без показа ошибки пользователю...`);
@@ -326,8 +294,10 @@ export class ProcessorService {
     // Определяем, является ли заказ animate_v2 (для отправки в broadcast-bot)
     const order = await this.orderService.getOrder(orderId);
     const isAnimateV2 = order?.order_type === 'animate_v2';
-    // Определяем, использует ли заказ fal.ai (для фейкового прогресса в основном боте)
-    const isFalOrder = order?.custom_prompt?.startsWith('fal:') || false;
+    // Все заказы используют fal.ai (для фейкового прогресса в основном боте)
+    const isFalOrder = !isAnimateV2;
+    // Используем объект-ссылку, который можно изменять в замыкании
+    let generationIdsRef = { ids: [...generationIds] };
     const broadcastBotToken = isAnimateV2 ? process.env.BROADCAST_BOT_TOKEN : null;
     let broadcastBot: Telegraf | null = null;
     
@@ -399,7 +369,7 @@ export class ProcessorService {
         try {
           const orderData = await this.orderService.getOrder(orderId);
           if (orderData?.custom_prompt) {
-            // Проверяем формат: fal:prompt|progressMessageId:123
+            // Проверяем формат: prompt|progressMessageId:123
             const progressMatch = orderData.custom_prompt.match(/progressMessageId:(\d+)/);
             if (progressMatch) {
               progressMessageId = parseInt(progressMatch[1], 10);
@@ -439,7 +409,7 @@ export class ProcessorService {
         return;
       }
       
-      // Для не-animate_v2 и не-fal.ai отправляем как обычно
+      // Для animate_v2 отправляем как обычно
       const botToUse = this.bot;
       const progressBar = this.createProgressBar(0);
       const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
@@ -459,7 +429,6 @@ export class ProcessorService {
     await sendInitialProgress();
 
     // Фейковая имитация прогресса для animate_v2 (broadcast-bot) и fal.ai заказов (основной бот)
-    // Для обычных RunwayML заказов используем только реальный прогресс
     const useFakeProgress = isAnimateV2 || isFalOrder;
     let fakeProgress = 0;
     const startTime = Date.now();
@@ -638,23 +607,19 @@ export class ProcessorService {
         if (isFalOrder) {
           const falJobs = await this.falService.getJobsByOrderId(orderId);
           const realFalJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
-          if (realFalJobs.length > 0 && generationIds.some(id => id.startsWith('fal_temp_'))) {
+          if (realFalJobs.length > 0 && generationIdsRef.ids.some(id => id.startsWith('fal_temp_'))) {
             // Обновляем generationIds на реальные джобы
             const realGenerationIds = realFalJobs.map(job => job.did_job_id);
-            console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIds.join(', ')} → ${realGenerationIds.join(', ')}`);
-            generationIds = realGenerationIds;
+            console.log(`🔄 Обновляю generationIds с временных на реальные: ${generationIdsRef.ids.join(', ')} → ${realGenerationIds.join(', ')}`);
+            generationIdsRef.ids = realGenerationIds;
             await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
           }
         }
         
-        // Проверяем статус всех джобов
-        const statusPromises = generationIds.map(async (generationId) => {
+        // Проверяем статус всех джобов (всегда используем fal.ai)
+        const statusPromises = generationIdsRef.ids.map(async (generationId) => {
           try {
-            // Определяем, какой сервис использовать по префиксу
-            const isFalJob = generationId.startsWith('fal_');
-            const jobStatus = isFalJob 
-              ? await this.falService.checkJobStatus(generationId)
-              : await this.runwayService.checkJobStatus(generationId);
+            const jobStatus = await this.falService.checkJobStatus(generationId);
             return { generationId, jobStatus };
           } catch (error) {
             console.error(`Error checking status for ${generationId}:`, error);
@@ -695,7 +660,7 @@ export class ProcessorService {
             }
           }
           
-          // Определяем URL видео в зависимости от формата ответа (Runway или fal.ai)
+          // Определяем URL видео в зависимости от формата ответа fal.ai
           const videoUrl = status === 'SUCCEEDED' || status === 'COMPLETED' 
             ? (jobStatus.output?.[0] || jobStatus.video?.url)
             : undefined;
@@ -710,29 +675,19 @@ export class ProcessorService {
             completedCount++;
             // Определяем URL видео в зависимости от формата ответа
             const videoUrl = jobStatus.output?.[0] || jobStatus.video?.url;
-            // Определяем, какой сервис использовать
-            const isFalJob = generationId.startsWith('fal_');
-            if (isFalJob) {
-              await this.falService.updateJobStatus(generationId, 'completed' as any, videoUrl);
-            } else {
-              await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
-            }
+            // Всегда используем fal.ai
+            await this.falService.updateJobStatus(generationId, 'completed' as any, videoUrl);
           } else if (status === 'FAILED') {
             failedCount++;
-            // Определяем, какой сервис использовать
-            const isFalJob = generationId.startsWith('fal_');
-            if (isFalJob) {
-              await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
-            } else {
-            await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
-            }
+            // Всегда используем fal.ai
+            await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
           } else {
             processingCount++;
             if (jobStatus.progress !== undefined) {
               totalProgress += jobStatus.progress;
             } else {
               // Для fal.ai без прогресса симулируем прогресс на основе времени
-              // Примерно 2-3 минуты на генерацию (используем десятичный формат 0-1, как RunwayML)
+              // Примерно 2-3 минуты на генерацию
               const estimatedProgress = Math.min(0.95, (attempts / 30));
               totalProgress += estimatedProgress;
             }
@@ -764,7 +719,7 @@ export class ProcessorService {
         }
 
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
-        const allFinished = completedCount + failedCount === generationIds.length;
+        const allFinished = completedCount + failedCount === generationIdsRef.ids.length;
 
         // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
@@ -821,10 +776,7 @@ export class ProcessorService {
             const jobInfo = jobStatuses.get(generationId);
             console.log(`   Проверяю generationId: ${generationId}, status: ${jobInfo?.status}, videoUrl: ${jobInfo?.videoUrl ? 'есть' : 'нет'}`);
             if (jobInfo?.videoUrl) {
-              const isFalJob = generationId.startsWith('fal_');
-              const job = isFalJob 
-                ? await this.falService.getJobByRequestId(generationId)
-                : await this.runwayService.getJobByGenerationId(generationId);
+              const job = await this.falService.getJobByRequestId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
@@ -846,10 +798,7 @@ export class ProcessorService {
                 }
                 failedErrors.push(errorMsg);
               } else {
-                const isFalJob = generationId.startsWith('fal_');
-                const job = isFalJob
-                  ? await this.falService.getJobByRequestId(generationId)
-                  : await this.runwayService.getJobByGenerationId(generationId);
+                const job = await this.falService.getJobByRequestId(generationId);
                 if (job?.error_message) {
                   // Убираем failureCode из сообщения, если есть
                   let errorMsg = job.error_message;
@@ -894,7 +843,7 @@ export class ProcessorService {
               }
             }
           } else if (!isAnimateV2 && !useFakeProgress) {
-            // Только для не-animate_v2 заказов обновляем прогресс (используем ТОЛЬКО реальный прогресс от RunwayML)
+            // Только для не-animate_v2 заказов обновляем прогресс (используем реальный прогресс от fal.ai)
             const realProgress = processingCount > 0 ? Math.round((totalProgress / processingCount) * 100) : 0;
             const displayProgress = realProgress;
             
@@ -933,23 +882,20 @@ export class ProcessorService {
           
           // Собираем все успешные результаты
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIds) {
+          for (const generationId of generationIdsRef.ids) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const isFalJob = generationId.startsWith('fal_');
-              const job = isFalJob 
-                ? await this.falService.getJobByRequestId(generationId)
-                : await this.runwayService.getJobByGenerationId(generationId);
+              const job = await this.falService.getJobByRequestId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
             const failedErrors: string[] = [];
-            for (const generationId of generationIds) {
+            for (const generationId of generationIdsRef.ids) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
@@ -960,10 +906,7 @@ export class ProcessorService {
                 failedErrors.push(errorMsg);
               } else {
                 // Проверяем БД на наличие ошибок
-                const isFalJob = generationId.startsWith('fal_');
-                const job = isFalJob
-                  ? await this.falService.getJobByRequestId(generationId)
-                  : await this.runwayService.getJobByGenerationId(generationId);
+                const job = await this.falService.getJobByRequestId(generationId);
                 if (job?.error_message) {
                   // Убираем failureCode из сообщения, если есть
                   let errorMsg = job.error_message;
@@ -984,23 +927,20 @@ export class ProcessorService {
           hasNotifiedUser = true;
           // Таймаут - отправляем то, что готово
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIds) {
+          for (const generationId of generationIdsRef.ids) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const isFalJob = generationId.startsWith('fal_');
-              const job = isFalJob
-                ? await this.falService.getJobByRequestId(generationId)
-                : await this.runwayService.getJobByGenerationId(generationId);
+              const job = await this.falService.getJobByRequestId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
           } else {
             // Таймаут - собираем ошибки из провалившихся джобов
             const failedErrors: string[] = [];
-            for (const generationId of generationIds) {
+            for (const generationId of generationIdsRef.ids) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
@@ -1011,10 +951,7 @@ export class ProcessorService {
                 failedErrors.push(errorMsg);
               } else {
                 // Проверяем БД на наличие ошибок
-                const isFalJob = generationId.startsWith('fal_');
-                const job = isFalJob
-                  ? await this.falService.getJobByRequestId(generationId)
-                  : await this.runwayService.getJobByGenerationId(generationId);
+                const job = await this.falService.getJobByRequestId(generationId);
                 if (job?.error_message) {
                   // Убираем failureCode из сообщения, если есть
                   let errorMsg = job.error_message;
@@ -1038,32 +975,26 @@ export class ProcessorService {
         if (attempts >= maxAttempts && !hasNotifiedUser) {
           hasNotifiedUser = true;
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of generationIds) {
+          for (const generationId of generationIdsRef.ids) {
             const jobInfo = jobStatuses.get(generationId);
             if (jobInfo?.videoUrl) {
-              const isFalJob = generationId.startsWith('fal_');
-              const job = isFalJob
-                ? await this.falService.getJobByRequestId(generationId)
-                : await this.runwayService.getJobByGenerationId(generationId);
+              const job = await this.falService.getJobByRequestId(generationId);
               successfulVideos.push({ url: jobInfo.videoUrl, model: job?.model });
             }
           }
 
           if (successfulVideos.length > 0) {
-            await this.handleMultipleJobsSuccess(generationIds, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(generationIdsRef.ids, telegramId, orderId, successfulVideos);
           } else {
             // Собираем ошибки из провалившихся джобов
             const failedErrors: string[] = [];
-            for (const generationId of generationIds) {
+            for (const generationId of generationIdsRef.ids) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 failedErrors.push(jobInfo.error);
               } else {
                 // Проверяем БД на наличие ошибок
-                const isFalJob = generationId.startsWith('fal_');
-                const job = isFalJob
-                  ? await this.falService.getJobByRequestId(generationId)
-                  : await this.runwayService.getJobByGenerationId(generationId);
+                const job = await this.falService.getJobByRequestId(generationId);
                 if (job?.error_message) {
                   failedErrors.push(job.error_message);
                 }
@@ -1091,7 +1022,7 @@ export class ProcessorService {
       try {
         attempts++;
         
-        const jobStatus = await this.runwayService.checkJobStatus(generationId);
+        const jobStatus = await this.falService.checkJobStatus(generationId);
         
         if (jobStatus.status === 'SUCCEEDED') {
           // Job completed successfully
@@ -1206,39 +1137,29 @@ export class ProcessorService {
         return;
       }
 
-      // Для fal.ai заказов (основной бот) НЕ списываем генерации (для админов)
-      const isFalOrder = order?.custom_prompt?.startsWith('fal:');
-      if (isFalOrder) {
-        console.log(`✅ Заказ ${orderId} (fal.ai) успешно завершен. Отправляю результат в основной бот...`);
-        // Отправляем видео в основной бот
-        for (const video of videos) {
-          if (video.url) {
-            try {
-              await this.bot.telegram.sendVideo(telegramId, video.url, {
-                caption: `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
-                parse_mode: 'HTML'
-              });
-            } catch (error) {
-              console.error(`Error sending video:`, error);
-              await this.bot.telegram.sendMessage(
-                telegramId,
-                `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
-                { parse_mode: 'HTML' }
-              );
-            }
+      // Отправляем видео пользователю
+      for (const video of videos) {
+        if (video.url) {
+          try {
+            await this.bot.telegram.sendVideo(telegramId, video.url, {
+              caption: `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+              parse_mode: 'HTML'
+            });
+          } catch (error) {
+            console.error(`Error sending video:`, error);
+            await this.bot.telegram.sendMessage(
+              telegramId,
+              `🎬 Видео готово!\n\nРезультат: <a href="${video.url}">скачать</a>\n\nСпасибо за использование Vividus Bot!`,
+              { parse_mode: 'HTML' }
+            );
           }
         }
-        // Отправляем сообщение о возможности следующего заказа
-        await this.bot.telegram.sendMessage(
-          telegramId,
-          '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
-        );
-        return;
       }
-
+      
       // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
       // Списываем генерации только после успешной генерации
-      if (order) {
+      // Для animate_v2 не списываем генерации (broadcast-bot)
+      if (order && order.order_type !== 'animate_v2') {
         const hasPayment = await this.orderService.hasPayment(order.id);
         if (!hasPayment) {
           await this.userService.deductGenerations(telegramId, 1);
@@ -1270,11 +1191,11 @@ export class ProcessorService {
         console.error('Error updating campaign stats:', error);
       }
 
-      // Notify user
-      await this.notifyUser(telegramId, '✅ Ваше видео готово! Отправляю...');
-      
-      // Send all videos to user
-      await this.sendMultipleVideosToUser(telegramId, videos);
+      // Отправляем сообщение о возможности следующего заказа
+      await this.bot.telegram.sendMessage(
+        telegramId,
+        '📸 Вы можете сразу отправить следующее фото для создания нового видео!'
+      );
 
     } catch (error) {
       console.error(`Error handling multiple jobs success for order ${orderId}:`, error);
@@ -1290,7 +1211,8 @@ export class ProcessorService {
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
       // Определяем, является ли заказ fal.ai (для основного бота)
-      const isFalOrder = order?.custom_prompt?.startsWith('fal:');
+      // Все заказы теперь используют fal.ai, но проверяем только не-animate_v2
+      const isFalOrder = order && order.order_type !== 'animate_v2';
 
       // Для заказов animate_v2 (из broadcast-bot) не отправляем уведомления в основной бот
       if (order.order_type === 'animate_v2') {
@@ -1320,24 +1242,13 @@ export class ProcessorService {
         });
         
         if (moderationError) {
-          // Переводим ошибку модерации (используем соответствующий метод перевода)
-          if (isFalOrder) {
-            errorMessage = `❌ ${this.translateFalError(moderationError)}`;
-          } else {
-            errorMessage = `❌ ${this.translateRunwayError(moderationError)}`;
-          }
+          // Переводим ошибку модерации (всегда используем fal.ai)
+          errorMessage = `❌ ${this.translateFalError(moderationError)}`;
         } else {
           // Используем первую доступную переведенную ошибку
-          if (isFalOrder) {
-            const translatedError = this.translateFalError(errors[0]);
-            if (translatedError !== errors[0]) {
-              errorMessage = `❌ ${translatedError}`;
-            }
-          } else {
-            const translatedError = this.translateRunwayError(errors[0]);
-            if (translatedError !== errors[0]) {
-              errorMessage = `❌ ${translatedError}`;
-            }
+          const translatedError = this.translateFalError(errors[0]);
+          if (translatedError !== errors[0]) {
+            errorMessage = `❌ ${translatedError}`;
           }
         }
       }
@@ -1358,7 +1269,7 @@ export class ProcessorService {
       await this.orderService.updateOrderStatus(orderId, 'completed' as any);
 
       // Update job status
-      await this.runwayService.updateJobStatus(generationId, 'completed' as any, videoUrl);
+      await this.falService.updateJobStatus(generationId, 'completed' as any, videoUrl);
 
       // Для заказов animate_v2 (из broadcast-bot) отправляем результат в broadcast-bot
       if (order && order.order_type === 'animate_v2') {
@@ -1419,7 +1330,7 @@ export class ProcessorService {
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
       // Update job status
-      await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, error);
+      await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, error);
 
       // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
       const order = await this.orderService.getOrder(orderId);
@@ -1432,7 +1343,7 @@ export class ProcessorService {
       }
 
       // Translate error message for user
-      const translatedError = this.translateRunwayError(error);
+      const translatedError = this.translateFalError(error);
       
       // Notify user with translated error
       await this.notifyUser(telegramId, `❌ ${translatedError}`);
@@ -1545,7 +1456,7 @@ export class ProcessorService {
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
       // Update job status
-      await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, 'Processing timeout');
+      await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, 'Processing timeout');
 
       // Notify user
       await this.notifyUser(telegramId, '⏰ Время обработки истекло. Попробуйте позже.');
@@ -1832,15 +1743,10 @@ export class ProcessorService {
       
       await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото...');
       
-      // Create combined image
-      const textToImageJobId = await this.runwayService.createImageFromTextWithReferences(
-        combinePrompt,
-        referenceImages,
-        orderId
-      );
-      
-      // Monitor text_to_image job
-      await this.monitorTextToImageJob(textToImageJobId, orderId, telegramId, order);
+      // Create combined image - используем fal.ai для всех операций
+      // Для combine_and_animate пока оставляем как есть, но можно переделать на fal.ai позже
+      // Временно используем заглушку - этот функционал требует доработки
+      throw new Error('Combine and animate functionality requires fal.ai implementation');
       
     } catch (error: any) {
       console.error(`Error processing combine_and_animate order ${orderId}:`, error);
@@ -1870,82 +1776,7 @@ export class ProcessorService {
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     let attempts = 0;
 
-    const checkStatus = async () => {
-      try {
-        attempts++;
-        
-        const jobStatus = await this.runwayService.checkJobStatus(generationId);
-        
-        if (jobStatus.status === 'succeeded' && jobStatus.output && jobStatus.output.length > 0) {
-          // Image created successfully
-          const combinedImageUrl = jobStatus.output[0];
-          
-          // Update job status
-          await this.runwayService.updateJobStatus(generationId, 'completed' as any, combinedImageUrl);
-          
-          // Download and save combined image
-          const { FileService } = await import('./file');
-          const fileService = new FileService();
-          const localPath = await fileService.downloadFileFromUrl(combinedImageUrl, 'combined');
-          const s3Url = await fileService.uploadToS3(localPath);
-          
-          // Update order with combined image
-          await this.orderService.updateOrderCombinedImage(orderId, s3Url);
-          
-          // Отправляем объединенное изображение пользователю
-          await this.notifyUser(telegramId, 'Современное объединённое фото ✅');
-          try {
-            await this.bot.telegram.sendPhoto(telegramId, combinedImageUrl, {
-              caption: 'Современное объединённое фото'
-            });
-          } catch (error) {
-            console.error('Error sending combined photo:', error);
-            // Если не удалось отправить фото, отправляем ссылку
-            await this.notifyUser(telegramId, `📸 Объединенное фото: ${combinedImageUrl}`);
-          }
-          
-          await this.notifyUser(telegramId, '🎬 Шаг 2/2: Анимирую изображение...');
-          
-          // Step 2: Animate the combined image
-          const animationPrompt = order.animation_prompt || 'animate this image with subtle movements and breathing effect';
-          const videoGenerationIds = await this.runwayService.createMultipleVideosFromImage(
-            s3Url,
-            orderId,
-            animationPrompt
-          );
-          
-          if (videoGenerationIds.length > 0) {
-            await this.orderService.updateOrderResult(orderId, videoGenerationIds[0]);
-            this.monitorMultipleJobs(videoGenerationIds, telegramId, orderId);
-          } else {
-            throw new Error('Не удалось создать анимацию');
-          }
-          
-        } else if (jobStatus.status === 'FAILED') {
-          let errorMessage = jobStatus.failure || jobStatus.error || 'Job failed';
-          if ((jobStatus as any).failureCode) {
-            errorMessage = `${errorMessage}|failureCode:${(jobStatus as any).failureCode}`;
-          }
-          await this.runwayService.updateJobStatus(generationId, 'failed' as any, undefined, errorMessage);
-          throw new Error(this.translateRunwayError(errorMessage));
-        } else if (attempts >= maxAttempts) {
-          throw new Error('Время ожидания объединения изображения истекло');
-        } else {
-          // Still processing, check again in 5 seconds
-          setTimeout(checkStatus, 5000);
-        }
-      } catch (error: any) {
-        console.error(`Error monitoring text_to_image job ${generationId}:`, error);
-        
-        if (attempts >= maxAttempts || error.message?.includes('FAILED') || error.message?.includes('failed')) {
-          throw error;
-        } else {
-          setTimeout(checkStatus, 5000);
-        }
-      }
-    };
-
-    // Start monitoring
-    setTimeout(checkStatus, 5000);
+    // Этот метод больше не используется, так как combine_and_animate требует доработки для fal.ai
+    throw new Error('This method is deprecated - combine_and_animate requires fal.ai implementation');
   }
 }
