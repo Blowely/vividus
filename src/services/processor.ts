@@ -672,6 +672,23 @@ export class ProcessorService {
           const falJobs = await this.falService.getJobsByOrderId(orderId);
           const realFalJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
           
+          // Проверяем, есть ли завершенные джобы в БД, которые еще не обработаны
+          // Это важно, если джоб завершился между проверками
+          for (const job of realFalJobs) {
+            if (job.status === 'completed' && job.result_url) {
+              const jobId = job.did_job_id;
+              // Если джоб завершен, но не в jobStatuses, добавляем его
+              if (!jobStatuses.has(jobId)) {
+                jobStatuses.set(jobId, {
+                  status: 'COMPLETED',
+                  videoUrl: job.result_url,
+                  error: undefined
+                });
+                console.log(`   ✅ Найден завершенный джоб в БД: ${jobId}, добавляю в обработку`);
+              }
+            }
+          }
+          
           // Проверяем, есть ли временные ID в списке и реальные джобы в БД
           const hasTempIds = generationIdsRef.ids.some(id => id.startsWith('fal_temp_'));
           
@@ -805,6 +822,23 @@ export class ProcessorService {
               // Примерно 2-3 минуты на генерацию
               const estimatedProgress = Math.min(0.95, (attempts / 30));
               totalProgress += estimatedProgress;
+            }
+          }
+        }
+        
+        // Дополнительная проверка: считаем завершенные джобы из jobStatuses, которые могли быть добавлены из БД
+        // Это важно, если джоб завершился между проверками
+        for (const [generationId, jobInfo] of jobStatuses.entries()) {
+          if (idsToCheck.includes(generationId) && jobInfo.status === 'COMPLETED') {
+            // Проверяем, был ли этот джоб уже посчитан
+            const wasCounted = statusResults.some(
+              result => result.generationId === generationId && 
+                       (result.jobStatus?.status === 'COMPLETED' || result.jobStatus?.status === 'SUCCEEDED')
+            );
+            if (!wasCounted && completedCount < idsToCheck.length) {
+              // Джоб завершен в БД, но не был посчитан - увеличиваем счетчик
+              completedCount++;
+              console.log(`   ✅ Учитываю завершенный джоб из БД: ${generationId}`);
             }
           }
         }
