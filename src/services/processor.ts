@@ -686,6 +686,25 @@ export class ProcessorService {
                 });
                 console.log(`   ✅ Найден завершенный джоб в БД: ${jobId}, добавляю в обработку`);
               }
+              // Также добавляем джоб в generationIdsRef, если его там нет
+              if (!generationIdsRef.ids.includes(jobId)) {
+                generationIdsRef.ids.push(jobId);
+                console.log(`   ➕ Добавляю завершенный джоб ${jobId} в generationIdsRef`);
+              }
+            } else if (job.status === 'failed') {
+              // Также обрабатываем провалившиеся джобы
+              const jobId = job.did_job_id;
+              if (!jobStatuses.has(jobId)) {
+                jobStatuses.set(jobId, {
+                  status: 'FAILED',
+                  videoUrl: undefined,
+                  error: job.error_message || 'Job failed'
+                });
+                console.log(`   ❌ Найден провалившийся джоб в БД: ${jobId}`);
+              }
+              if (!generationIdsRef.ids.includes(jobId)) {
+                generationIdsRef.ids.push(jobId);
+              }
             }
           }
           
@@ -747,12 +766,15 @@ export class ProcessorService {
           return;
         }
         
+        console.log(`🔍 Проверка статуса для заказа ${orderId}: idsToCheck=${idsToCheck.join(', ')}, attempts=${attempts}`);
+        
         const statusPromises = idsToCheck.map(async (generationId) => {
           try {
             const jobStatus = await this.falService.checkJobStatus(generationId);
+            console.log(`   📊 Статус джоба ${generationId}: ${jobStatus?.status}, videoUrl: ${jobStatus?.video?.url || jobStatus?.output?.[0] || 'нет'}`);
             return { generationId, jobStatus };
           } catch (error) {
-            console.error(`Error checking status for ${generationId}:`, error);
+            console.error(`   ❌ Ошибка проверки статуса для ${generationId}:`, error);
             return { generationId, jobStatus: null };
           }
         });
@@ -828,20 +850,26 @@ export class ProcessorService {
         
         // Дополнительная проверка: считаем завершенные джобы из jobStatuses, которые могли быть добавлены из БД
         // Это важно, если джоб завершился между проверками
+        // Пересчитываем idsToCheck после возможного обновления generationIdsRef
+        const updatedIdsToCheck = generationIdsRef.ids.filter(id => !id.startsWith('fal_temp_'));
+        
         for (const [generationId, jobInfo] of jobStatuses.entries()) {
-          if (idsToCheck.includes(generationId) && jobInfo.status === 'COMPLETED') {
-            // Проверяем, был ли этот джоб уже посчитан
+          if (updatedIdsToCheck.includes(generationId) && jobInfo.status === 'COMPLETED') {
+            // Проверяем, был ли этот джоб уже посчитан в statusResults
             const wasCounted = statusResults.some(
               result => result.generationId === generationId && 
                        (result.jobStatus?.status === 'COMPLETED' || result.jobStatus?.status === 'SUCCEEDED')
             );
-            if (!wasCounted && completedCount < idsToCheck.length) {
+            if (!wasCounted) {
               // Джоб завершен в БД, но не был посчитан - увеличиваем счетчик
               completedCount++;
-              console.log(`   ✅ Учитываю завершенный джоб из БД: ${generationId}`);
+              console.log(`   ✅ Учитываю завершенный джоб из БД: ${generationId}, completedCount теперь: ${completedCount}`);
             }
           }
         }
+        
+        // Используем обновленный список idsToCheck
+        const idsToCheckFinal = updatedIdsToCheck;
 
         // Вычисляем фейковый прогресс для animate_v2 и fal.ai заказов
         if (useFakeProgress) {
@@ -868,8 +896,10 @@ export class ProcessorService {
         }
 
         // Проверяем, завершены ли все джобы (успешно или с ошибкой)
-        // Используем idsToCheck.length, так как временные ID уже отфильтрованы
-        const allFinished = idsToCheck.length > 0 && completedCount + failedCount === idsToCheck.length;
+        // Используем idsToCheckFinal.length, так как временные ID уже отфильтрованы
+        const allFinished = idsToCheckFinal.length > 0 && completedCount + failedCount === idsToCheckFinal.length;
+        
+        console.log(`📈 Статистика проверки для заказа ${orderId}: completedCount=${completedCount}, failedCount=${failedCount}, processingCount=${processingCount}, idsToCheckFinal.length=${idsToCheckFinal.length}, allFinished=${allFinished}`);
 
         // Для animate_v2 и fal.ai: если видео готово, отправляем сразу, не ждем фейкового прогресса
         if ((isAnimateV2 || isFalOrder) && allFinished && !hasNotifiedUser) {
@@ -920,9 +950,9 @@ export class ProcessorService {
             }
           }
           
-          // Собираем все успешные результаты (используем idsToCheck, так как временные ID уже отфильтрованы)
+          // Собираем все успешные результаты (используем idsToCheckFinal, так как временные ID уже отфильтрованы)
           const successfulVideos: Array<{ url: string; model?: string }> = [];
-          for (const generationId of idsToCheck) {
+          for (const generationId of idsToCheckFinal) {
             const jobInfo = jobStatuses.get(generationId);
             console.log(`   Проверяю generationId: ${generationId}, status: ${jobInfo?.status}, videoUrl: ${jobInfo?.videoUrl ? 'есть' : 'нет'}`);
             if (jobInfo?.videoUrl) {
@@ -934,11 +964,11 @@ export class ProcessorService {
 
           if (successfulVideos.length > 0) {
             console.log(`   Вызываю handleMultipleJobsSuccess для заказа ${orderId}`);
-            await this.handleMultipleJobsSuccess(idsToCheck, telegramId, orderId, successfulVideos);
+            await this.handleMultipleJobsSuccess(idsToCheckFinal, telegramId, orderId, successfulVideos);
           } else {
             // Все джобы провалились - собираем все ошибки
             const failedErrors: string[] = [];
-            for (const generationId of idsToCheck) {
+            for (const generationId of idsToCheckFinal) {
               const jobInfo = jobStatuses.get(generationId);
               if (jobInfo?.error) {
                 // Убираем failureCode из сообщения, если есть
