@@ -696,13 +696,8 @@ export class TelegramService {
       const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
       if (userGenerations >= 1) {
-        // Проверяем баланс, но не списываем - списание будет после успешной генерации
-        if (userGenerations < 1) {
-          await this.sendMessage(ctx, '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.');
-          return;
-        }
-        
         // Создаем заказ со статусом processing (без оплаты)
+        // Финальная проверка баланса будет выполнена в processOrder перед началом обработки
         const order = await this.orderService.createOrder(user.id, s3Url, processedPrompt);
         await this.orderService.updateOrderStatus(order.id, 'processing' as any);
         

@@ -42,6 +42,26 @@ export class ProcessorService {
         throw new Error('User not found');
       }
 
+      // Проверяем баланс генераций перед началом обработки
+      // Исключения: заказы animate_v2 (из broadcast-bot) и заказы с оплатой деньгами
+      if (order.order_type !== 'animate_v2') {
+        const hasPayment = await this.orderService.hasPayment(orderId);
+        if (!hasPayment) {
+          // Заказ не оплачен деньгами - проверяем баланс генераций
+          const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
+          if (userGenerations < 1) {
+            // У пользователя нет генераций - не начинаем обработку
+            console.log(`❌ Заказ ${orderId}: у пользователя нет генераций (баланс: ${userGenerations})`);
+            await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+            await this.notifyUser(
+              user.telegram_id,
+              '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.'
+            );
+            return;
+          }
+        }
+      }
+
       // Проверяем количество активных заказов в обработке
       const activeOrders = await this.orderService.getOrdersByStatus('processing' as any);
       const activeOrdersCount = activeOrders.length;
