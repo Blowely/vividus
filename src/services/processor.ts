@@ -36,6 +36,12 @@ export class ProcessorService {
         throw new Error('Order not found');
       }
 
+      // Если заказ уже завершен или провалился, не обрабатываем его
+      if (order.status === 'completed' || order.status === 'failed') {
+        console.log(`⚠️ Заказ ${orderId} уже в статусе ${order.status}, пропускаю обработку`);
+        return;
+      }
+
       // Get user details
       const user = await this.userService.getUserById(order.user_id);
       if (!user) {
@@ -985,6 +991,14 @@ export class ProcessorService {
                 }
               }
             }
+            
+            // Проверяем статус заказа перед обработкой таймаута
+            const order = await this.orderService.getOrder(orderId);
+            if (order && order.status === 'completed') {
+              console.log(`⚠️ Заказ ${orderId} уже завершен, пропускаю обработку таймаута`);
+              return;
+            }
+            
             console.log(`❌ Таймаут для заказа ${orderId}. Ошибки:`, failedErrors);
             await this.handleAllJobsFailed(telegramId, orderId, failedErrors);
           }
@@ -1227,6 +1241,12 @@ export class ProcessorService {
     try {
       const order = await this.orderService.getOrder(orderId);
       if (!order) return;
+
+      // Если заказ уже завершен, не обрабатываем его как неудачный
+      if (order.status === 'completed') {
+        console.log(`⚠️ Заказ ${orderId} уже завершен, пропускаю обработку ошибки`);
+        return;
+      }
 
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
 
