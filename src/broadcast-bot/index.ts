@@ -228,7 +228,25 @@ bot.on('photo', async (ctx) => {
     v2State.photoFileId = fileId;
     animateV2State.set(ctx.from!.id, v2State);
     
-    await ctx.reply('Фото принято! Теперь опишите, как оживить фото:\n\nПримеры:\n• "Люди улыбаются и машут рукой"\n• "Легкое движение волос на ветру"\n• "Моргание и легкий поворот головы"');
+    const promptInstructions = `✅ Фото принято!
+
+✍️ Теперь напишите, как оживить фото:
+
+Примеры:
+• Люди на фото улыбаются и обнимаются 🤗
+• Мужчина слегка кивает и улыбается 😊
+• Девушка моргает и слегка поворачивает голову 💫
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре»
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его
+
+📏 Требования к фото:
+• Минимальный размер: 300x300 пикселей
+• Формат: JPG или PNG`;
+
+    await ctx.reply(promptInstructions);
     
     v2State.waitingForPrompt = true;
     animateV2State.set(ctx.from!.id, v2State);
@@ -771,10 +789,11 @@ async function createCombineAndAnimateOrder(
     // Получаем или создаем пользователя (админа)
     const user = await userService.getOrCreateUser(ctx.from!);
     
-    // Загружаем все фото в S3
+    // Получаем ссылки на файлы через broadcast-bot
     const photoUrls: string[] = [];
     for (const fileId of photos) {
-      const s3Url = await fileService.downloadTelegramFileToS3(fileId);
+      const fileLink = await bot.telegram.getFileLink(fileId);
+      const s3Url = await fileService.downloadFileFromUrlAndUploadToS3(fileLink.toString());
       photoUrls.push(s3Url);
     }
     
@@ -796,7 +815,22 @@ async function createCombineAndAnimateOrder(
     combineAndAnimatePhotos.delete(ctx.from!.id);
     combineAndAnimateState.delete(ctx.from!.id);
     
-    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\nЗаказ будет обработан автоматически.`);
+    // Обновляем статус на processing для немедленной обработки (для админа без оплаты)
+    await orderService.updateOrderStatus(order.id, 'processing' as any);
+    
+    await ctx.reply(`✅ Заказ создан! ID: ${order.id.slice(0, 8)}...\n\n🎬 Начинаю обработку...\n\nШаг 1/2: Объединение фото через face-swap\nШаг 2/2: Анимация результата`);
+    
+    // Запускаем обработку заказа асинхронно
+    try {
+      const { ProcessorService } = await import('../services/processor');
+      const processorService = new ProcessorService();
+      processorService.processOrder(order.id).catch((processError) => {
+        console.error('Error processing combine order:', processError);
+      });
+    } catch (processError) {
+      console.error('Error starting order processing:', processError);
+      await ctx.reply('⚠️ Заказ создан, но произошла ошибка при запуске обработки. Заказ будет обработан автоматически позже.');
+    }
     
   } catch (error) {
     console.error('Error creating combine and animate order:', error);

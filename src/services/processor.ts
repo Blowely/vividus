@@ -2,6 +2,7 @@ import { FalService } from './fal';
 import { OrderService } from './order';
 import { FileService } from './file';
 import { UserService } from './user';
+import { S3Service } from './s3';
 import { Telegraf } from 'telegraf';
 import { config } from 'dotenv';
 import pool from '../config/database';
@@ -13,6 +14,7 @@ export class ProcessorService {
   private orderService: OrderService;
   private fileService: FileService;
   private userService: UserService;
+  private s3Service: S3Service;
   private bot: Telegraf;
   private readonly MAX_CONCURRENT_ORDERS: number;
 
@@ -21,6 +23,7 @@ export class ProcessorService {
     this.orderService = new OrderService();
     this.fileService = new FileService();
     this.userService = new UserService();
+    this.s3Service = new S3Service();
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
     // Максимальное количество одновременно обрабатываемых заказов
     this.MAX_CONCURRENT_ORDERS = parseInt(process.env.MAX_CONCURRENT_ORDERS || '10', 10);
@@ -107,32 +110,64 @@ export class ProcessorService {
           console.log(`👀 Запускаю вызов fal.ai асинхронно для animate_v2...`);
           
           (async () => {
-            try {
-              const requestId = await this.falService.createVideoFromImage(
-                order.original_file_path,
-                orderId,
-                order.custom_prompt
-              );
-              console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
-              
-              // После создания джоба запускаем мониторинг
-              const generationIds = [requestId];
-              await this.orderService.updateOrderResult(orderId, generationIds[0]);
-              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
-              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
-            } catch (error: any) {
-              console.error('Error in async fal.ai call for animate_v2:', error);
-              // Проверяем, может джоб все-таки создан
-              const falJobs = await this.falService.getJobsByOrderId(orderId);
-              if (falJobs.length > 0) {
-                const generationIds = falJobs.map(job => job.did_job_id);
+            let retryCount = 0;
+            const maxRetries = 1; // Максимум 1 повторная попытка
+            
+            while (retryCount <= maxRetries) {
+              try {
+                if (retryCount > 0) {
+                  console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для animate_v2 заказа ${orderId}`);
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации...`);
+                }
+                
+                const requestId = await this.falService.createVideoFromImage(
+                  order.original_file_path,
+                  orderId,
+                  order.custom_prompt
+                );
+                console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
+                
+                // После создания джоба запускаем мониторинг
+                const generationIds = [requestId];
                 await this.orderService.updateOrderResult(orderId, generationIds[0]);
-                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
                 this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
-              } else {
-                // Если джоб не создан, обновляем статус заказа на failed
-                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
-                console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Статус обновлен на failed.`);
+                
+                break; // Успешно завершено
+              } catch (error: any) {
+                console.error(`Error in async fal.ai call for animate_v2 (attempt ${retryCount + 1}/${maxRetries + 1}):`, error);
+                
+                // Проверяем, является ли это ошибкой скачивания файла (НЕ ошибкой доступности)
+                const isDownloadError = !error.isFileAccessError && error.message && (
+                  error.message.includes('Не удалось загрузить изображение') ||
+                  error.message.includes('Failed to download') ||
+                  error.message.includes('file_download_error')
+                );
+                
+                // Если это ошибка скачивания (но не доступности) и есть попытки, пробуем еще раз
+                if (isDownloadError && retryCount < maxRetries) {
+                  retryCount++;
+                  console.log(`🔄 Обнаружена ошибка скачивания файла для animate_v2, запускаю повторную попытку...`);
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  continue;
+                }
+                
+                // Проверяем, может джоб все-таки создан
+                const falJobs = await this.falService.getJobsByOrderId(orderId);
+                if (falJobs.length > 0) {
+                  const generationIds = falJobs.map(job => job.did_job_id);
+                  await this.orderService.updateOrderResult(orderId, generationIds[0]);
+                  console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                  this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+                } else {
+                  // Если джоб не создан, обновляем статус заказа на failed
+                  await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+                  const errorMessage = error.message || 'Произошла ошибка при создании видео. Попробуйте позже.';
+                  await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
+                  console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Статус обновлен на failed.`);
+                }
+                
+                break; // Выходим из цикла
               }
             }
           })();
@@ -204,40 +239,109 @@ export class ProcessorService {
           
           // Запускаем вызов fal.ai асинхронно (не ждем ответа, не блокируем event loop)
           (async () => {
-            try {
-              const requestId = await this.falService.createVideoFromImage(
-                order.original_file_path,
-                orderId,
-                cleanPrompt
-              );
-              console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
-              
-              // Обновляем временный джоб на реальный в БД
-              const client = await (await import('../config/database')).default.connect();
+            let retryCount = 0;
+            const maxRetries = 1; // Максимум 1 повторная попытка (всего 2 попытки)
+            
+            while (retryCount <= maxRetries) {
               try {
-                await client.query(
-                  `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
-                  [requestId, tempGenerationId, orderId]
+                if (retryCount > 0) {
+                  console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для заказа ${orderId}`);
+                  // Уведомляем пользователя о повторной попытке
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации...`);
+                  
+                  // Сбрасываем прогресс-бар и запускаем заново
+                  const orderData = await this.orderService.getOrder(orderId);
+                  if (orderData && orderData.custom_prompt) {
+                    // Извлекаем progressMessageId из custom_prompt
+                    const progressMessageIdMatch = orderData.custom_prompt.match(/progressMessageId:(\d+)/);
+                    if (progressMessageIdMatch) {
+                      const progressMsgId = parseInt(progressMessageIdMatch[1], 10);
+                      try {
+                        const progressBar = this.createProgressBar(2);
+                        await this.bot.telegram.editMessageText(
+                          user.telegram_id,
+                          progressMsgId,
+                          undefined,
+                          `🔄 Генерация видео (попытка ${retryCount + 1})...\n\n${progressBar} 2%`
+                        );
+                      } catch (error) {
+                        console.error('Error resetting progress bar:', error);
+                      }
+                    }
+                  }
+                }
+                
+                const requestId = await this.falService.createVideoFromImage(
+                  order.original_file_path,
+                  orderId,
+                  cleanPrompt
                 );
-                console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
-              } finally {
-                client.release();
-              }
-              
-              // Обновляем order result
-              await this.orderService.updateOrderResult(orderId, requestId);
-            } catch (error: any) {
-              console.error('Error in async fal.ai call:', error);
-              // Проверяем, может джоб все-таки создан
-              const falJobs = await this.falService.getJobsByOrderId(orderId);
-              if (falJobs.length > 0) {
-                const realGenerationIds = falJobs.map(job => job.did_job_id);
-                await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
-                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов.`);
-              } else {
-                // Обновляем статус заказа на failed
-                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
-                await this.notifyUser(user.telegram_id, `❌ Произошла ошибка при создании видео. Попробуйте позже.`);
+                console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
+                
+                // Обновляем временный джоб на реальный в БД
+                const client = await (await import('../config/database')).default.connect();
+                try {
+                  await client.query(
+                    `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
+                    [requestId, tempGenerationId, orderId]
+                  );
+                  console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+                } finally {
+                  client.release();
+                }
+                
+                // Обновляем order result
+                await this.orderService.updateOrderResult(orderId, requestId);
+                
+                // Успешно завершено, выходим из цикла
+                break;
+              } catch (error: any) {
+                console.error(`Error in async fal.ai call (attempt ${retryCount + 1}/${maxRetries + 1}):`, error);
+                
+                // Проверяем, является ли это ошибкой скачивания файла (НЕ ошибкой доступности)
+                const isDownloadError = !error.isFileAccessError && error.message && (
+                  error.message.includes('Не удалось загрузить изображение') ||
+                  error.message.includes('Failed to download') ||
+                  error.message.includes('file_download_error')
+                );
+                
+                // Если это ошибка скачивания (но не доступности) и есть попытки, пробуем еще раз
+                if (isDownloadError && retryCount < maxRetries) {
+                  retryCount++;
+                  console.log(`🔄 Обнаружена ошибка скачивания файла, запускаю повторную попытку...`);
+                  await new Promise(resolve => setTimeout(resolve, 2000)); // Ждем 2 секунды перед повтором
+                  continue;
+                }
+                
+                // Проверяем, может джоб все-таки создан (исключая временный)
+                const falJobs = await this.falService.getJobsByOrderId(orderId);
+                const realJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
+                
+                if (realJobs.length > 0) {
+                  const realGenerationIds = realJobs.map(job => job.did_job_id);
+                  await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
+                  console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${realJobs.length} реальных джобов.`);
+                } else {
+                  // Обновляем временный джоб на failed
+                  const client = await (await import('../config/database')).default.connect();
+                  try {
+                    await client.query(
+                      `UPDATE did_jobs SET status = $1, error_message = $2 WHERE did_job_id = $3 AND order_id = $4`,
+                      ['failed', error.message || 'Failed to create video', tempGenerationId, orderId]
+                    );
+                    console.log(`   ❌ Обновлен временный джоб ${tempGenerationId} на failed`);
+                  } finally {
+                    client.release();
+                  }
+                  
+                  // Обновляем статус заказа на failed
+                  await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+                  // Используем сообщение из ошибки, если оно есть, иначе общее сообщение
+                  const errorMessage = error.message || 'Произошла ошибка при создании видео. Попробуйте позже.';
+                  await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
+                }
+                
+                break; // Выходим из цикла после обработки ошибки
               }
             }
           })();
@@ -1831,7 +1935,7 @@ export class ProcessorService {
     try {
       console.log(`Processing combine_and_animate order: ${orderId}`);
       
-      // Step 1: Combine images using text_to_image
+      // Парсим список референсных изображений
       let referenceImages: string[] = [];
       if (order.reference_images) {
         try {
@@ -1844,14 +1948,59 @@ export class ProcessorService {
         referenceImages = [order.original_file_path];
       }
 
-      const combinePrompt = order.combine_prompt || 'combine all reference images into one cohesive image';
+      if (referenceImages.length < 2) {
+        throw new Error('Нужно как минимум 2 фото для объединения');
+      }
+
+      // Шаг 1: Объединяем фото через Flux Schnell (fal.ai)
+      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото через Flux...');
       
-      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото...');
+      const image1 = referenceImages[0];
+      const image2 = referenceImages[1];
       
-      // Create combined image - используем fal.ai для всех операций
-      // Для combine_and_animate пока оставляем как есть, но можно переделать на fal.ai позже
-      // Временно используем заглушку - этот функционал требует доработки
-      throw new Error('Combine and animate functionality requires fal.ai implementation');
+      console.log(`Combining images: image1=${image1}, image2=${image2}`);
+      
+      // Формируем промпт для объединения
+      const combinePrompt = order.combine_prompt || 
+        'Two people together in a modern photorealistic scene, natural lighting, high quality photograph';
+      
+      // Вызываем Flux API для объединения
+      const combinedImageUrl = await this.falService.combineImages(image1, image2, combinePrompt);
+      
+      console.log(`Face swap completed: ${combinedImageUrl}`);
+      
+      // Скачиваем объединенное изображение и загружаем в S3
+      const combinedImageS3Url = await this.s3Service.downloadAndUploadToS3(
+        combinedImageUrl,
+        `combined/combined_${orderId}_${Date.now()}.jpg`
+      );
+      
+      // Сохраняем URL объединенного изображения в базе
+      await this.orderService.updateOrderCombinedImage(orderId, combinedImageS3Url);
+      
+      await this.notifyUser(telegramId, '✅ Фото объединены!\n\n🎬 Шаг 2/2: Оживляю видео...');
+      
+      // Шаг 2: Оживляем объединенное фото через fal.ai (MiniMax Hailuo)
+      const animationPrompt = order.animation_prompt || 'animate this image with subtle movements and breathing effect';
+      
+      console.log(`Animating combined image with prompt: ${animationPrompt}`);
+      
+      // Создаем видео из объединенного фото
+      const systemRequestId = await this.falService.createVideoFromImage(
+        combinedImageS3Url,
+        orderId,
+        animationPrompt,
+        '6' // 6 секунд - дешевле
+      );
+      
+      // Сохраняем did_job_id в заказе
+      await this.orderService.updateOrderResult(orderId, systemRequestId);
+      
+      console.log(`Video generation started with systemRequestId: ${systemRequestId}`);
+      
+      // Мониторим выполнение задачи анимации (запускаем асинхронно)
+      const generationIds = [systemRequestId];
+      this.monitorMultipleJobs(generationIds, telegramId, orderId);
       
     } catch (error: any) {
       console.error(`Error processing combine_and_animate order ${orderId}:`, error);

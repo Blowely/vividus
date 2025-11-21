@@ -72,4 +72,31 @@ export class S3Service {
     }
   }
 
+  // Скачивает файл по URL и загружает в S3
+  async downloadAndUploadToS3(url: string, key: string): Promise<string> {
+    try {
+      console.log(`Downloading file from URL: ${url}`);
+      
+      // Скачиваем файл
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.statusText}`);
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      
+      // Определяем content type
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      
+      console.log(`Downloaded ${buffer.length} bytes, uploading to S3...`);
+      
+      // Загружаем в S3
+      return await this.uploadFile(buffer, key, contentType);
+    } catch (error: any) {
+      console.error('Error downloading and uploading to S3:', error);
+      throw new Error('Failed to download and upload file to S3');
+    }
+  }
+
 }

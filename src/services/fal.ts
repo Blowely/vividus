@@ -26,6 +26,20 @@ export class FalService {
     
     const errorLower = errorMessage.toLowerCase();
     
+    // Ошибка скачивания файла
+    if (errorLower.includes('failed to download') || 
+        errorLower.includes('file_download_error') ||
+        errorLower.includes('download the file')) {
+      return 'Не удалось загрузить изображение. Пожалуйста, отправьте фото заново.';
+    }
+    
+    // Размер изображения слишком маленький
+    if (errorLower.includes('dimensions are too small') || 
+        errorLower.includes('minimum dimensions') ||
+        errorLower.includes('image is too small')) {
+      return 'Изображение слишком маленькое. Минимальный размер: 300x300 пикселей. Пожалуйста, отправьте фото большего размера.';
+    }
+    
     // Модерация контента
     if (errorLower.includes('content moderation') || 
         errorLower.includes('moderation') || 
@@ -61,6 +75,90 @@ export class FalService {
     try {
       console.log('🎬 Creating video with fal.ai API...');
       console.log('Image URL:', imageUrl);
+      
+      // Проверяем доступность файла перед отправкой в fal.ai
+      // Используем простую проверку через HEAD или GET с ограничением
+      try {
+        // Пробуем HEAD запрос (быстрее, не скачивает файл)
+        const headResponse = await axios.head(imageUrl, { 
+          timeout: 5000,
+          validateStatus: (status) => status < 500
+        });
+        
+        if (headResponse.status === 404) {
+          const error: any = new Error('Файл не найден. Пожалуйста, отправьте фото заново.');
+          error.isFileAccessError = true; // Флаг, чтобы не делать retry
+          throw error;
+        }
+        
+        if (headResponse.status >= 400 && headResponse.status !== 405) {
+          const error: any = new Error('Файл недоступен. Пожалуйста, отправьте фото заново.');
+          error.isFileAccessError = true; // Флаг, чтобы не делать retry
+          throw error;
+        }
+        
+        console.log('✅ Файл доступен (HEAD), статус:', headResponse.status);
+      } catch (headError: any) {
+        // Если это наша ошибка проверки доступности, пробрасываем её дальше
+        if (headError.isFileAccessError) {
+          throw headError;
+        }
+        
+        // Если HEAD не поддерживается (405) или таймаут, пробуем GET с ограничением
+        if (headError.response?.status === 405 || headError.code === 'ECONNABORTED') {
+          try {
+            // Используем range запрос для проверки доступности без полной загрузки
+            const getResponse = await axios.get(imageUrl, {
+              timeout: 5000,
+              headers: { 'Range': 'bytes=0-0' }, // Запрашиваем только первый байт
+              validateStatus: (status) => status < 500
+            });
+            
+            if (getResponse.status === 404) {
+              const error: any = new Error('Файл не найден. Пожалуйста, отправьте фото заново.');
+              error.isFileAccessError = true;
+              throw error;
+            }
+            
+            if (getResponse.status >= 400 && getResponse.status !== 206) {
+              const error: any = new Error('Файл недоступен. Пожалуйста, отправьте фото заново.');
+              error.isFileAccessError = true;
+              throw error;
+            }
+            
+            console.log('✅ Файл доступен (GET range), статус:', getResponse.status);
+          } catch (getError: any) {
+            // Если это наша ошибка проверки доступности, пробрасываем её дальше
+            if (getError.isFileAccessError) {
+              throw getError;
+            }
+            
+            if (getError.response?.status === 404) {
+              const error: any = new Error('Файл не найден. Пожалуйста, отправьте фото заново.');
+              error.isFileAccessError = true;
+              throw error;
+            }
+            if (getError.response?.status >= 400) {
+              const error: any = new Error('Файл недоступен. Пожалуйста, отправьте фото заново.');
+              error.isFileAccessError = true;
+              throw error;
+            }
+            // Если ошибка не связана с доступностью файла (таймаут, сеть), продолжаем
+            console.warn('⚠️ Не удалось проверить доступность файла, продолжаем:', getError.message);
+          }
+        } else if (headError.response?.status === 404) {
+          const error: any = new Error('Файл не найден. Пожалуйста, отправьте фото заново.');
+          error.isFileAccessError = true;
+          throw error;
+        } else if (headError.response?.status >= 400) {
+          const error: any = new Error('Файл недоступен. Пожалуйста, отправьте фото заново.');
+          error.isFileAccessError = true;
+          throw error;
+        } else {
+          // Если ошибка не связана с доступностью файла (таймаут, сеть), продолжаем
+          console.warn('⚠️ Не удалось проверить доступность файла, продолжаем:', headError.message);
+        }
+      }
       
       const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
       
@@ -127,11 +225,44 @@ export class FalService {
       console.error('Error creating video:', error);
       console.error('Error details:', error.response?.data);
       
-      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to create video';
+      // Извлекаем сообщение об ошибке из разных форматов ответа fal.ai
+      let errorMessage: string = 'Failed to create video';
+      
+      if (error.response?.data) {
+        // Если detail - массив (как в случае file_download_error)
+        if (Array.isArray(error.response.data.detail)) {
+          const firstError = error.response.data.detail[0];
+          if (firstError?.msg) {
+            errorMessage = firstError.msg;
+          } else if (typeof firstError === 'string') {
+            errorMessage = firstError;
+          }
+        } 
+        // Если detail - строка
+        else if (typeof error.response.data.detail === 'string') {
+          errorMessage = error.response.data.detail;
+        }
+        // Если есть error
+        else if (error.response.data.error) {
+          errorMessage = error.response.data.error;
+        }
+        // Если detail - объект с msg
+        else if (error.response.data.detail?.msg) {
+          errorMessage = error.response.data.detail.msg;
+        }
+      }
+      
+      // Если ничего не нашли, используем message
+      if (errorMessage === 'Failed to create video' && error.message) {
+        errorMessage = error.message;
+      }
+      
+      console.error('Extracted error message:', errorMessage);
+      
       const translatedError = this.translateFalError(errorMessage);
       
       const translatedErrorObj = new Error(translatedError);
-      (translatedErrorObj as any).originalError = errorMessage;
+      (translatedErrorObj as any).originalError = error.response?.data || errorMessage;
       throw translatedErrorObj;
     }
   }
@@ -351,6 +482,58 @@ export class FalService {
       return result.rows;
     } finally {
       client.release();
+    }
+  }
+
+  // Объединение двух изображений с использованием Flux Schnell (самая дешевая и быстрая)
+  async combineImages(imageUrl1: string, imageUrl2: string, prompt: string): Promise<string> {
+    try {
+      console.log('🔄 Combining images with fal.ai Flux Schnell...');
+      console.log('Image 1:', imageUrl1);
+      console.log('Image 2:', imageUrl2);
+      console.log('Prompt:', prompt);
+      
+      // Используем Flux Schnell - самая быстрая и дешевая модель ($0.003 за изображение)
+      const response = await axios.post(
+        `${this.baseUrl}/fal-ai/flux/schnell`,
+        {
+          prompt: prompt,
+          image_size: {
+            width: 768,
+            height: 768
+          },
+          num_inference_steps: 4, // Минимум для Schnell
+          num_images: 1,
+          enable_safety_checker: true,
+          // Используем референсные изображения через prompt
+          // Flux Schnell не поддерживает image_prompts напрямую, поэтому просто генерируем на основе промпта
+        },
+        {
+          headers: {
+            'Authorization': `Key ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('Flux Schnell response:', response.data);
+      
+      // fal.ai возвращает URL на результат
+      if (response.data.images && response.data.images.length > 0) {
+        return response.data.images[0].url;
+      } else {
+        throw new Error('Unexpected response format from fal.ai flux: ' + JSON.stringify(response.data));
+      }
+    } catch (error: any) {
+      console.error('Error combining images:', error);
+      console.error('Error details:', error.response?.data);
+      
+      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to combine images';
+      const translatedError = this.translateFalError(errorMessage);
+      
+      const translatedErrorObj = new Error(translatedError);
+      (translatedErrorObj as any).originalError = errorMessage;
+      throw translatedErrorObj;
     }
   }
 }
