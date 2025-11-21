@@ -639,14 +639,17 @@ router.get('/stats/summary', async (req, res) => {
       console.log('Fetching summary stats with params:', { campaign, params, excludeUserIds });
       
       // Получаем статистику за разные периоды
-      // Если есть админы для исключения, добавляем их в параметры
+      // Всегда передаем параметры, даже если список пустой (для совместимости SQL)
       const queryParams: any[] = [campaign || null];
-      let paramIndex = 2;
       let excludeUsersCondition = '';
       
       if (excludeUserIds.length > 0) {
         queryParams.push(excludeUserIds);
-        excludeUsersCondition = `AND o.user_id IN (SELECT id FROM users WHERE telegram_id = ANY($${paramIndex}::bigint[]))`;
+        excludeUsersCondition = `AND o.user_id IN (SELECT id FROM users WHERE telegram_id = ANY($2::bigint[]))`;
+      } else {
+        // Если нет админов для исключения, передаем пустой массив, чтобы SQL запрос работал
+        queryParams.push([]);
+        excludeUsersCondition = `AND 1=0`; // Условие, которое никогда не выполнится
       }
       
       const result = await client.query(`
