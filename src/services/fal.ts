@@ -160,7 +160,7 @@ export class FalService {
         }
       }
       
-      const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
+      const prompt = customPrompt || 'animate this image with subtle movements, breathing effect and waving hand';
       
       // Submit request using fal.ai API (direct model endpoint)
       const response = await axios.post(
