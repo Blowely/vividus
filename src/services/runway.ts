@@ -249,7 +249,7 @@ export class RunwayService {
         promptImage: imageUrl,
         seed: Math.floor(Math.random() * 1000000),
         model: selectedModel,
-        promptText: customPrompt || 'animate this image with subtle movements and breathing effect',
+        promptText: customPrompt || 'animate this image with subtle movements, breathing effect and waving hand',
         duration: modelParams.duration,
         ratio: modelParams.ratio,
         contentModeration: {
@@ -295,7 +295,7 @@ export class RunwayService {
   }
 
   async createMultipleVideosFromImage(imageUrl: string, orderId: string, customPrompt?: string): Promise<string[]> {
-    const prompt = customPrompt || 'animate this image with subtle movements and breathing effect';
+    const prompt = customPrompt || 'animate this image with subtle movements, breathing effect and waving hand';
     
     console.log(`🚀 Запускаю генерации для ${this.availableModels.length} моделей: ${this.availableModels.join(', ')}`);
     

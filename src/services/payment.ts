@@ -504,7 +504,7 @@ export class PaymentService {
                     // Обрабатываем промпт (используем ту же логику что и в TelegramService)
                     let processedPrompt = (prompt as string).toLowerCase().trim();
                     if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
-                      processedPrompt = 'animate this image with subtle movements and breathing effect';
+                      processedPrompt = 'animate this image with subtle movements, breathing effect and waving hand';
                     } else {
                       // Переводим русский промпт на английский
                       const translations: { [key: string]: string } = {

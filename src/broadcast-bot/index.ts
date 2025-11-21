@@ -800,7 +800,7 @@ async function createCombineAndAnimateOrder(
     // Формируем промпты
     const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
     
-    let animationPrompt = state.animationPrompt || 'animate this image with subtle movements and breathing effect';
+    let animationPrompt = state.animationPrompt || 'animate this image with subtle movements, breathing effect and waving hand';
     animationPrompt = translateAnimationPrompt(animationPrompt);
     
     // Создаем заказ
