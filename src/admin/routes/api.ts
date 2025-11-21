@@ -620,9 +620,35 @@ router.get('/stats/summary', async (req, res) => {
       // Всегда передаем параметр, но используем NULL если кампания не выбрана
       const params = [campaign || null];
       
-      console.log('Fetching summary stats with params:', { campaign, params });
+      // Получаем список админов и пользователя vividusgosupp
+      const adminIds = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      
+      // Получаем telegram_id пользователя vividusgosupp
+      const vividusgosuppResult = await client.query(
+        'SELECT telegram_id FROM users WHERE username = $1',
+        ['vividusgosupp']
+      );
+      const vividusgosuppId = vividusgosuppResult.rows[0]?.telegram_id;
+      
+      // Формируем список ID для исключения (админы + vividusgosupp)
+      const excludeUserIds = [...adminIds];
+      if (vividusgosuppId) {
+        excludeUserIds.push(parseInt(vividusgosuppId));
+      }
+      
+      console.log('Fetching summary stats with params:', { campaign, params, excludeUserIds });
       
       // Получаем статистику за разные периоды
+      // Если есть админы для исключения, добавляем их в параметры
+      const queryParams: any[] = [campaign || null];
+      let paramIndex = 2;
+      let excludeUsersCondition = '';
+      
+      if (excludeUserIds.length > 0) {
+        queryParams.push(excludeUserIds);
+        excludeUsersCondition = `AND o.user_id IN (SELECT id FROM users WHERE telegram_id = ANY($${paramIndex}::bigint[]))`;
+      }
+      
       const result = await client.query(`
         WITH filter_params AS (
           SELECT NULLIF($1, '')::text as campaign_filter
@@ -638,6 +664,7 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(*) FROM users WHERE (users.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) ${userCampaignFilter}) as users_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods)) as orders_today,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND orders.status = 'completed') as generations_today,
+          (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND o.status = 'completed' ${excludeUsersCondition}) as admin_generations_today,
           (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND p.status = 'success') as payments_today,
           (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT today_start FROM periods) AND p.status = 'success') as revenue_today,
           
@@ -645,6 +672,7 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(*) FROM users WHERE (users.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) ${userCampaignFilter}) as users_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods)) as orders_3d,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND orders.status = 'completed') as generations_3d,
+          (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND o.status = 'completed' ${excludeUsersCondition}) as admin_generations_3d,
           (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND p.status = 'success') as payments_3d,
           (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT three_days_start FROM periods) AND p.status = 'success') as revenue_3d,
           
@@ -652,6 +680,7 @@ router.get('/stats/summary', async (req, res) => {
           (SELECT COUNT(*) FROM users WHERE (users.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) ${userCampaignFilter}) as users_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods)) as orders_week,
           (SELECT COUNT(*) FROM orders ${orderCampaignFilter} (orders.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND orders.status = 'completed') as generations_week,
+          (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE ((SELECT campaign_filter FROM filter_params) IS NULL OR u.start_param = (SELECT campaign_filter FROM filter_params)) AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND o.status = 'completed' ${excludeUsersCondition}) as admin_generations_week,
           (SELECT COUNT(*) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND p.status = 'success') as payments_week,
           (SELECT COALESCE(SUM(p.amount), 0) FROM payments p ${paymentCampaignJoin} (p.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow') >= (SELECT week_start FROM periods) AND p.status = 'success') as revenue_week,
           
@@ -687,6 +716,7 @@ router.get('/stats/summary', async (req, res) => {
           users: parseInt(data.users_today) || 0,
           orders: parseInt(data.orders_today) || 0,
           generations: parseInt(data.generations_today) || 0,
+          admin_generations: parseInt(data.admin_generations_today) || 0,
           payments: parseInt(data.payments_today) || 0,
           revenue: parseFloat(data.revenue_today) || 0
         },
@@ -694,6 +724,7 @@ router.get('/stats/summary', async (req, res) => {
           users: parseInt(data.users_3d) || 0,
           orders: parseInt(data.orders_3d) || 0,
           generations: parseInt(data.generations_3d) || 0,
+          admin_generations: parseInt(data.admin_generations_3d) || 0,
           payments: parseInt(data.payments_3d) || 0,
           revenue: parseFloat(data.revenue_3d) || 0
         },
@@ -701,6 +732,7 @@ router.get('/stats/summary', async (req, res) => {
           users: parseInt(data.users_week) || 0,
           orders: parseInt(data.orders_week) || 0,
           generations: parseInt(data.generations_week) || 0,
+          admin_generations: parseInt(data.admin_generations_week) || 0,
           payments: parseInt(data.payments_week) || 0,
           revenue: parseFloat(data.revenue_week) || 0
         },
