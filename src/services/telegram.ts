@@ -305,6 +305,7 @@ export class TelegramService {
   }
 
   private async handleHelp(ctx: Context) {
+    const userId = ctx.from!.id;
     const helpMessage = `
 ❓ Помощь по использованию бота
 
@@ -316,6 +317,7 @@ export class TelegramService {
 ⏱️ Время обработки: 2-5 минут
 
 💬 По вопросам обращайтесь: @vividusgosupp
+🆔 Ваш ID: ${userId}
 
 Для начала отправьте фото!`;
     
