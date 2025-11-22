@@ -111,13 +111,14 @@ export class ProcessorService {
           
           (async () => {
             let retryCount = 0;
-            const maxRetries = 1; // Максимум 1 повторная попытка
+            const maxRetries = 2; // Максимум 2 повторных попытки (всего 3 попытки)
             
             while (retryCount <= maxRetries) {
             try {
                 if (retryCount > 0) {
                   console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для animate_v2 заказа ${orderId}`);
-                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации...`);
+                  console.log(`📎 URL файла: ${order.original_file_path}`);
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации (${retryCount}/${maxRetries})...`);
                 }
                 
               const requestId = await this.falService.createVideoFromImage(
@@ -148,7 +149,7 @@ export class ProcessorService {
                 if (isDownloadError && retryCount < maxRetries) {
                   retryCount++;
                   console.log(`🔄 Обнаружена ошибка скачивания файла для animate_v2, запускаю повторную попытку...`);
-                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  await new Promise(resolve => setTimeout(resolve, 3000)); // Ждем 3 секунды перед повтором
                   continue;
                 }
                 
@@ -240,14 +241,16 @@ export class ProcessorService {
           // Запускаем вызов fal.ai асинхронно (не ждем ответа, не блокируем event loop)
           (async () => {
             let retryCount = 0;
-            const maxRetries = 1; // Максимум 1 повторная попытка (всего 2 попытки)
+            const maxRetries = 2; // Максимум 2 повторных попытки (всего 3 попытки)
             
             while (retryCount <= maxRetries) {
               try {
                 if (retryCount > 0) {
                   console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для заказа ${orderId}`);
+                  console.log(`📎 URL файла: ${order.original_file_path}`);
+                  
                   // Уведомляем пользователя о повторной попытке
-                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации...`);
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации (${retryCount}/${maxRetries})...`);
                   
                   // Сбрасываем прогресс-бар и запускаем заново
                   const orderData = await this.orderService.getOrder(orderId);
@@ -262,7 +265,7 @@ export class ProcessorService {
                           user.telegram_id,
                           progressMsgId,
                           undefined,
-                          `🔄 Генерация видео (попытка ${retryCount + 1})...\n\n${progressBar} 2%`
+                          `🔄 Генерация видео (попытка ${retryCount + 1}/${maxRetries + 1})...\n\n${progressBar} 2%`
                         );
                       } catch (error) {
                         console.error('Error resetting progress bar:', error);
@@ -271,11 +274,12 @@ export class ProcessorService {
                   }
                 }
                 
-              const requestId = await this.falService.createVideoFromImage(
-                order.original_file_path,
-                orderId,
-                cleanPrompt
-              );
+                console.log(`📎 Отправка в fal.ai, URL: ${order.original_file_path}`);
+                const requestId = await this.falService.createVideoFromImage(
+                  order.original_file_path,
+                  orderId,
+                  cleanPrompt
+                );
               console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
               
               // Обновляем временный джоб на реальный в БД
@@ -309,7 +313,7 @@ export class ProcessorService {
                 if (isDownloadError && retryCount < maxRetries) {
                   retryCount++;
                   console.log(`🔄 Обнаружена ошибка скачивания файла, запускаю повторную попытку...`);
-                  await new Promise(resolve => setTimeout(resolve, 2000)); // Ждем 2 секунды перед повтором
+                  await new Promise(resolve => setTimeout(resolve, 3000)); // Ждем 3 секунды перед повтором
                   continue;
                 }
                 

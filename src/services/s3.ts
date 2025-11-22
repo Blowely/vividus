@@ -62,13 +62,16 @@ export class S3Service {
         ContentDisposition: 'inline', // Открывать в браузере, а не скачивать
       }));
 
-      // Добавляем параметр для открытия в браузере вместо скачивания
-      const link = `${this.endpoint}/${this.bucketName}/${filename}`;
-      console.log('File uploaded successfully to S3:', link);
+      // Генерируем публичный URL
+      const publicUrl = `${this.endpoint}/${this.bucketName}/${filename}`;
+      console.log('File uploaded successfully to S3:', publicUrl);
       
-      // Возвращаем URL с параметром response-content-disposition для открытия в браузере
-      // Это решает проблему с fal.ai, который не может скачать файлы с Content-Disposition: attachment
-      return `${link}?response-content-disposition=inline`;
+      // Yandex Cloud поддерживает параметр response-content-disposition в URL
+      // Это заставляет S3 вернуть файл с нужным заголовком
+      // Важно: используем encodeURIComponent для корректной кодировки
+      const urlWithDisposition = `${publicUrl}?response-content-disposition=${encodeURIComponent('inline')}`;
+      
+      return urlWithDisposition;
 
     } catch (error: any) {
       console.error('Error uploading to S3:', error);
@@ -103,5 +106,6 @@ export class S3Service {
       throw new Error('Failed to download and upload file to S3');
     }
   }
+
 
 }
