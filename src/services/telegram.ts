@@ -717,7 +717,7 @@ export class TelegramService {
       const originalPrompt = promptText;
       
       if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
-        processedPrompt = 'animate this image with subtle movements, breathing effect and waving hand';
+        processedPrompt = 'everyone in the photo is waving hand, subtle movements and breathing effect';
       } else {
         // Translate Russian prompts to English for better AI understanding
         let translatedPrompt = this.translatePrompt(processedPrompt);
@@ -1365,7 +1365,7 @@ export class TelegramService {
       const originalPrompt = promptText;
       
       if (processedPrompt === 'пропустить' || processedPrompt === 'skip') {
-        processedPrompt = 'animate this image with subtle movements, breathing effect and waving hand';
+        processedPrompt = 'everyone in the photo is waving hand, subtle movements and breathing effect';
       } else {
         // Переводим промпт
         let translatedPrompt = this.translatePrompt(processedPrompt);
@@ -1412,7 +1412,7 @@ export class TelegramService {
       const order = await this.orderService.createOrder(
         user.id, 
         s3Url, 
-        'animate this image with subtle movements, breathing effect and waving hand'
+        'everyone in the photo is waving hand, subtle movements and breathing effect'
       );
       console.log(`📝 Создан заказ для fal.ai: ${order.id}, order_type: ${order.order_type}`);
       
@@ -2060,7 +2060,7 @@ ${packageListText}
       }
       
       // Получаем промпт (если был сохранен)
-      const promptText = 'animate this image with subtle movements, breathing effect and waving hand'; // Можно сохранять промпт отдельно
+      const promptText = 'everyone in the photo is waving hand, subtle movements and breathing effect'; // Можно сохранять промпт отдельно
       
       // Для fal.ai отправляем изображение как есть (без обработки)
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
@@ -2516,7 +2516,7 @@ ${packageListText}
       const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
       
       // Промпт для анимации - берем из пользовательского ввода
-      let animationPrompt = state.animationPrompt || 'animate this image with subtle movements, breathing effect and waving hand';
+      let animationPrompt = state.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
       // Переводим русский промпт на английский для лучшего понимания AI
       animationPrompt = this.translateAnimationPrompt(animationPrompt);

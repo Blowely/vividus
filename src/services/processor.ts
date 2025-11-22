@@ -206,7 +206,7 @@ export class ProcessorService {
           }
           
           // Запускаем вызов fal.ai АСИНХРОННО (не блокируем event loop)
-          const cleanPrompt = order.custom_prompt?.split('|progressMessageId:')[0] || 'animate this image with subtle movements, breathing effect and waving hand';
+          const cleanPrompt = order.custom_prompt?.split('|progressMessageId:')[0] || 'everyone in the photo is waving hand, subtle movements and breathing effect';
           
           // Создаем временный generationId для немедленного запуска мониторинга
           const tempGenerationId = `fal_temp_${orderId}_${Date.now()}`;
@@ -1981,7 +1981,7 @@ export class ProcessorService {
       await this.notifyUser(telegramId, '✅ Фото объединены!\n\n🎬 Шаг 2/2: Оживляю видео...');
       
       // Шаг 2: Оживляем объединенное фото через fal.ai (MiniMax Hailuo)
-      const animationPrompt = order.animation_prompt || 'animate this image with subtle movements, breathing effect and waving hand';
+      const animationPrompt = order.animation_prompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
       console.log(`Animating combined image with prompt: ${animationPrompt}`);
       
