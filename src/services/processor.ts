@@ -114,27 +114,27 @@ export class ProcessorService {
             const maxRetries = 1; // Максимум 1 повторная попытка
             
             while (retryCount <= maxRetries) {
-              try {
+            try {
                 if (retryCount > 0) {
                   console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для animate_v2 заказа ${orderId}`);
                   await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации...`);
                 }
                 
-                const requestId = await this.falService.createVideoFromImage(
-                  order.original_file_path,
-                  orderId,
-                  order.custom_prompt
-                );
-                console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
-                
-                // После создания джоба запускаем мониторинг
-                const generationIds = [requestId];
-                await this.orderService.updateOrderResult(orderId, generationIds[0]);
-                console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
-                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              const requestId = await this.falService.createVideoFromImage(
+                order.original_file_path,
+                orderId,
+                order.custom_prompt
+              );
+              console.log(`   ✅ Fal.ai запрос завершен для animate_v2: ${requestId}`);
+              
+              // После создания джоба запускаем мониторинг
+              const generationIds = [requestId];
+              await this.orderService.updateOrderResult(orderId, generationIds[0]);
+              console.log(`👀 Начинаю мониторинг ${generationIds.length} джобов для заказа ${orderId}`);
+              this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
                 
                 break; // Успешно завершено
-              } catch (error: any) {
+            } catch (error: any) {
                 console.error(`Error in async fal.ai call for animate_v2 (attempt ${retryCount + 1}/${maxRetries + 1}):`, error);
                 
                 // Проверяем, является ли это ошибкой скачивания файла (НЕ ошибкой доступности)
@@ -152,19 +152,19 @@ export class ProcessorService {
                   continue;
                 }
                 
-                // Проверяем, может джоб все-таки создан
-                const falJobs = await this.falService.getJobsByOrderId(orderId);
-                if (falJobs.length > 0) {
-                  const generationIds = falJobs.map(job => job.did_job_id);
-                  await this.orderService.updateOrderResult(orderId, generationIds[0]);
-                  console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
-                  this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
-                } else {
-                  // Если джоб не создан, обновляем статус заказа на failed
-                  await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+              // Проверяем, может джоб все-таки создан
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
+              if (falJobs.length > 0) {
+                const generationIds = falJobs.map(job => job.did_job_id);
+                await this.orderService.updateOrderResult(orderId, generationIds[0]);
+                console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${falJobs.length} джобов. Запускаю мониторинг...`);
+                this.monitorMultipleJobs(generationIds, user.telegram_id, orderId);
+              } else {
+                // Если джоб не создан, обновляем статус заказа на failed
+                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
                   const errorMessage = error.message || 'Произошла ошибка при создании видео. Попробуйте позже.';
                   await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
-                  console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Статус обновлен на failed.`);
+                console.log(`❌ Заказ ${orderId} (animate_v2) завершился с ошибкой. Статус обновлен на failed.`);
                 }
                 
                 break; // Выходим из цикла
@@ -271,31 +271,31 @@ export class ProcessorService {
                   }
                 }
                 
-                const requestId = await this.falService.createVideoFromImage(
-                  order.original_file_path,
-                  orderId,
-                  cleanPrompt
+              const requestId = await this.falService.createVideoFromImage(
+                order.original_file_path,
+                orderId,
+                cleanPrompt
+              );
+              console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
+              
+              // Обновляем временный джоб на реальный в БД
+              const client = await (await import('../config/database')).default.connect();
+              try {
+                await client.query(
+                  `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
+                  [requestId, tempGenerationId, orderId]
                 );
-                console.log(`   ✅ Fal.ai запрос завершен: ${requestId}`);
-                
-                // Обновляем временный джоб на реальный в БД
-                const client = await (await import('../config/database')).default.connect();
-                try {
-                  await client.query(
-                    `UPDATE did_jobs SET did_job_id = $1 WHERE did_job_id = $2 AND order_id = $3`,
-                    [requestId, tempGenerationId, orderId]
-                  );
-                  console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
-                } finally {
-                  client.release();
-                }
-                
-                // Обновляем order result
-                await this.orderService.updateOrderResult(orderId, requestId);
+                console.log(`   ✅ Обновлен временный джоб ${tempGenerationId} на реальный ${requestId}`);
+              } finally {
+                client.release();
+              }
+              
+              // Обновляем order result
+              await this.orderService.updateOrderResult(orderId, requestId);
                 
                 // Успешно завершено, выходим из цикла
                 break;
-              } catch (error: any) {
+            } catch (error: any) {
                 console.error(`Error in async fal.ai call (attempt ${retryCount + 1}/${maxRetries + 1}):`, error);
                 
                 // Проверяем, является ли это ошибкой скачивания файла (НЕ ошибкой доступности)
@@ -314,14 +314,14 @@ export class ProcessorService {
                 }
                 
                 // Проверяем, может джоб все-таки создан (исключая временный)
-                const falJobs = await this.falService.getJobsByOrderId(orderId);
+              const falJobs = await this.falService.getJobsByOrderId(orderId);
                 const realJobs = falJobs.filter(job => !job.did_job_id.startsWith('fal_temp_'));
                 
                 if (realJobs.length > 0) {
                   const realGenerationIds = realJobs.map(job => job.did_job_id);
-                  await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
+                await this.orderService.updateOrderResult(orderId, realGenerationIds[0]);
                   console.log(`⚠️ Ошибка при вызове fal.ai, но найдено ${realJobs.length} реальных джобов.`);
-                } else {
+              } else {
                   // Обновляем временный джоб на failed
                   const client = await (await import('../config/database')).default.connect();
                   try {
@@ -334,8 +334,8 @@ export class ProcessorService {
                     client.release();
                   }
                   
-                  // Обновляем статус заказа на failed
-                  await this.orderService.updateOrderStatus(orderId, 'failed' as any);
+                // Обновляем статус заказа на failed
+                await this.orderService.updateOrderStatus(orderId, 'failed' as any);
                   // Используем сообщение из ошибки, если оно есть, иначе общее сообщение
                   const errorMessage = error.message || 'Произошла ошибка при создании видео. Попробуйте позже.';
                   await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);

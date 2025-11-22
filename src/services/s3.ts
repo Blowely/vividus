@@ -59,6 +59,7 @@ export class S3Service {
         Body: body,
         ACL: 'public-read',
         ContentType: mimeType,
+        ContentDisposition: 'inline', // Открывать в браузере, а не скачивать
       }));
 
       const link = `${this.endpoint}/${this.bucketName}/${filename}`;
