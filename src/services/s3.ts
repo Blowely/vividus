@@ -62,10 +62,14 @@ export class S3Service {
         ContentDisposition: 'inline', // Открывать в браузере, а не скачивать
       }));
 
+      // Добавляем параметр для открытия в браузере вместо скачивания
       const link = `${this.endpoint}/${this.bucketName}/${filename}`;
       console.log('File uploaded successfully to S3:', link);
       
-      return link;
+      // Возвращаем URL с параметром response-content-disposition для открытия в браузере
+      // Это решает проблему с fal.ai, который не может скачать файлы с Content-Disposition: attachment
+      return `${link}?response-content-disposition=inline`;
+
     } catch (error: any) {
       console.error('Error uploading to S3:', error);
       console.error('Error details:', error.response?.data);
