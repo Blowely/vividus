@@ -428,7 +428,7 @@ export class ProcessorService {
     // Определяем, является ли заказ animate_v2 (для отправки в broadcast-bot)
     const order = await this.orderService.getOrder(orderId);
     const isAnimateV2 = order?.order_type === 'animate_v2';
-    // Все заказы используют fal.ai (для фейкового прогресса в основном боте)
+    // Все заказы используют fal.ai (включая combine_and_animate)
     const isFalOrder = !isAnimateV2;
     // Используем объект-ссылку, который можно изменять в замыкании
     let generationIdsRef = { ids: [...generationIds] };
@@ -1974,8 +1974,8 @@ export class ProcessorService {
         throw new Error('Нужно как минимум 2 фото для объединения');
       }
 
-      // Шаг 1: Объединяем фото через Flux Schnell (fal.ai)
-      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото через Flux...');
+      // Шаг 1: Объединяем фото через Nano Banana 2 (fal.ai)
+      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото через Nano Banana 2...');
       
       const image1 = referenceImages[0];
       const image2 = referenceImages[1];
@@ -2007,7 +2007,7 @@ export class ProcessorService {
       
       console.log(`Animating combined image with prompt: ${animationPrompt}`);
       
-      // Создаем видео из объединенного фото
+      // Создаем видео из объединенного фото через fal.ai
       const systemRequestId = await this.falService.createVideoFromImage(
         combinedImageS3Url,
         orderId,

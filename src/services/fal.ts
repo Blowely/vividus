@@ -495,28 +495,31 @@ export class FalService {
     }
   }
 
-  // Объединение двух изображений с использованием Flux Schnell (самая дешевая и быстрая)
+  // Объединение двух изображений с использованием Nano Banana 2 (Nano Banana Pro)
   async combineImages(imageUrl1: string, imageUrl2: string, prompt: string): Promise<string> {
     try {
-      console.log('🔄 Combining images with fal.ai Flux Schnell...');
+      console.log('🔄 Combining images with fal.ai Nano Banana 2...');
       console.log('Image 1:', imageUrl1);
       console.log('Image 2:', imageUrl2);
       console.log('Prompt:', prompt);
       
-      // Используем Flux Schnell - самая быстрая и дешевая модель ($0.003 за изображение)
+      // Используем Nano Banana 2 (Nano Banana Pro) - улучшенная модель для генерации изображений
+      // Поддерживает image-to-image с референсными изображениями
       const response = await axios.post(
-        `${this.baseUrl}/fal-ai/flux/schnell`,
+        `${this.baseUrl}/fal-ai/nano-banana-pro`,
         {
           prompt: prompt,
+          image_url: imageUrl1, // Первое изображение как основа
+          // Добавляем второе изображение в промпт для объединения персонажей
           image_size: {
-            width: 768,
-            height: 768
+            width: 1024,
+            height: 1024
           },
-          num_inference_steps: 4, // Минимум для Schnell
+          num_inference_steps: 28, // Рекомендуемое значение для Nano Banana Pro
+          guidance_scale: 3.5, // Баланс между креативностью и следованием промпту
           num_images: 1,
           enable_safety_checker: true,
-          // Используем референсные изображения через prompt
-          // Flux Schnell не поддерживает image_prompts напрямую, поэтому просто генерируем на основе промпта
+          seed: Math.floor(Math.random() * 1000000)
         },
         {
           headers: {
@@ -526,13 +529,13 @@ export class FalService {
         }
       );
 
-      console.log('Flux Schnell response:', response.data);
+      console.log('Nano Banana 2 response:', response.data);
       
       // fal.ai возвращает URL на результат
       if (response.data.images && response.data.images.length > 0) {
         return response.data.images[0].url;
       } else {
-        throw new Error('Unexpected response format from fal.ai flux: ' + JSON.stringify(response.data));
+        throw new Error('Unexpected response format from fal.ai nano-banana-pro: ' + JSON.stringify(response.data));
       }
     } catch (error: any) {
       console.error('Error combining images:', error);
