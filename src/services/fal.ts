@@ -44,7 +44,10 @@ export class FalService {
     if (errorLower.includes('content moderation') || 
         errorLower.includes('moderation') || 
         errorLower.includes('not passed moderation') ||
-        errorLower.includes('did not pass')) {
+        errorLower.includes('did not pass') ||
+        errorLower.includes('flagged by') ||
+        errorLower.includes('content checker') ||
+        (errorLower.includes('could not be processed') && errorLower.includes('content'))) {
       return 'Картинка или промпт (текстовый запрос) не прошли модерацию.';
     }
     
@@ -56,6 +59,13 @@ export class FalService {
     // Размер файла
     if (errorLower.includes('file size') || errorLower.includes('too large') || errorLower.includes('too small')) {
       return 'Неподходящий размер изображения. Пожалуйста, отправьте фото другого размера.';
+    }
+    
+    // Соотношение сторон (aspect ratio)
+    if (errorLower.includes('aspect ratio') || 
+        errorLower.includes('ratio should be between') ||
+        errorLower.includes('ratio of the image should be')) {
+      return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.4 до 2.5. Пожалуйста, отправьте фото с другим соотношением сторон.';
     }
     
     // Общая ошибка валидации

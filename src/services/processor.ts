@@ -1444,24 +1444,32 @@ export class ProcessorService {
       let errorMessage = '❌ Не удалось создать видео. Попробуйте другое изображение.';
       
       if (errors.length > 0) {
-        // Ищем ошибку модерации среди всех ошибок
-        const moderationError = errors.find(error => {
-          const errorLower = error.toLowerCase();
-          return errorLower.includes('content moderation') || 
-                 errorLower.includes('moderation') || 
-                 errorLower.includes('not passed moderation') ||
-                 errorLower.includes('public figure') ||
-                 errorLower.includes('did not pass');
-        });
+        // Фильтруем только строковые ошибки
+        const stringErrors = errors.filter(error => typeof error === 'string' && error.trim().length > 0);
         
-        if (moderationError) {
-          // Переводим ошибку модерации (всегда используем fal.ai)
-          errorMessage = `❌ ${this.translateFalError(moderationError)}`;
-        } else {
-          // Используем первую доступную переведенную ошибку
-          const translatedError = this.translateFalError(errors[0]);
-          if (translatedError !== errors[0]) {
-            errorMessage = `❌ ${translatedError}`;
+        if (stringErrors.length > 0) {
+          // Ищем ошибку модерации среди всех ошибок
+          const moderationError = stringErrors.find(error => {
+            const errorLower = error.toLowerCase();
+            return errorLower.includes('content moderation') || 
+                   errorLower.includes('moderation') || 
+                   errorLower.includes('not passed moderation') ||
+                   errorLower.includes('public figure') ||
+                   errorLower.includes('did not pass') ||
+                   errorLower.includes('flagged by') ||
+                   errorLower.includes('content checker') ||
+                   (errorLower.includes('could not be processed') && errorLower.includes('content'));
+          });
+          
+          if (moderationError) {
+            // Переводим ошибку модерации (всегда используем fal.ai)
+            errorMessage = `❌ ${this.translateFalError(moderationError)}`;
+          } else {
+            // Используем первую доступную переведенную ошибку
+            const translatedError = this.translateFalError(stringErrors[0]);
+            if (translatedError !== stringErrors[0]) {
+              errorMessage = `❌ ${translatedError}`;
+            }
           }
         }
       }
@@ -1577,7 +1585,10 @@ export class ProcessorService {
     if (errorLower.includes('content moderation') || 
         errorLower.includes('moderation') || 
         errorLower.includes('not passed moderation') ||
-        errorLower.includes('did not pass')) {
+        errorLower.includes('did not pass') ||
+        errorLower.includes('flagged by') ||
+        errorLower.includes('content checker') ||
+        (errorLower.includes('could not be processed') && errorLower.includes('content'))) {
       return 'Картинка или промпт (текстовый запрос) не прошли модерацию.';
     }
     
@@ -1589,6 +1600,13 @@ export class ProcessorService {
     // Размер файла
     if (errorLower.includes('file size') || errorLower.includes('too large') || errorLower.includes('too small')) {
       return 'Неподходящий размер изображения. Пожалуйста, отправьте фото другого размера.';
+    }
+    
+    // Соотношение сторон (aspect ratio)
+    if (errorLower.includes('aspect ratio') || 
+        errorLower.includes('ratio should be between') ||
+        errorLower.includes('ratio of the image should be')) {
+      return 'Неподдерживаемое соотношение сторон изображения. Соотношение ширины к высоте должно быть от 0.4 до 2.5. Пожалуйста, отправьте фото с другим соотношением сторон.';
     }
     
     // Общая ошибка валидации
