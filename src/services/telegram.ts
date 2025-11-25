@@ -1992,8 +1992,8 @@ ${packageListText}
         ];
       });
       
-      // Добавляем кнопку оплаты звёздами (пока заглушка)
-      keyboard.push([Markup.button.callback('⭐ Оплатить звёздами', 'buy_generations_stars')]);
+      // Добавляем кнопку оплаты звёздами (скрыто)
+      // keyboard.push([Markup.button.callback('⭐ Оплатить звёздами', 'buy_generations_stars')]);
       keyboard.push(this.getBackButton());
       
       // Отправляем новое сообщение вместо редактирования
