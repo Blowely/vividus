@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 import pool from '../config/database';
 import { DidJob, DidJobStatus } from '../types';
 import { S3Service } from './s3';
+import { fal } from '@fal-ai/client';
 
 config();
 
@@ -17,6 +18,11 @@ export class FalService {
     this.baseUrl = 'https://fal.run';
     this.modelId = 'fal-ai/minimax/hailuo-2.3-fast/standard/image-to-video';
     this.s3Service = new S3Service();
+    
+    // Инициализируем fal client с API ключом
+    fal.config({
+      credentials: this.apiKey
+    });
   }
 
   private translateFalError(errorMessage: string | undefined | null): string {
@@ -495,51 +501,46 @@ export class FalService {
     }
   }
 
-  // Объединение двух изображений с использованием Nano Banana 2 (Nano Banana Pro)
+  // Объединение двух изображений с использованием Nano Banana Pro Edit
   async combineImages(imageUrl1: string, imageUrl2: string, prompt: string): Promise<string> {
     try {
-      console.log('🔄 Combining images with fal.ai Nano Banana 2...');
+      console.log('🔄 Combining images with fal.ai Nano Banana Pro Edit...');
       console.log('Image 1:', imageUrl1);
       console.log('Image 2:', imageUrl2);
       console.log('Prompt:', prompt);
       
-      // Используем Nano Banana 2 (Nano Banana Pro) - улучшенная модель для генерации изображений
-      // Поддерживает image-to-image с референсными изображениями
-      const response = await axios.post(
-        `${this.baseUrl}/fal-ai/nano-banana-pro`,
-        {
+      // Используем Nano Banana Pro Edit для объединения двух изображений
+      // Этот endpoint специально предназначен для работы с несколькими референсными изображениями
+      const result = await fal.subscribe('fal-ai/nano-banana-pro/edit', {
+        input: {
           prompt: prompt,
-          image_url: imageUrl1, // Первое изображение как основа
-          // Добавляем второе изображение в промпт для объединения персонажей
-          image_size: {
-            width: 1024,
-            height: 1024
-          },
-          num_inference_steps: 28, // Рекомендуемое значение для Nano Banana Pro
-          guidance_scale: 3.5, // Баланс между креативностью и следованием промпту
-          num_images: 1,
-          enable_safety_checker: true,
-          seed: Math.floor(Math.random() * 1000000)
+          image_urls: [imageUrl1, imageUrl2] // Массив из двух изображений
         },
-        {
-          headers: {
-            'Authorization': `Key ${this.apiKey}`,
-            'Content-Type': 'application/json'
+        logs: true,
+        onQueueUpdate: (update) => {
+          if (update.status === 'IN_PROGRESS') {
+            update.logs?.map((log) => log.message).forEach((msg) => {
+              console.log('Nano Banana Pro Edit log:', msg);
+            });
           }
         }
-      );
+      });
 
-      console.log('Nano Banana 2 response:', response.data);
+      console.log('Nano Banana Pro Edit response:', result.data);
+      console.log('Request ID:', result.requestId);
       
       // fal.ai возвращает URL на результат
-      if (response.data.images && response.data.images.length > 0) {
-        return response.data.images[0].url;
+      if (result.data && result.data.images && result.data.images.length > 0) {
+        return result.data.images[0].url;
+      } else if (result.data && result.data.image) {
+        // Иногда результат может быть в поле image
+        return result.data.image.url || result.data.image;
       } else {
-        throw new Error('Unexpected response format from fal.ai nano-banana-pro: ' + JSON.stringify(response.data));
+        throw new Error('Unexpected response format from fal.ai nano-banana-pro/edit: ' + JSON.stringify(result.data));
       }
     } catch (error: any) {
       console.error('Error combining images:', error);
-      console.error('Error details:', error.response?.data);
+      console.error('Error details:', error.response?.data || error.message);
       
       const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to combine images';
       const translatedError = this.translateFalError(errorMessage);
