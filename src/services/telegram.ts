@@ -2695,7 +2695,8 @@ ${packageListText}
           photoUrls,
           combinePrompt,
           animationPrompt,
-          OrderStatus.PROCESSING // Статус processing вместо payment_required
+          OrderStatus.PROCESSING, // Статус processing вместо payment_required
+          originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
         );
         
         // Очищаем состояние

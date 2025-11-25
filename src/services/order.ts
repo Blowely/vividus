@@ -41,7 +41,8 @@ export class OrderService {
     referenceImages: string[], 
     combinePrompt?: string, 
     animationPrompt?: string,
-    status: OrderStatus = OrderStatus.PAYMENT_REQUIRED
+    status: OrderStatus = OrderStatus.PAYMENT_REQUIRED,
+    originalPrompt?: string // Оригинальный промпт пользователя для отображения в админке
   ): Promise<Order> {
     const client = await pool.connect();
     
@@ -49,9 +50,9 @@ export class OrderService {
       const result = await client.query(
         `INSERT INTO orders (
           user_id, original_file_path, status, order_type, 
-          combine_prompt, animation_prompt, reference_images
+          combine_prompt, animation_prompt, custom_prompt, reference_images
         ) 
-         VALUES ($1, $2, $3, 'combine_and_animate', $4, $5, $6) 
+         VALUES ($1, $2, $3, 'combine_and_animate', $4, $5, $6, $7) 
          RETURNING *`,
         [
           userId, 
@@ -59,6 +60,7 @@ export class OrderService {
           status, 
           combinePrompt,
           animationPrompt,
+          originalPrompt || animationPrompt, // Сохраняем оригинальный промпт в custom_prompt для отображения в админке
           JSON.stringify(referenceImages)
         ]
       );

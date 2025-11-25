@@ -640,12 +640,15 @@ export class PaymentService {
                           const { OrderService } = await import('./order');
                           const { OrderStatus } = await import('../types');
                           const orderService = new OrderService();
+                          // Сохраняем оригинальный промпт до перевода
+                          const originalAnimationPrompt = combineData.state?.animationPrompt || animationPrompt;
                           const order = await orderService.createCombineAndAnimateOrder(
                             userId,
                             photoUrls,
                             combinePrompt,
                             animationPrompt,
-                            OrderStatus.PROCESSING
+                            OrderStatus.PROCESSING,
+                            originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
                           );
                           
                           // Запускаем обработку

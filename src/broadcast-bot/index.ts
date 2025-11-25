@@ -804,11 +804,15 @@ async function createCombineAndAnimateOrder(
     animationPrompt = translateAnimationPrompt(animationPrompt);
     
     // Создаем заказ
+    // Сохраняем оригинальный промпт до перевода
+    const originalAnimationPrompt = state.animationPrompt || animationPrompt;
     const order = await orderService.createCombineAndAnimateOrder(
       user.id,
       photoUrls,
       combinePrompt,
-      animationPrompt
+      animationPrompt,
+      'processing' as any,
+      originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
     );
     
     // Очищаем состояние
