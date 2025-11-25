@@ -40,7 +40,8 @@ export class OrderService {
     userId: number, 
     referenceImages: string[], 
     combinePrompt?: string, 
-    animationPrompt?: string
+    animationPrompt?: string,
+    status: OrderStatus = OrderStatus.PAYMENT_REQUIRED
   ): Promise<Order> {
     const client = await pool.connect();
     
@@ -55,7 +56,7 @@ export class OrderService {
         [
           userId, 
           referenceImages[0] || '', // Первое фото как original_file_path для совместимости
-          OrderStatus.PAYMENT_REQUIRED, 
+          status, 
           combinePrompt,
           animationPrompt,
           JSON.stringify(referenceImages)

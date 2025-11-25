@@ -551,21 +551,48 @@ export class TelegramService {
           return;
         }
         
-        // Добавляем фото в список для режима combine_and_animate (максимум 2)
-        if (combinePhotos.length < 2) {
-          combinePhotos.push(fileId);
-          this.combineAndAnimatePhotos.set(user.telegram_id, combinePhotos);
-          
-          // Если получили 2 фото, запрашиваем промпт
-          if (combinePhotos.length === 2) {
+        // Используем mediaGroupId для группировки фото из одного альбома
+        // Создаем ключ для хранения фото из этой медиа-группы
+        const mediaGroupKey = `combine_${user.telegram_id}_${mediaGroupId}`;
+        
+        // Получаем или создаем массив фото для этой медиа-группы
+        if (!(global as any).combineMediaGroups) {
+          (global as any).combineMediaGroups = new Map();
+        }
+        
+        let groupPhotos = (global as any).combineMediaGroups.get(mediaGroupKey) || [];
+        
+        // Добавляем фото, если его еще нет в группе (избегаем дубликатов)
+        if (!groupPhotos.includes(fileId)) {
+          groupPhotos.push(fileId);
+          (global as any).combineMediaGroups.set(mediaGroupKey, groupPhotos);
+        }
+        
+        // Берем только первые 2 фото из группы
+        const photosToUse = groupPhotos.slice(0, 2);
+        
+        // Обновляем основной список фото для режима combine_and_animate
+        this.combineAndAnimatePhotos.set(user.telegram_id, photosToUse);
+        
+        // Если получили 2 фото, запрашиваем промпт (с задержкой, чтобы все фото из группы успели обработаться)
+        if (photosToUse.length === 2) {
+          // Проверяем, не запрашивали ли уже промпт для этой группы
+          const state = this.combineAndAnimateState.get(user.telegram_id) || {};
+          if (!state.waitingForAnimationPrompt) {
             // Небольшая задержка, чтобы все фото из группы успели обработаться
             setTimeout(async () => {
-              await this.requestAnimationPrompt(ctx);
-            }, 1000);
+              // Проверяем еще раз, что у нас есть 2 фото
+              const currentPhotos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
+              if (currentPhotos.length >= 2) {
+                await this.requestAnimationPrompt(ctx);
+              }
+              // Очищаем временное хранилище для этой медиа-группы
+              if ((global as any).combineMediaGroups) {
+                (global as any).combineMediaGroups.delete(mediaGroupKey);
+              }
+            }, 1500);
           }
-          return;
         }
-        // Уже есть 2 фото, игнорируем остальные
         return;
       }
       
@@ -1268,7 +1295,24 @@ export class TelegramService {
         await this.showAnalytics(ctx);
         break;
       default:
-        if (callbackData.startsWith('buy_and_process_')) {
+        if (callbackData.startsWith('buy_and_process_combine_')) {
+          // Формат: buy_and_process_combine_{count}_{price}
+          const parts = callbackData.replace('buy_and_process_combine_', '').split('_');
+          if (parts.length === 2) {
+            const count = parseInt(parts[0], 10);
+            const price = parseInt(parts[1], 10);
+            if (!isNaN(count) && !isNaN(price)) {
+              // Сначала покупаем генерации, затем обрабатываем объединение и оживление
+              await this.handlePurchaseGenerationsAndProcessCombine(ctx, count, price);
+            } else {
+              console.error(`Invalid buy_and_process_combine callback: ${callbackData}`);
+              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            }
+          } else {
+            console.error(`Invalid buy_and_process_combine callback format: ${callbackData}`);
+            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+          }
+        } else if (callbackData.startsWith('buy_and_process_')) {
           // Формат: buy_and_process_{count}_{price}
           const parts = callbackData.replace('buy_and_process_', '').split('_');
           if (parts.length === 2) {
@@ -2206,6 +2250,76 @@ ${packageListText}
     }
   }
 
+  private async handlePurchaseGenerationsAndProcessCombine(ctx: Context, generationsCount: number, price: number) {
+    try {
+      await ctx.answerCbQuery();
+      
+      const user = await this.userService.getOrCreateUser(ctx.from!);
+      
+      // Получаем сохраненные фото и состояние для объединения и оживления
+      const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
+      const combineState = this.combineAndAnimateState.get(user.telegram_id);
+      
+      if (!combinePhotos || combinePhotos.length < 2 || !combineState) {
+        await this.sendMessage(ctx, '❌ Фото не найдены. Отправьте фото заново!');
+        return;
+      }
+      
+      const animationPrompt = combineState.animationPrompt || 'пропустить';
+      
+      console.log(`📦 Creating generation purchase with auto-process combine: ${generationsCount} generations for ${price} RUB, user: ${ctx.from!.id}`);
+      
+      // Создаем покупку генераций
+      // После успешной оплаты в webhook нужно будет проверить наличие combineAndAnimatePhotos
+      // и автоматически создать заказ
+      const payment = await this.paymentService.createGenerationPurchase(
+        ctx.from!.id, 
+        generationsCount, 
+        price
+      );
+      
+      // Сохраняем данные для автоматической обработки после оплаты
+      // Используем глобальное хранилище для передачи данных в webhook
+      if (typeof (global as any).pendingCombineAndAnimatePurchases === 'undefined') {
+        (global as any).pendingCombineAndAnimatePurchases = new Map();
+      }
+      (global as any).pendingCombineAndAnimatePurchases.set(payment.id, {
+        telegramId: ctx.from!.id,
+        photos: combinePhotos,
+        state: combineState
+      });
+      
+      // Генерируем URL для оплаты
+      const paymentUrl = await this.paymentService.generateGenerationPurchaseUrl(
+        payment.id,
+        price,
+        generationsCount,
+        ctx.from!.id
+      );
+      
+      const message = `💳 Покупка генераций и обработка фото
+
+📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
+💰 Сумма: ${price} ₽
+
+После оплаты генерации будут добавлены на баланс, и фото будут обработаны автоматически.`;
+      
+      await this.sendMessage(ctx, message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.url('💳 Оплатить', paymentUrl)],
+            this.getBackButton()
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error creating generation purchase with combine processing:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await this.sendMessage(ctx, `❌ Ошибка при создании платежа: ${errorMessage}\n\nПопробуйте позже.`);
+    }
+  }
+
   private async handlePurchaseGenerations(ctx: Context, generationsCount: number, price: number) {
     try {
       await ctx.answerCbQuery();
@@ -2564,24 +2678,88 @@ ${packageListText}
       
       // Промпт для анимации - берем из пользовательского ввода
       let animationPrompt = state.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
+      const originalAnimationPrompt = animationPrompt;
       
       // Переводим русский промпт на английский для лучшего понимания AI
       animationPrompt = this.translateAnimationPrompt(animationPrompt);
       
-      // Создаем заказ
-      const order = await this.orderService.createCombineAndAnimateOrder(
-        user.id,
-        photoUrls,
-        combinePrompt,
-        animationPrompt
-      );
+      // Проверяем баланс генераций пользователя
+      const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
       
-      // Очищаем состояние
-      this.combineAndAnimatePhotos.delete(user.telegram_id);
-      this.combineAndAnimateState.delete(user.telegram_id);
+      if (userGenerations >= 1) {
+        // Создаем заказ со статусом processing (без оплаты)
+        // Финальная проверка баланса будет выполнена в processOrder перед началом обработки
+        const { OrderStatus } = await import('../types');
+        const order = await this.orderService.createCombineAndAnimateOrder(
+          user.id,
+          photoUrls,
+          combinePrompt,
+          animationPrompt,
+          OrderStatus.PROCESSING // Статус processing вместо payment_required
+        );
+        
+        // Очищаем состояние
+        this.combineAndAnimatePhotos.delete(user.telegram_id);
+        this.combineAndAnimateState.delete(user.telegram_id);
+        
+        // Объединенное сообщение о промпте, создании заказа и начале генерации
+        const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip') 
+          ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
+          : originalAnimationPrompt;
+        await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет до 5 минут.`);
       
-      // Отправляем запрос на оплату
-      await this.sendPaymentRequest(ctx, order);
+        // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
+        const { ProcessorService } = await import('./processor');
+        const processorService = new ProcessorService();
+        await processorService.processOrder(order.id);
+      } else {
+        // У пользователя нет генераций - предлагаем купить генерации
+        
+        // Сохраняем фото и промпт для повторной обработки после покупки генераций
+        this.combineAndAnimatePhotos.set(user.telegram_id, photos);
+        this.combineAndAnimateState.set(user.telegram_id, state);
+        
+        const displayPromptForMessage = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip' || !originalAnimationPrompt)
+          ? 'оживите это изображение с помощью легких движений и эффекта дыхания'
+          : originalAnimationPrompt;
+        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+
+📸 Ваши фото сохранены и готовы к обработке
+🎬 Промпт: "${displayPromptForMessage}"
+
+Выберите способ оплаты:`;
+        
+        // Пакеты генераций (оригинальные цены)
+        const packages = [
+          { count: 1, originalPrice: 169 },
+          { count: 3, originalPrice: 507 },
+          { count: 5, originalPrice: 845 },
+          { count: 10, originalPrice: 1690 }
+        ];
+        
+        // Коэффициент скидки: 89/169 ≈ 0.5266 (скидка ~47.34%)
+        const discountCoefficient = 89 / 169;
+        
+        const keyboard = packages.map(pkg => {
+          // Используем цену со скидкой как финальную цену (оригинальная * 89/169)
+          const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
+          const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
+          return [
+            Markup.button.callback(
+              buttonText,
+              `buy_and_process_combine_${pkg.count}_${discountedPrice}`
+            )
+          ];
+        });
+        
+        keyboard.push(this.getBackButton());
+        
+        await this.sendMessage(ctx, noGenerationsMessage, {
+          reply_markup: {
+            inline_keyboard: keyboard
+          }
+        });
+      }
       
     } catch (error) {
       console.error('Error creating combine and animate order:', error);
