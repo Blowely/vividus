@@ -178,13 +178,15 @@ export class FalService {
       
       const prompt = customPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
-      // Используем прямой вызов через axios для избежания timeout в fal.subscribe
-      // fal.subscribe имеет внутренний timeout в 90 секунд, поэтому используем старый метод
+      // Используем прямой вызов через axios с коротким timeout
+      // fal.ai для длительных операций может вернуть request_id сразу или обработать синхронно
+      // Используем короткий timeout, чтобы быстро получить request_id для асинхронных операций
       console.log('🔄 Creating video with fal.ai using direct API call...');
       
       try {
-        // Используем прямой вызов через axios с увеличенным timeout
-        // Это позволяет избежать проблем с внутренним timeout в fal.subscribe
+        // Используем прямой вызов через axios с коротким timeout
+        // Если операция длительная, fal.ai вернет request_id быстро
+        // Если операция быстрая, получим результат синхронно
         const response = await axios.post(
           `${this.baseUrl}/${this.modelId}`,
           {
@@ -198,7 +200,7 @@ export class FalService {
               'Authorization': `Key ${this.apiKey}`,
               'Content-Type': 'application/json'
             },
-            timeout: 300000 // 5 минут - достаточно для длительных операций
+            timeout: 30000 // 30 секунд - достаточно для получения request_id или быстрого результата
           }
         );
 
@@ -225,31 +227,66 @@ export class FalService {
           throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
         }
       } catch (axiosError: any) {
-        // Если прямой вызов через axios не удался, пробуем fal.run() как fallback
-        console.warn('Direct axios.post() failed, trying fal.run():', axiosError.message);
-        
-        try {
-          const result = await fal.run(this.modelId, {
-            input: {
-              prompt: prompt,
-              image_url: imageUrl,
-              duration: duration,
-              prompt_optimizer: true
-            }
-          });
+        // Если произошел timeout, это может означать, что операция длительная
+        // В этом случае fal.ai все равно обрабатывает запрос, но ответ придет позже
+        // Нужно использовать другой подход - проверить, не вернул ли fal.ai request_id в заголовках
+        if (axiosError.code === 'ECONNABORTED' || axiosError.message?.includes('timeout')) {
+          console.warn('Request timed out after 30s, but fal.ai may still be processing. Checking for request_id in response...');
           
-          if (result.requestId) {
-            const systemRequestId = `fal_${result.requestId}`;
+          // Проверяем, есть ли request_id в ответе (даже если был timeout)
+          if (axiosError.response?.data?.request_id) {
+            const requestId = axiosError.response.data.request_id;
+            const systemRequestId = `fal_${requestId}`;
             await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-            await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, result.requestId);
+            await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+            console.log(`✅ Got request_id despite timeout: ${requestId}`);
             return systemRequestId;
-          } else {
-            throw new Error('Unexpected response format from fal.ai run: ' + JSON.stringify(result));
           }
-        } catch (fallbackError: any) {
-          // Если и fallback не сработал, пробрасываем оригинальную ошибку
-          throw axiosError;
+          
+          // Если request_id нет, пробуем использовать fal.run() с коротким timeout
+          // fal.run() может вернуть request_id быстрее
+          console.warn('No request_id in timeout response, trying fal.run() with short timeout...');
+          
+          try {
+            // Используем Promise.race для ограничения времени ожидания fal.run()
+            const runPromise = fal.run(this.modelId, {
+              input: {
+                prompt: prompt,
+                image_url: imageUrl,
+                duration: duration,
+                prompt_optimizer: true
+              }
+            });
+            
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('fal.run() timeout')), 30000)
+            );
+            
+            const result = await Promise.race([runPromise, timeoutPromise]) as any;
+            
+            if (result.requestId) {
+              const systemRequestId = `fal_${result.requestId}`;
+              await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+              await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, result.requestId);
+              return systemRequestId;
+            } else if (result.data?.video?.url) {
+              const videoUrl = result.data.video.url;
+              const systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+              await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+              await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+              return systemRequestId;
+            } else {
+              throw new Error('Unexpected response format from fal.ai run: ' + JSON.stringify(result));
+            }
+          } catch (runError: any) {
+            // Если и fal.run() не сработал, пробрасываем оригинальную ошибку
+            console.error('Both axios.post() and fal.run() failed:', runError.message);
+            throw axiosError;
+          }
         }
+        
+        // Для других ошибок пробрасываем дальше
+        throw axiosError;
       }
     } catch (error: any) {
       console.error('Error creating video:', error);
