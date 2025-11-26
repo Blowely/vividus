@@ -303,6 +303,16 @@ bot.on('video', async (ctx) => {
   const video = ctx.message.video;
   const caption = ctx.message.caption;
 
+  // Логируем file_id для получения
+  console.log('\n========================================');
+  console.log('📹 ВИДЕО ПОЛУЧЕНО');
+  console.log('========================================');
+  console.log(`📋 file_id: ${video.file_id}`);
+  console.log(`📏 Размер: ${video.file_size ? (video.file_size / 1024 / 1024).toFixed(2) + ' МБ' : 'неизвестно'}`);
+  console.log(`⏱️  Длительность: ${video.duration ? video.duration + ' сек' : 'неизвестно'}`);
+  console.log(`📝 Подпись: ${caption || '(нет)'}`);
+  console.log('========================================\n');
+
   waitingForBroadcast.set(ctx.from!.id, {
     text: caption,
     mediaType: 'video',

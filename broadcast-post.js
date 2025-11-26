@@ -1,7 +1,8 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Input } = require('telegraf');
 const { config } = require('dotenv');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 config();
 
@@ -13,15 +14,46 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 // Текст для рассылки
-const MESSAGE_TEXT = `<b>🥰 Уверены, что Вы и Ваши близкие готовы к такой порции восторга?</b>
+const MESSAGE_TEXT = `✨ До Дня матери осталось всего несколько дней.
+Это лучший момент подготовить подарок, который остаётся в сердце.
 
-Хотите увидеть неподдельное удивление, а потом нежные слезы счастья в глазах тех, кого Вы любите?
+Теперь у нас есть новая услуга — ролик под ключ.
+Вам не нужно ничего оживлять или обрабатывать самим — мы сделаем всё за вас.
 
-Это не просто жест, это способ оживить самые тёплые воспоминания и подарить эмоции, которые запомнятся навсегда. 
-<b>Подарите магию момента, которая растрогает каждого! 🥹 👇</b>`;
+Мы создадим трогательное видео полностью под ключ —
+вам нужно только прислать фотографии.
+
+🎥 Что входит:
+• оживление старых фотографий
+• восстановление качества
+• монтаж красивого ролика с музыкой
+• добавление ваших тёплых слов
+
+📌 От вас нужно:
+• 10 или 20 фото
+• музыка
+• текст поздравления (по желанию)
+
+❤️ Почему лучше заранее:
+• будет время выбрать лучшие фото
+• ближе к празднику растёт загрузка
+
+Люди, которые уже заказывали, пишут:
+«Мама заплакала от счастья…»
+
+🎁 Тарифы:
+10 фото — 2990 ₽
+20 фото — 4990 ₽
+
+Для заказа: @vividusgosupp
+Пример ролика — прикрепили выше.`;
 
 // URL видео
-const VIDEO_URL = 'https://storage.yandexcloud.net/vividus/service/broadcast02.mp4';
+const VIDEO_URL = 'https://storage.yandexcloud.net/vividus/service/broadcast03.mp4';
+const VIDEO_CACHE_PATH = path.join(__dirname, 'uploads', 'temp', 'broadcast03.mp4');
+// file_id видео (если видео уже загружено в Telegram, используйте этот ID вместо URL)
+// Получить file_id можно, загрузив видео один раз и сохранив file_id из ответа
+const VIDEO_FILE_ID = process.env.VIDEO_FILE_ID || null;
 
 // Проверка на блокировку бота
 function isBlockedError(error) {
@@ -89,13 +121,79 @@ function findAdminTelegramId(sqlFilePath, username) {
   return null;
 }
 
+// Скачивание видео, если его нет локально
+async function ensureVideoDownloaded() {
+  if (fs.existsSync(VIDEO_CACHE_PATH)) {
+    console.log('Видео уже скачано локально');
+    return;
+  }
+  
+  console.log('Скачиваю видео...');
+  const dir = path.dirname(VIDEO_CACHE_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(VIDEO_CACHE_PATH);
+    https.get(VIDEO_URL, (response) => {
+      if (response.statusCode !== 200) {
+        reject(new Error(`Ошибка скачивания: ${response.statusCode}`));
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        const sizeMB = (fs.statSync(VIDEO_CACHE_PATH).size / 1024 / 1024).toFixed(2);
+        console.log(`Видео скачано (${sizeMB} МБ)`);
+        resolve();
+      });
+    }).on('error', (err) => {
+      fs.unlinkSync(VIDEO_CACHE_PATH);
+      reject(err);
+    });
+  });
+}
+
+// Получение file_id видео (загрузить один раз и сохранить file_id)
+async function getVideoFileId(telegramId) {
+  try {
+    console.log('Загружаю видео для получения file_id...');
+    const videoInput = Input.fromLocalFile(VIDEO_CACHE_PATH);
+    const result = await bot.telegram.sendVideo(telegramId, videoInput, {
+      caption: 'Тестовая загрузка для получения file_id'
+    });
+    
+    if (result.video && result.video.file_id) {
+      console.log(`\n✅ file_id получен: ${result.video.file_id}`);
+      console.log('Добавьте эту строку в .env файл:');
+      console.log(`VIDEO_FILE_ID=${result.video.file_id}\n`);
+      return result.video.file_id;
+    }
+    return null;
+  } catch (error) {
+    console.error('Ошибка при получении file_id:', error?.response?.description || error?.message);
+    return null;
+  }
+}
+
 // Отправка видео пользователю
 async function sendVideoToUser(telegramId) {
   try {
-    await bot.telegram.sendVideo(telegramId, VIDEO_URL, {
-      caption: MESSAGE_TEXT,
-      parse_mode: 'HTML'
-    });
+    // Если есть file_id, используем его (самый надежный способ для больших файлов)
+    if (VIDEO_FILE_ID) {
+      await bot.telegram.sendVideo(telegramId, VIDEO_FILE_ID, {
+        caption: MESSAGE_TEXT,
+        parse_mode: 'HTML'
+      });
+    } else {
+      // Пытаемся отправить через локальный файл (работает только для файлов < 50 МБ)
+      const videoInput = Input.fromLocalFile(VIDEO_CACHE_PATH);
+      await bot.telegram.sendVideo(telegramId, videoInput, {
+        caption: MESSAGE_TEXT,
+        parse_mode: 'HTML'
+      });
+    }
     return { success: true };
   } catch (error) {
     if (isBlockedError(error)) {
@@ -110,7 +208,40 @@ async function sendVideoToUser(telegramId) {
 }
 
 // Основная функция рассылки
-async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = null) {
+async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = null, getFileId = false) {
+  // Если нужно получить file_id, делаем это и выходим
+  if (getFileId) {
+    try {
+      await ensureVideoDownloaded();
+      if (!testMode) {
+        console.error('Для получения file_id необходимо использовать тестовый режим с указанием админа');
+        process.exit(1);
+      }
+      const usernames = adminUsernames || 'vividusgosupp';
+      const usernameList = usernames.split(',').map(u => u.trim()).filter(u => u);
+      const adminId = findAdminTelegramId(sqlFilePath, usernameList[0]);
+      if (!adminId) {
+        console.error(`Админ "${usernameList[0]}" не найден`);
+        process.exit(1);
+      }
+      await getVideoFileId(adminId);
+      return;
+    } catch (error) {
+      console.error('Ошибка:', error.message);
+      process.exit(1);
+    }
+  }
+  
+  // Скачиваем видео перед началом рассылки (только если нет file_id)
+  if (!VIDEO_FILE_ID) {
+    try {
+      await ensureVideoDownloaded();
+    } catch (error) {
+      console.error('Ошибка при скачивании видео:', error.message);
+      process.exit(1);
+    }
+  }
+  
   if (testMode) {
     console.log('🧪 ТЕСТОВЫЙ РЕЖИМ - отправка тестовым пользователям');
     
@@ -265,6 +396,8 @@ let sqlFilePath = './users_2025-11-22T15-20-08.sql';
 let testMode = false;
 let adminUsernames = null;
 
+let getFileId = false;
+
 // Парсинг аргументов
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--test' || args[i] === '-t') {
@@ -281,6 +414,9 @@ for (let i = 0; i < args.length; i++) {
       adminUsernames = args[i + 1];
       i++;
     }
+  } else if (args[i] === '--get-file-id' || args[i] === '-f') {
+    getFileId = true;
+    testMode = true;
   } else if (!args[i].startsWith('--') && !args[i].startsWith('-')) {
     // Это путь к SQL файлу
     sqlFilePath = args[i];
@@ -292,7 +428,7 @@ if (!fs.existsSync(sqlFilePath)) {
   process.exit(1);
 }
 
-broadcastPost(sqlFilePath, testMode, adminUsernames)
+broadcastPost(sqlFilePath, testMode, adminUsernames, getFileId)
   .then(() => {
     console.log('\nРассылка завершена');
     process.exit(0);
