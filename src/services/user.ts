@@ -25,20 +25,45 @@ export class UserService {
       }
       
       // Create new user
-      const newUser = await client.query(
-        `INSERT INTO users (telegram_id, username, first_name, last_name, start_param) 
-         VALUES ($1, $2, $3, $4, $5) 
-         RETURNING *`,
-        [
-          telegramUser.id,
-          telegramUser.username,
-          telegramUser.first_name,
-          telegramUser.last_name,
-          startParam || null
-        ]
-      );
-      
-      return newUser.rows[0];
+      try {
+        const newUser = await client.query(
+          `INSERT INTO users (telegram_id, username, first_name, last_name, start_param) 
+           VALUES ($1, $2, $3, $4, $5) 
+           RETURNING *`,
+          [
+            telegramUser.id,
+            telegramUser.username,
+            telegramUser.first_name,
+            telegramUser.last_name,
+            startParam || null
+          ]
+        );
+        
+        return newUser.rows[0];
+      } catch (error: any) {
+        // Обрабатываем race condition: если пользователь уже создан другим запросом
+        if (error.code === '23505' && error.constraint === 'users_telegram_id_key') {
+          // Пользователь уже существует, получаем его
+          const existingUser = await client.query(
+            'SELECT * FROM users WHERE telegram_id = $1',
+            [telegramUser.id]
+          );
+          
+          if (existingUser.rows.length > 0) {
+            // Update start_param if provided and not already set
+            if (startParam && !existingUser.rows[0].start_param) {
+              await client.query(
+                'UPDATE users SET start_param = $1 WHERE telegram_id = $2',
+                [startParam, telegramUser.id]
+              );
+              existingUser.rows[0].start_param = startParam;
+            }
+            return existingUser.rows[0];
+          }
+        }
+        // Если это не race condition, пробрасываем ошибку дальше
+        throw error;
+      }
       
     } finally {
       client.release();

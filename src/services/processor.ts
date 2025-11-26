@@ -1344,6 +1344,19 @@ export class ProcessorService {
         return;
       }
 
+      // Для заказов combine_and_animate сначала отправляем объединенное фото, затем видео
+      if (order && order.order_type === 'combine_and_animate' && (order as any).combined_image_path) {
+        try {
+          console.log(`📸 Отправляю объединенное фото для заказа ${orderId}...`);
+          await this.bot.telegram.sendPhoto(telegramId, (order as any).combined_image_path, {
+            caption: '🎨 Объединенное фото готово!'
+          });
+        } catch (error) {
+          console.error(`Error sending combined image:`, error);
+          // Продолжаем отправку видео даже если фото не отправилось
+        }
+      }
+
       // Отправляем видео пользователю
       for (const video of videos) {
         if (video.url) {
