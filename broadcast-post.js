@@ -12,6 +12,10 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 }
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+// Broadcast-бот для получения файлов (если используется file_id из broadcast-bot)
+const broadcastBot = process.env.BROADCAST_BOT_TOKEN 
+  ? new Telegraf(process.env.BROADCAST_BOT_TOKEN) 
+  : null;
 
 // Текст для рассылки
 const MESSAGE_TEXT = `✨ До Дня матери осталось всего несколько дней.
@@ -177,15 +181,56 @@ async function getVideoFileId(telegramId) {
   }
 }
 
-// Отправка видео пользователю
-async function sendVideoToUser(telegramId) {
+// Скачивание файла через broadcast-bot по file_id
+async function downloadFileFromBroadcastBot(fileId) {
+  if (!broadcastBot) {
+    throw new Error('BROADCAST_BOT_TOKEN не установлен');
+  }
+  
   try {
-    // Если есть file_id, используем его (самый надежный способ для больших файлов)
-    if (VIDEO_FILE_ID) {
-      await bot.telegram.sendVideo(telegramId, VIDEO_FILE_ID, {
+    const fileLink = await broadcastBot.telegram.getFileLink(fileId);
+    const response = await fetch(fileLink.href);
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (error) {
+    throw new Error(`Ошибка скачивания файла через broadcast-bot: ${error.message}`);
+  }
+}
+
+// Отправка видео пользователю
+async function sendVideoToUser(telegramId, cachedBuffer = null) {
+  try {
+    // Если есть кэшированный буфер (скачанный через broadcast-bot), используем его
+    if (cachedBuffer) {
+      await bot.telegram.sendVideo(telegramId, { source: cachedBuffer }, {
         caption: MESSAGE_TEXT,
         parse_mode: 'HTML'
       });
+      return { success: true };
+    }
+    
+    // Если есть file_id, пытаемся использовать его
+    if (VIDEO_FILE_ID) {
+      try {
+        // Пробуем отправить напрямую (если file_id из основного бота)
+        await bot.telegram.sendVideo(telegramId, VIDEO_FILE_ID, {
+          caption: MESSAGE_TEXT,
+          parse_mode: 'HTML'
+        });
+        return { success: true };
+      } catch (error) {
+        // Если не получилось, возможно file_id из broadcast-bot
+        // Скачиваем файл через broadcast-bot и отправляем через основной бот
+        if (broadcastBot && error?.response?.description?.includes('wrong file identifier')) {
+          const fileBuffer = await downloadFileFromBroadcastBot(VIDEO_FILE_ID);
+          await bot.telegram.sendVideo(telegramId, { source: fileBuffer }, {
+            caption: MESSAGE_TEXT,
+            parse_mode: 'HTML'
+          });
+          return { success: true };
+        }
+        throw error;
+      }
     } else {
       // Пытаемся отправить через локальный файл (работает только для файлов < 50 МБ)
       const videoInput = Input.fromLocalFile(VIDEO_CACHE_PATH);
@@ -193,8 +238,8 @@ async function sendVideoToUser(telegramId) {
         caption: MESSAGE_TEXT,
         parse_mode: 'HTML'
       });
+      return { success: true };
     }
-    return { success: true };
   } catch (error) {
     if (isBlockedError(error)) {
       return { success: false, reason: 'blocked' };
@@ -209,6 +254,15 @@ async function sendVideoToUser(telegramId) {
 
 // Основная функция рассылки
 async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = null, getFileId = false) {
+  // Показываем, какой метод используется для отправки видео
+  if (VIDEO_FILE_ID) {
+    console.log('✅ Используется VIDEO_FILE_ID из .env');
+    console.log(`📋 file_id: ${VIDEO_FILE_ID.substring(0, 20)}...`);
+  } else {
+    console.log('⚠️  VIDEO_FILE_ID не найден в .env, будет использоваться загрузка файла');
+  }
+  console.log('');
+  
   // Если нужно получить file_id, делаем это и выходим
   if (getFileId) {
     try {
@@ -232,8 +286,22 @@ async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = nul
     }
   }
   
-  // Скачиваем видео перед началом рассылки (только если нет file_id)
-  if (!VIDEO_FILE_ID) {
+  // Скачиваем видео перед началом рассылки
+  let cachedVideoBuffer = null;
+  
+  if (VIDEO_FILE_ID && broadcastBot) {
+    // Если используется file_id из broadcast-bot, скачиваем файл один раз
+    try {
+      console.log('Скачиваю видео через broadcast-bot (один раз для всех пользователей)...');
+      cachedVideoBuffer = await downloadFileFromBroadcastBot(VIDEO_FILE_ID);
+      const sizeMB = (cachedVideoBuffer.length / 1024 / 1024).toFixed(2);
+      console.log(`✅ Видео скачано (${sizeMB} МБ)`);
+    } catch (error) {
+      console.error('Ошибка при скачивании видео через broadcast-bot:', error.message);
+      console.log('Попробую использовать file_id напрямую...');
+    }
+  } else if (!VIDEO_FILE_ID) {
+    // Если нет file_id, скачиваем из URL
     try {
       await ensureVideoDownloaded();
     } catch (error) {
@@ -269,7 +337,7 @@ async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = nul
       console.log(`✓ Найден ${username} с telegram_id: ${adminId}`);
       console.log(`Отправляю тестовое сообщение ${username}...`);
       
-      const result = await sendVideoToUser(adminId);
+      const result = await sendVideoToUser(adminId, cachedVideoBuffer);
       if (result.success) {
         console.log(`✅ Тестовое сообщение успешно отправлено ${username}!`);
         results.push({ username, success: true });
@@ -324,7 +392,7 @@ async function broadcastPost(sqlFilePath, testMode = false, adminUsernames = nul
   
   for (let i = 0; i < telegramIds.length; i++) {
     const telegramId = telegramIds[i];
-    const result = await sendVideoToUser(telegramId);
+    const result = await sendVideoToUser(telegramId, cachedVideoBuffer);
     
     if (result.success) {
       successCount++;

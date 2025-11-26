@@ -639,6 +639,23 @@ export class TelegramService {
     try {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       
+      const video = (ctx.message as any)['video'];
+      const fileId = video?.file_id;
+      
+      // Логируем file_id для использования в рассылке
+      if (fileId) {
+        console.log('\n========================================');
+        console.log('📹 ВИДЕО ПОЛУЧЕНО В ОСНОВНОМ БОТЕ');
+        console.log('========================================');
+        console.log(`📋 file_id: ${fileId}`);
+        console.log(`📏 Размер: ${video.file_size ? (video.file_size / 1024 / 1024).toFixed(2) + ' МБ' : 'неизвестно'}`);
+        console.log(`⏱️  Длительность: ${video.duration ? video.duration + ' сек' : 'неизвестно'}`);
+        console.log(`👤 От пользователя: ${ctx.from?.id} (@${ctx.from?.username || 'без username'})`);
+        console.log('========================================');
+        console.log(`\n✅ Добавьте в .env файл:`);
+        console.log(`VIDEO_FILE_ID=${fileId}\n`);
+      }
+      
       // Проверяем режим рассылки для админа
       // Для обычных пользователей видео не обрабатываются
       await this.sendMessage(ctx, '❌ Пожалуйста, отправьте фото (не видео) для создания анимации.');
