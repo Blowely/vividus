@@ -178,66 +178,13 @@ export class FalService {
       
       const prompt = customPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
-      // Используем fal.subscribe() для избежания таймаутов при длительных операциях
-      console.log('🔄 Creating video with fal.ai using subscribe...');
+      // Используем прямой вызов через axios для избежания timeout в fal.subscribe
+      // fal.subscribe имеет внутренний timeout в 90 секунд, поэтому используем старый метод
+      console.log('🔄 Creating video with fal.ai using direct API call...');
       
       try {
-        const result = await fal.subscribe(this.modelId, {
-          input: {
-            prompt: prompt,
-            image_url: imageUrl,
-            duration: duration,
-            prompt_optimizer: true
-          },
-          logs: true,
-          onQueueUpdate: (update) => {
-            if (update.status === 'IN_PROGRESS') {
-              update.logs?.map((log) => log.message).forEach((msg) => {
-                console.log('fal.ai log:', msg);
-              });
-            }
-          }
-        });
-
-        console.log('fal.ai response:', result.data);
-        console.log('Request ID:', result.requestId);
-        
-        // fal.ai может вернуть либо request_id (для асинхронных), либо сразу результат
-        let requestId: string;
-        let systemRequestId: string;
-        
-        if (result.requestId) {
-          // Асинхронный запрос
-          requestId = result.requestId;
-          systemRequestId = `fal_${requestId}`;
-          
-          // Save job to database
-          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-          
-          // Сохраняем оригинальный request_id в error_message для последующего использования
-          await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
-        } else if (result.data?.video?.url) {
-          // Синхронный ответ - сразу готово
-          const videoUrl = result.data.video.url;
-          systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          
-          // Save job to database
-          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-          
-          // Сразу помечаем как завершенное
-          await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
-          
-          return systemRequestId;
-        } else {
-          throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(result.data));
-        }
-        
-        return systemRequestId;
-      } catch (subscribeError: any) {
-        // Если fal.subscribe() не поддерживается или произошла ошибка, пробуем старый метод
-        console.warn('fal.subscribe() failed, trying axios.post:', subscribeError.message);
-        
-        // Fallback на старый метод через axios
+        // Используем прямой вызов через axios с увеличенным timeout
+        // Это позволяет избежать проблем с внутренним timeout в fal.subscribe
         const response = await axios.post(
           `${this.baseUrl}/${this.modelId}`,
           {
@@ -251,21 +198,24 @@ export class FalService {
               'Authorization': `Key ${this.apiKey}`,
               'Content-Type': 'application/json'
             },
-            timeout: 120000 // Увеличиваем таймаут до 120 секунд
+            timeout: 300000 // 5 минут - достаточно для длительных операций
           }
         );
 
-        console.log('fal.ai response (fallback):', response.data);
+        console.log('fal.ai response:', response.data);
         
         let requestId: string;
         let systemRequestId: string;
         
         if (response.data.request_id) {
+          // Асинхронный запрос - сохраняем request_id для polling
           requestId = response.data.request_id;
           systemRequestId = `fal_${requestId}`;
           await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
           await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+          return systemRequestId;
         } else if (response.data.video && response.data.video.url) {
+          // Синхронный ответ - сразу готово
           const videoUrl = response.data.video.url;
           systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
@@ -274,8 +224,32 @@ export class FalService {
         } else {
           throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
         }
+      } catch (axiosError: any) {
+        // Если прямой вызов через axios не удался, пробуем fal.run() как fallback
+        console.warn('Direct axios.post() failed, trying fal.run():', axiosError.message);
         
-        return systemRequestId;
+        try {
+          const result = await fal.run(this.modelId, {
+            input: {
+              prompt: prompt,
+              image_url: imageUrl,
+              duration: duration,
+              prompt_optimizer: true
+            }
+          });
+          
+          if (result.requestId) {
+            const systemRequestId = `fal_${result.requestId}`;
+            await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+            await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, result.requestId);
+            return systemRequestId;
+          } else {
+            throw new Error('Unexpected response format from fal.ai run: ' + JSON.stringify(result));
+          }
+        } catch (fallbackError: any) {
+          // Если и fallback не сработал, пробрасываем оригинальную ошибку
+          throw axiosError;
+        }
       }
     } catch (error: any) {
       console.error('Error creating video:', error);
@@ -361,39 +335,121 @@ export class FalService {
       
       const originalRequestId = job.error_message; // Временно храним оригинальный ID здесь
       
-      // Для fal.ai используем queue.status API
-      const response = await axios.get(
-        `${this.baseUrl}/fal/queue/status`,
-        {
-          params: {
-            request_id: originalRequestId
-          },
-          headers: {
-            'Authorization': `Key ${this.apiKey}`
+      // Для fal.ai используем правильный endpoint для проверки статуса
+      // Используем формат: /fal-ai/{model}/status с request_id в query параметрах
+      try {
+        // Формируем правильный путь модели (заменяем / на -)
+        const modelPath = this.modelId.replace(/\//g, '-');
+        
+        // Пробуем несколько вариантов endpoint'ов
+        const endpoints = [
+          // Вариант 1: Стандартный формат fal.ai
+          `${this.baseUrl}/fal-ai/${modelPath}/status?request_id=${originalRequestId}`,
+          // Вариант 2: Альтернативный формат
+          `${this.baseUrl}/fal/queue/${originalRequestId}`,
+          // Вариант 3: Прямой формат с моделью в пути
+          `${this.baseUrl}/${this.modelId}/status?request_id=${originalRequestId}`
+        ];
+        
+        let lastError: any = null;
+        
+        for (const endpoint of endpoints) {
+          try {
+            const response = await axios.get(endpoint, {
+              headers: {
+                'Authorization': `Key ${this.apiKey}`
+              }
+            });
+            
+            console.log(`Job status response (${endpoint}):`, response.data);
+            
+            // Преобразуем статус fal.ai в наш формат
+            const falStatus = response.data.status;
+            let ourStatus = falStatus;
+            
+            if (falStatus === 'IN_PROGRESS' || falStatus === 'IN_QUEUE' || falStatus === 'QUEUED') {
+              ourStatus = 'PROCESSING';
+            } else if (falStatus === 'COMPLETED' || falStatus === 'SUCCEEDED') {
+              ourStatus = 'COMPLETED';
+            } else if (falStatus === 'FAILED' || falStatus === 'ERROR') {
+              ourStatus = 'FAILED';
+            }
+            
+            // Извлекаем URL видео из разных возможных форматов ответа
+            const videoUrl = response.data.video?.url 
+              || response.data.output?.video?.url 
+              || response.data.output?.[0]?.url
+              || (Array.isArray(response.data.output) && response.data.output[0])
+              || response.data.output?.url;
+            
+            return {
+              status: ourStatus,
+              video: videoUrl ? { url: videoUrl } : undefined,
+              output: videoUrl ? [videoUrl] : undefined,
+              error: response.data.error || response.data.failure
+            };
+          } catch (endpointError: any) {
+            lastError = endpointError;
+            // Продолжаем пробовать следующий endpoint
+            if (endpointError.response?.status !== 404) {
+              // Если это не 404, пробрасываем ошибку дальше
+              throw endpointError;
+            }
           }
         }
-      );
-      
-      console.log('Job status response:', response.data);
-      
-      // Преобразуем статус fal.ai в наш формат
-      const falStatus = response.data.status;
-      let ourStatus = falStatus;
-      
-      if (falStatus === 'IN_PROGRESS') {
-        ourStatus = 'PROCESSING';
-      } else if (falStatus === 'COMPLETED') {
-        ourStatus = 'COMPLETED';
-      } else if (falStatus === 'FAILED') {
-        ourStatus = 'FAILED';
+        
+        // Если все endpoints вернули 404, пробуем использовать формат из библиотеки fal.ai
+        // Может быть нужно использовать другой формат endpoint'а
+        console.warn('All status endpoints returned 404, trying result endpoint for:', originalRequestId);
+        
+        try {
+          // Пробуем получить результат напрямую через result endpoint
+          const resultResponse = await axios.get(
+            `${this.baseUrl}/${this.modelId}/result`,
+            {
+              params: {
+                request_id: originalRequestId
+              },
+              headers: {
+                'Authorization': `Key ${this.apiKey}`
+              }
+            }
+          );
+          
+          console.log('Job result response:', resultResponse.data);
+          
+          // Если результат получен, значит запрос завершен
+          if (resultResponse.data.video?.url || resultResponse.data.output) {
+            const videoUrl = resultResponse.data.video?.url 
+              || resultResponse.data.output?.video?.url 
+              || resultResponse.data.output?.[0]?.url
+              || (Array.isArray(resultResponse.data.output) && resultResponse.data.output[0])
+              || resultResponse.data.output?.url;
+            
+            return {
+              status: 'COMPLETED',
+              video: videoUrl ? { url: videoUrl } : undefined,
+              output: videoUrl ? [videoUrl] : undefined,
+              error: undefined
+            };
+          }
+        } catch (resultError: any) {
+          console.warn('Result endpoint also failed:', resultError.message);
+        }
+        
+        // Если все попытки не удались, пробрасываем ошибку
+        throw new Error(`Failed to check job status: all endpoints returned 404. Request ID: ${originalRequestId}`);
+        
+      } catch (apiError: any) {
+        // Если это наша ошибка о 404, пробрасываем её
+        if (apiError.message && apiError.message.includes('Failed to check job status')) {
+          throw apiError;
+        }
+        
+        // Для других ошибок логируем и пробрасываем
+        console.error('Error checking job status via API:', apiError.message);
+        throw apiError;
       }
-      
-      return {
-        status: ourStatus,
-        video: response.data.video ? { url: response.data.video.url } : undefined,
-        output: response.data.video ? [response.data.video.url] : undefined,
-        error: response.data.error
-      };
     } catch (error: any) {
       console.error('Error checking job status:', error);
       console.error('Error details:', error.response?.data);

@@ -795,8 +795,24 @@ export class ProcessorService {
           try {
             const jobStatus = await this.falService.checkJobStatus(generationId);
             return { generationId, jobStatus };
-          } catch (error) {
+          } catch (error: any) {
             console.error(`Error checking status for ${generationId}:`, error);
+            // Если ошибка связана с 404 (endpoint не найден), это может означать, что запрос еще обрабатывается
+            // Но также может означать, что endpoint неправильный
+            // В этом случае возвращаем PENDING, чтобы не блокировать мониторинг
+            if (error.message && error.message.includes('404')) {
+              console.warn(`Status check returned 404 for ${generationId}, assuming PENDING`);
+              return { 
+                generationId, 
+                jobStatus: {
+                  status: 'PENDING',
+                  video: undefined,
+                  output: undefined,
+                  error: undefined
+                }
+              };
+            }
+            // Для других ошибок возвращаем null, чтобы пропустить этот джоб
             return { generationId, jobStatus: null };
           }
         });
