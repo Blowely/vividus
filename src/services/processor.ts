@@ -64,7 +64,7 @@ export class ProcessorService {
             await this.orderService.updateOrderStatus(orderId, 'failed' as any);
             await this.notifyUser(
               user.telegram_id,
-              '❌ Недостаточно генераций для обработки.\n\n✨ Вы можете купить генерации в меню.'
+              '❌ Недостаточно оживлений фото для обработки.\n\n✨ Вы можете купить оживления в меню.'
             );
             return;
           }
@@ -118,7 +118,7 @@ export class ProcessorService {
                 if (retryCount > 0) {
                   console.log(`🔄 Повторная попытка ${retryCount}/${maxRetries} для animate_v2 заказа ${orderId}`);
                   console.log(`📎 URL файла: ${order.original_file_path}`);
-                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации (${retryCount}/${maxRetries})...`);
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка оживления (${retryCount}/${maxRetries})...`);
                 }
                 
               const requestId = await this.falService.createVideoFromImage(
@@ -182,7 +182,7 @@ export class ProcessorService {
           let progressMessageId: number | null = null;
           try {
             const progressBar = this.createProgressBar(0);
-            const progressMessage = `🔄 Генерация видео...\n\n${progressBar} 0%`;
+            const progressMessage = `🔄 Оживление фотографии...\n\n${progressBar} 0%`;
             const message = await this.bot.telegram.sendMessage(user.telegram_id, progressMessage);
             if (message && 'message_id' in message) {
               progressMessageId = (message as any).message_id;
@@ -250,7 +250,7 @@ export class ProcessorService {
                   console.log(`📎 URL файла: ${order.original_file_path}`);
                   
                   // Уведомляем пользователя о повторной попытке
-                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка генерации (${retryCount}/${maxRetries})...`);
+                  await this.notifyUser(user.telegram_id, `🔄 Повторная попытка оживления (${retryCount}/${maxRetries})...`);
                   
                   // Сбрасываем прогресс-бар и запускаем заново
                   const orderData = await this.orderService.getOrder(orderId);
@@ -265,7 +265,7 @@ export class ProcessorService {
                           user.telegram_id,
                           progressMsgId,
                           undefined,
-                          `🔄 Генерация видео (попытка ${retryCount + 1}/${maxRetries + 1})...\n\n${progressBar} 2%`
+                          `🔄 Оживление фото (попытка ${retryCount + 1}/${maxRetries + 1})...\n\n${progressBar} 2%`
                         );
                       } catch (error) {
                         console.error('Error resetting progress bar:', error);
@@ -411,7 +411,7 @@ export class ProcessorService {
           if (!hasPayment) {
             await this.userService.returnGenerations(user.telegram_id, 1);
             const newBalance = await this.userService.getUserGenerations(user.telegram_id);
-            await this.notifyUser(user.telegram_id, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+            await this.notifyUser(user.telegram_id, `💼 Оживление фотографии возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
           }
           
           // Используем переведённое сообщение об ошибке, если оно есть
@@ -1437,7 +1437,7 @@ export class ProcessorService {
       if (!hasPayment) {
         await this.userService.returnGenerations(telegramId, 1);
         const newBalance = await this.userService.getUserGenerations(telegramId);
-        await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+        await this.notifyUser(telegramId, `💼 Оживление возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
       }
 
       // Проверяем ошибки на наличие модерации и других специфичных ошибок
@@ -1560,7 +1560,7 @@ export class ProcessorService {
         // Заказ был оплачен генерациями - возвращаем их
         await this.userService.returnGenerations(telegramId, 1);
         const newBalance = await this.userService.getUserGenerations(telegramId);
-        await this.notifyUser(telegramId, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
+        await this.notifyUser(telegramId, `💼 Оживление возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
       }
 
       // Translate error message for user

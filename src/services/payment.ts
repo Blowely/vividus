@@ -153,11 +153,11 @@ export class PaymentService {
 
   private getGenerationWord(count: number): string {
     if (count % 10 === 1 && count % 100 !== 11) {
-      return 'генерации';
+      return 'оживление фото';
     } else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
-      return 'генерации';
+      return 'оживления фото';
     } else {
-      return 'генераций';
+      return 'оживлений фото';
     }
   }
 
@@ -439,7 +439,7 @@ export class PaymentService {
               
               await this.bot.telegram.sendMessage(
                 user.telegram_id,
-                `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций`
+                `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото`
               );
               
               // Проверяем, нужно ли автоматически обработать фото после покупки

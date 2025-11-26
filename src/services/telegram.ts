@@ -102,15 +102,18 @@ export class TelegramService {
     const keyboard = [];
     
     // Первая строка - кнопка новой нейросети для всех пользователей
-    keyboard.push([Markup.button.text('🎬 Оживить фото (NEW)')]);
+    keyboard.push([Markup.button.text('🎬 Оживить фото')]);
     
-    keyboard.push([Markup.button.text('✨ Купить генерации'), Markup.button.text('❓ Поддержка')]);
+    // Добавляем кнопку "Объединить и оживить" для админов под кнопкой "Оживить фото"
+    if (this.isAdmin(userId)) {
+      keyboard.push([Markup.button.text('🔀 Объединить и оживить')]);
+    }
+    
+    keyboard.push([Markup.button.text('✨ Купить оживления'), Markup.button.text('❓ Поддержка')]);
 
     // Добавляем кнопки для админов
     if (this.isAdmin(userId)) {
       keyboard.push([Markup.button.text('📊 Статистика')]);
-      // Кнопка "Объединить и оживить" только для админов
-      keyboard.push([Markup.button.text('🔀 Объединить и оживить')]);
     }
 
     return {
@@ -462,19 +465,28 @@ export class TelegramService {
         }
       }
       
-      // Проверяем, находимся ли мы в режиме объединения
+      // Проверяем, находимся ли мы в режиме объединения (старый режим merge)
+      // ВАЖНО: Этот режим не должен активироваться для обычных пользователей
+      // Он используется только для старого функционала объединения, который сейчас заменен на combine_and_animate
       const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
-      if (firstPhotoId) {
-        if (firstPhotoId === 'MERGE_MODE_WAITING') {
-          // Это первое фото в режиме объединения
-          this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
-          await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
-          return;
-        } else {
-          // Это второе фото, обрабатываем объединение
+      if (firstPhotoId && firstPhotoId !== 'MERGE_MODE_WAITING') {
+        // Проверяем, что это действительно режим merge (есть pendingPromptsData с merge:)
+        const promptData = this.pendingPromptsData.get(user.telegram_id);
+        if (promptData && promptData.prompt.startsWith('merge:')) {
+          // Это второе фото в режиме merge, обрабатываем объединение
           await this.handleMergeSecondPhoto(ctx, user, fileId);
           return;
+        } else {
+          // Состояние merge осталось, но это не merge - очищаем его
+          console.log(`⚠️ Очищаю застрявшее состояние merge для пользователя ${user.telegram_id}`);
+          this.pendingMergeFirstPhoto.delete(user.telegram_id);
+          this.pendingPromptsData.delete(user.telegram_id);
         }
+      } else if (firstPhotoId === 'MERGE_MODE_WAITING') {
+        // Это первое фото в режиме объединения
+        this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
+        await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
+        return;
       }
       
       // Проверяем наличие caption (текста, прикрепленного к фото)
@@ -762,6 +774,17 @@ export class TelegramService {
         return;
       }
       
+      // Очищаем застрявшее состояние merge, если оно есть (для обычного оживления не нужно)
+      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+      const promptData = this.pendingPromptsData.get(user.telegram_id);
+      if (firstPhotoId || (promptData && promptData.prompt.startsWith('merge:'))) {
+        console.log(`⚠️ Очищаю застрявшее состояние merge при обычном оживлении для пользователя ${user.telegram_id}`);
+        this.pendingMergeFirstPhoto.delete(user.telegram_id);
+        if (promptData && promptData.prompt.startsWith('merge:')) {
+          this.pendingPromptsData.delete(user.telegram_id);
+        }
+      }
+      
       // Remove from pending prompts
       this.pendingPrompts.delete(user.telegram_id);
       
@@ -798,9 +821,9 @@ export class TelegramService {
         const displayPrompt = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
           : originalPrompt;
-        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю оживление видео...\n\n⏳ Это займет 2-5 минут.`);
       
-        // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
+        // Запускаем обработку заказа (списание оживлений произойдет при успешном оживлении)
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
@@ -814,7 +837,7 @@ export class TelegramService {
         const displayPromptForMessage = (originalPrompt === 'пропустить' || originalPrompt === 'skip' || !originalPrompt)
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания'
           : originalPrompt;
-        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+        const noGenerationsMessage = `💼 У вас нет оживлений фото для обработки
 
 📸 Ваше фото сохранено и готово к обработке
 🎬 Промпт: "${displayPromptForMessage}"
@@ -905,9 +928,9 @@ export class TelegramService {
       }
       
       // Обрабатываем команды от reply кнопок
-      // Оживить фото (NEW) - новая нейросеть для всех пользователей
-      if (text === '🎬 Оживить фото (NEW)') {
-        console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить фото (NEW)"`);
+      // Оживить фото - новая нейросеть для всех пользователей
+      if (text === '🎬 Оживить фото') {
+        console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить фото"`);
         const userId = ctx.from!.id;
         const state = { waitingForPhoto: true, waitingForPrompt: false };
         this.animateV2State.set(userId, state);
@@ -956,7 +979,7 @@ export class TelegramService {
         return;
       }
       
-      if (text === '✨ Купить генерации') {
+      if (text === '✨ Купить оживления') {
         await this.handleBuyGenerations(ctx);
         return;
       }
@@ -1008,12 +1031,22 @@ export class TelegramService {
         return;
       }
       
-      // Проверяем, является ли это промптом для объединения
+      // Проверяем, является ли это промптом для объединения (старый режим merge)
+      // ВАЖНО: Проверяем не только prompt, но и наличие первого фото в pendingMergeFirstPhoto
       const promptData = this.pendingPromptsData.get(user.telegram_id);
-      if (promptData && promptData.prompt.startsWith('merge:')) {
-        // Это промпт для объединяющего заказа
+      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+      if (promptData && promptData.prompt.startsWith('merge:') && firstPhotoId && firstPhotoId !== 'MERGE_MODE_WAITING') {
+        // Это промпт для объединяющего заказа (старый режим merge)
         await this.processMergePrompt(ctx, user, text);
       } else {
+        // Обычный промпт - очищаем застрявшее состояние merge если есть
+        if (firstPhotoId || (promptData && promptData.prompt.startsWith('merge:'))) {
+          console.log(`⚠️ Очищаю застрявшее состояние merge при обработке обычного промпта для пользователя ${user.telegram_id}`);
+          this.pendingMergeFirstPhoto.delete(user.telegram_id);
+          if (promptData && promptData.prompt.startsWith('merge:')) {
+            this.pendingPromptsData.delete(user.telegram_id);
+          }
+        }
         // Обычный промпт
         await this.processPrompt(ctx, user, text);
       }
@@ -1067,7 +1100,7 @@ export class TelegramService {
         const displayPromptMerge = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
           : originalPrompt;
-        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPromptMerge}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
+        await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPromptMerge}"\n\n✅ Заказ на объединение создан\n🎬 Начинаю оживление видео...\n\n⏳ Это займет 2-5 минут.`);
         
         // Запускаем обработку заказа
         const { ProcessorService } = await import('./processor');
@@ -1085,7 +1118,7 @@ export class TelegramService {
         const displayPromptForMergeMessage = (originalPrompt === 'пропустить' || originalPrompt === 'skip' || !originalPrompt)
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания'
           : originalPrompt;
-        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+        const noGenerationsMessage = `💼 У вас нет оживлений фото для обработки
 
 📸 Ваши фото сохранены и готовы к обработке
 🎬 Промпт: "${displayPromptForMergeMessage}"
@@ -1476,7 +1509,7 @@ export class TelegramService {
       const displayPrompt = (originalPrompt === 'пропустить' || originalPrompt === 'skip') 
         ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
         : originalPrompt;
-      await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет 2-5 минут.`);
+      await this.sendMessage(ctx, `🎬 Отлично! Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю оживление фото...\n\n⏳ Это займет 2-5 минут.`);
       
       // Запускаем обработку заказа
       const { ProcessorService } = await import('./processor');
@@ -1552,7 +1585,7 @@ export class TelegramService {
         `👥 Пользователи: ${stat.total_users}\n` +
         `💰 Сумма оплат: ${stat.total_payments_rub.toFixed(2)} ₽\n` +
         `⭐ Сумма в stars: ${stat.total_payments_stars}\n` +
-        `🎬 Успешных генераций: ${stat.completed_orders}\n` +
+        `🎬 Успешных оживлений: ${stat.completed_orders}\n` +
         `📈 Конверсия: ${stat.conversion_rate}%`;
 
       await ctx.answerCbQuery('✅');
@@ -1700,7 +1733,7 @@ export class TelegramService {
         message += `👥 Пользователи: ${stat.total_users}${formatTodayChange(today.users)}\n`;
         message += `💰 Сумма оплат: ${stat.total_payments_rub} руб${formatTodayChange(today.payments_rub, true)}\n`;
         message += `⭐ Сумма в stars: ${stat.total_payments_stars}${formatTodayChange(today.payments_stars)}\n`;
-        message += `🎬 Успешных генераций: ${stat.completed_orders}${formatTodayChange(today.completed_orders)}\n`;
+        message += `🎬 Успешных оживлений: ${stat.completed_orders}${formatTodayChange(today.completed_orders)}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
         
         // Добавляем кнопки для детальной статистики и удаления
@@ -2017,7 +2050,7 @@ export class TelegramService {
         packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: <b>-${discountPercent}%</b> ${strikethroughPrice}\n`;
       });
       
-      const message = `💼 У вас осталось генераций: ${currentGenerations}
+      const message = `💼 У вас осталось оживлений фото: ${currentGenerations}
 
 ${packageListText}
 Выберите пакет 👇`;
@@ -2072,7 +2105,7 @@ ${packageListText}
       }, 500);
     } catch (error) {
       console.error('Error showing buy generations menu:', error);
-      await this.sendMessage(ctx, '❌ Ошибка при загрузке меню покупки генераций');
+      await this.sendMessage(ctx, '❌ Ошибка при загрузке меню покупки оживлений');
     }
   }
 
@@ -2094,14 +2127,14 @@ ${packageListText}
       );
       console.log(`✅ Payment URL generated: ${paymentUrl}`);
       
-      const message = `💳 Покупка генераций и обработка фото
+      const message = `💳 Покупка оживлений фото и обработка
 
 📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
 💰 Сумма: ${price} ₽
 🆔 ID платежа: ${payment.id.slice(0, 8)}...
 
 После оплаты:
-✅ Генерации будут добавлены на ваш баланс
+✅ Оживления будут добавлены на ваш баланс
 ✅ Ваше фото будет автоматически обработано
 
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}`;
@@ -2227,12 +2260,12 @@ ${packageListText}
       // НЕ удаляем сохраненные данные - они нужны для автоматической обработки после оплаты
       // Данные будут удалены после успешной обработки фото через webhook
       
-      const message = `💳 Покупка генераций и обработка фото
+      const message = `💳 Покупка оживлений фото и обработка
 
 📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
 💰 Сумма: ${price} ₽
 
-После оплаты генерации будут добавлены на баланс, и фото будет обработано автоматически.`;
+После оплаты оживления будут добавлены на баланс, и фото будет обработано автоматически.`;
       
       await this.sendMessage(ctx, message, {
         parse_mode: 'HTML',
@@ -2297,12 +2330,12 @@ ${packageListText}
         ctx.from!.id
       );
       
-      const message = `💳 Покупка генераций и обработка фото
+      const message = `💳 Покупка оживлений фото и обработка
 
 📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
 💰 Сумма: ${price} ₽
 
-После оплаты генерации будут добавлены на баланс, и фото будут обработаны автоматически.`;
+После оплаты оживления будут добавлены на баланс, и фото будут обработаны автоматически.`;
       
       await this.sendMessage(ctx, message, {
         parse_mode: 'HTML',
@@ -2337,7 +2370,7 @@ ${packageListText}
       );
       console.log(`✅ Payment URL generated: ${paymentUrl}`);
       
-      const message = `💳 Покупка генераций
+      const message = `💳 Покупка оживлений фото
 
 📦 Пакет: ${generationsCount} ${this.getGenerationWord(generationsCount)}
 💰 Сумма: ${price} ₽
@@ -2345,7 +2378,7 @@ ${packageListText}
 
 Для оплаты нажмите кнопку ниже или перейдите по ${this.formatLink(paymentUrl, 'ссылке')}
 
-После оплаты генерации будут автоматически добавлены на ваш баланс.`;
+После оплаты оживления будут автоматически добавлены на ваш баланс.`;
       
       await this.sendMessage(ctx, message, {
         parse_mode: 'HTML',
@@ -2381,7 +2414,7 @@ ${packageListText}
       
       const message = `⭐ Оплата звёздами Telegram
 
-💼 У вас осталось генераций: ${currentGenerations}
+💼 У вас осталось оживлений фото: ${currentGenerations}
 
 Выберите пакет:`;
       
@@ -2424,7 +2457,7 @@ ${packageListText}
       try {
         await ctx.replyWithInvoice({
           title: `Покупка ${generationsCount} ${this.getGenerationWord(generationsCount)}`,
-          description: `Пополнение баланса генераций для обработки фотографий`,
+          description: `Пополнение баланса оживлений фото для обработки фотографий`,
           payload: invoicePayload,
           provider_token: '', // Не требуется для звезд
           currency: 'XTR', // Код валюты для звезд Telegram
@@ -2596,7 +2629,7 @@ ${packageListText}
         try {
           await this.bot.telegram.sendMessage(
             telegramId,
-            `✅ Генерации успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} генераций\n⭐ Оплачено: ${starsAmount} звёзд`
+            `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото\n⭐ Оплачено: ${starsAmount} звёзд`
           );
         } catch (error: any) {
           if (this.isBlockedError(error)) {
@@ -2677,6 +2710,7 @@ ${packageListText}
       const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
       
       // Промпт для анимации - берем из пользовательского ввода
+      // Используем тот же базовый промпт, что и в обычном оживлении
       let animationPrompt = state.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       const originalAnimationPrompt = animationPrompt;
       
@@ -2707,9 +2741,9 @@ ${packageListText}
         const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip') 
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
           : originalAnimationPrompt;
-        await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю генерацию видео...\n\n⏳ Это займет до 5 минут.`);
+        await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю оживление видео...\n\n⏳ Это займет до 5 минут.`);
       
-        // Запускаем обработку заказа (списание генераций произойдет при успешной генерации)
+        // Запускаем обработку заказа (списание оживлений произойдет при успешном оживлении)
         const { ProcessorService } = await import('./processor');
         const processorService = new ProcessorService();
         await processorService.processOrder(order.id);
@@ -2723,7 +2757,7 @@ ${packageListText}
         const displayPromptForMessage = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip' || !originalAnimationPrompt)
           ? 'оживите это изображение с помощью легких движений и эффекта дыхания'
           : originalAnimationPrompt;
-        const noGenerationsMessage = `💼 У вас нет генераций для обработки фото
+        const noGenerationsMessage = `💼 У вас нет оживлений фото для обработки
 
 📸 Ваши фото сохранены и готовы к обработке
 🎬 Промпт: "${displayPromptForMessage}"
@@ -2770,11 +2804,11 @@ ${packageListText}
 
   private getGenerationWord(count: number): string {
     if (count % 10 === 1 && count % 100 !== 11) {
-      return 'генерация';
+      return 'оживление фото';
     } else if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) {
-      return 'генерации';
+      return 'оживления фото';
     } else {
-      return 'генераций';
+      return 'оживлений фото';
     }
   }
 
