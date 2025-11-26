@@ -1232,22 +1232,51 @@ export class TelegramService {
       'мужчина слева': 'man on the left',
       'женщина справа': 'woman on the right',
       'ребёнок в центре': 'child in the center',
-      'люди на фото': 'people in the photo'
+      'люди на фото': 'people in the photo',
+      'как соседи': 'like neighbors',
+      'как друзья': 'like friends',
+      'как семья': 'like family',
+      'как коллеги': 'like colleagues',
+      'вместе': 'together',
+      'рядом': 'next to each other',
+      'приобняв': 'hugging',
+      'держась за руки': 'holding hands'
     };
     
     let translated = russianPrompt.toLowerCase();
     
-    // Заменяем фразы
-    for (const [russian, english] of Object.entries(translations)) {
+    // Заменяем фразы (сначала длинные, потом короткие)
+    const sortedTranslations = Object.entries(translations).sort((a, b) => b[0].length - a[0].length);
+    for (const [russian, english] of sortedTranslations) {
       if (translated.includes(russian)) {
         translated = translated.replace(russian, english);
       }
+    }
+    
+    // Убираем оставшиеся русские слова, заменяя их на пустую строку или оставляя как есть
+    // Если остались русские символы, пробуем перевести через базовый словарь
+    const basicTranslations: { [key: string]: string } = {
+      'как': 'like',
+      'и': 'and',
+      'или': 'or',
+      'с': 'with',
+      'на': 'on',
+      'в': 'in',
+      'для': 'for'
+    };
+    
+    for (const [russian, english] of Object.entries(basicTranslations)) {
+      const regex = new RegExp(`\\b${russian}\\b`, 'gi');
+      translated = translated.replace(regex, english);
     }
     
     // Добавляем базовую часть если нужно
     if (!translated.includes('animate')) {
       translated = `animate this image with ${translated}`;
     }
+    
+    // Очищаем от лишних пробелов
+    translated = translated.replace(/\s+/g, ' ').trim();
     
     return translated;
   }
@@ -1289,6 +1318,19 @@ export class TelegramService {
       case 'skip_prompt_merge':
         const userMerge = await this.userService.getOrCreateUser(ctx.from!);
         await this.processMergePrompt(ctx, userMerge, 'пропустить');
+        break;
+      case 'skip_prompt_combine':
+        const userCombine = await this.userService.getOrCreateUser(ctx.from!);
+        const combineState = this.combineAndAnimateState.get(userCombine.telegram_id);
+        const combinePhotos = this.combineAndAnimatePhotos.get(userCombine.telegram_id);
+        if (combineState && combinePhotos && combinePhotos.length >= 2) {
+          // Устанавливаем базовый промпт для объединенных фото
+          combineState.animationPrompt = 'пропустить';
+          this.combineAndAnimateState.set(userCombine.telegram_id, combineState);
+          await this.createCombineAndAnimateOrder(ctx, userCombine, combinePhotos, combineState);
+        } else {
+          await this.sendMessage(ctx, '❌ Фото не найдены. Начните заново.');
+        }
         break;
       case 'back_to_menu':
         // Удаляем inline клавиатуру и показываем главное меню с reply клавиатурой
@@ -2680,7 +2722,14 @@ ${packageListText}
 • Минимальный размер: 300x300 пикселей
 • Формат: JPG или PNG`;
 
-    await this.sendMessage(ctx, message);
+    await this.sendMessage(ctx, message, {
+      reply_markup: {
+        inline_keyboard: [
+          [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt_combine')],
+          this.getBackButton()
+        ]
+      }
+    });
     
     // Устанавливаем флаг ожидания промпта
     const user = await this.userService.getOrCreateUser(ctx.from!);
@@ -2710,9 +2759,16 @@ ${packageListText}
       const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
       
       // Промпт для анимации - берем из пользовательского ввода
-      // Используем тот же базовый промпт, что и в обычном оживлении
-      let animationPrompt = state.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
-      const originalAnimationPrompt = animationPrompt;
+      // Для объединенных фото используем специальный базовый промпт с взаимодействием людей
+      let animationPrompt: string;
+      const originalAnimationPrompt = state.animationPrompt || '';
+      
+      if (state.animationPrompt === 'пропустить' || state.animationPrompt === 'skip' || !state.animationPrompt) {
+        // Базовый промпт для объединенных фото: люди машут руками, улыбаются друг другу, легкие движения
+        animationPrompt = 'people in the photo are waving hands, smiling at each other, subtle movements and breathing effect, natural interaction between them';
+      } else {
+        animationPrompt = state.animationPrompt;
+      }
       
       // Переводим русский промпт на английский для лучшего понимания AI
       animationPrompt = this.translateAnimationPrompt(animationPrompt);
@@ -2738,8 +2794,8 @@ ${packageListText}
         this.combineAndAnimateState.delete(user.telegram_id);
         
         // Объединенное сообщение о промпте, создании заказа и начале генерации
-        const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip') 
-          ? 'оживите это изображение с помощью легких движений и эффекта дыхания' 
+        const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip' || !originalAnimationPrompt) 
+          ? 'люди машут руками, улыбаются друг другу, легкие движения и эффект дыхания' 
           : originalAnimationPrompt;
         await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю оживление видео...\n\n⏳ Это займет до 5 минут.`);
       

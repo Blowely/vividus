@@ -178,65 +178,105 @@ export class FalService {
       
       const prompt = customPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
-      // Submit request using fal.ai API (direct model endpoint)
-      const response = await axios.post(
-        `${this.baseUrl}/${this.modelId}`,
-        {
-          prompt: prompt,
-          image_url: imageUrl,
-          duration: duration,
-          prompt_optimizer: true
-        },
-        {
-          headers: {
-            'Authorization': `Key ${this.apiKey}`,
-            'Content-Type': 'application/json'
+      // Используем fal.subscribe() для избежания таймаутов при длительных операциях
+      console.log('🔄 Creating video with fal.ai using subscribe...');
+      
+      try {
+        const result = await fal.subscribe(this.modelId, {
+          input: {
+            prompt: prompt,
+            image_url: imageUrl,
+            duration: duration,
+            prompt_optimizer: true
+          },
+          logs: true,
+          onQueueUpdate: (update) => {
+            if (update.status === 'IN_PROGRESS') {
+              update.logs?.map((log) => log.message).forEach((msg) => {
+                console.log('fal.ai log:', msg);
+              });
+            }
           }
-        }
-      );
+        });
 
-      console.log('fal.ai response:', response.data);
-      
-      // fal.ai может вернуть либо request_id (для асинхронных), либо сразу результат
-      let requestId: string;
-      let systemRequestId: string;
-      
-      if (response.data.request_id) {
-        // Асинхронный запрос
-        requestId = response.data.request_id;
-        systemRequestId = `fal_${requestId}`;
+        console.log('fal.ai response:', result.data);
+        console.log('Request ID:', result.requestId);
         
-        // Save job to database
-        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+        // fal.ai может вернуть либо request_id (для асинхронных), либо сразу результат
+        let requestId: string;
+        let systemRequestId: string;
         
-        // Сохраняем оригинальный request_id в error_message для последующего использования
-        await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
-      } else if (response.data.video && response.data.video.url) {
-        // Синхронный ответ - сразу готово
-        const videoUrl = response.data.video.url;
-        systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        // Save job to database
-        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-        
-        // Сразу помечаем как завершенное
-        await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+        if (result.requestId) {
+          // Асинхронный запрос
+          requestId = result.requestId;
+          systemRequestId = `fal_${requestId}`;
+          
+          // Save job to database
+          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+          
+          // Сохраняем оригинальный request_id в error_message для последующего использования
+          await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+        } else if (result.data?.video?.url) {
+          // Синхронный ответ - сразу готово
+          const videoUrl = result.data.video.url;
+          systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          // Save job to database
+          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+          
+          // Сразу помечаем как завершенное
+          await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+          
+          return systemRequestId;
+        } else {
+          throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(result.data));
+        }
         
         return systemRequestId;
-      } else {
-        throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
+      } catch (subscribeError: any) {
+        // Если fal.subscribe() не поддерживается или произошла ошибка, пробуем старый метод
+        console.warn('fal.subscribe() failed, trying axios.post:', subscribeError.message);
+        
+        // Fallback на старый метод через axios
+        const response = await axios.post(
+          `${this.baseUrl}/${this.modelId}`,
+          {
+            prompt: prompt,
+            image_url: imageUrl,
+            duration: duration,
+            prompt_optimizer: true
+          },
+          {
+            headers: {
+              'Authorization': `Key ${this.apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 120000 // Увеличиваем таймаут до 120 секунд
+          }
+        );
+
+        console.log('fal.ai response (fallback):', response.data);
+        
+        let requestId: string;
+        let systemRequestId: string;
+        
+        if (response.data.request_id) {
+          requestId = response.data.request_id;
+          systemRequestId = `fal_${requestId}`;
+          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+          await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+        } else if (response.data.video && response.data.video.url) {
+          const videoUrl = response.data.video.url;
+          systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+          await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+          return systemRequestId;
+        } else {
+          throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
+        }
+        
+        return systemRequestId;
       }
-      
-      // Immediately check status for debugging
-      console.log('🔍 Checking initial status for:', systemRequestId);
-      try {
-        const status = await this.checkJobStatus(systemRequestId);
-        console.log('Initial status:', status);
-      } catch (statusError) {
-        console.log('Status check failed, but generation was created');
-      }
-      
-      return systemRequestId;
     } catch (error: any) {
       console.error('Error creating video:', error);
       console.error('Error details:', error.response?.data);
