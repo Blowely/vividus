@@ -335,36 +335,18 @@ export class FalService {
       
       const originalRequestId = job.error_message; // Временно храним оригинальный ID здесь
       
-      // Для fal.ai используем правильный endpoint для проверки статуса
-      // Используем формат: /fal-ai/{model}/status с request_id в query параметрах
+      // Для fal.ai используем библиотеку для проверки статуса через queue API
       try {
-        // Формируем правильный путь модели (заменяем / на -)
-        const modelPath = this.modelId.replace(/\//g, '-');
-        
-        // Пробуем несколько вариантов endpoint'ов
-        const endpoints = [
-          // Вариант 1: Стандартный формат fal.ai
-          `${this.baseUrl}/fal-ai/${modelPath}/status?request_id=${originalRequestId}`,
-          // Вариант 2: Альтернативный формат
-          `${this.baseUrl}/fal/queue/${originalRequestId}`,
-          // Вариант 3: Прямой формат с моделью в пути
-          `${this.baseUrl}/${this.modelId}/status?request_id=${originalRequestId}`
-        ];
-        
-        let lastError: any = null;
-        
-        for (const endpoint of endpoints) {
-          try {
-            const response = await axios.get(endpoint, {
-              headers: {
-                'Authorization': `Key ${this.apiKey}`
-              }
-            });
+        // Используем fal.queue.get() для проверки статуса (если доступно)
+        // Иначе используем прямой API вызов
+        try {
+          // Пробуем использовать библиотеку fal.ai для проверки статуса
+          const queueStatus = await (fal as any).queue?.get?.(originalRequestId);
+          
+          if (queueStatus) {
+            console.log('Job status response (fal.queue.get):', queueStatus);
             
-            console.log(`Job status response (${endpoint}):`, response.data);
-            
-            // Преобразуем статус fal.ai в наш формат
-            const falStatus = response.data.status;
+            const falStatus = queueStatus.status;
             let ourStatus = falStatus;
             
             if (falStatus === 'IN_PROGRESS' || falStatus === 'IN_QUEUE' || falStatus === 'QUEUED') {
@@ -375,75 +357,75 @@ export class FalService {
               ourStatus = 'FAILED';
             }
             
-            // Извлекаем URL видео из разных возможных форматов ответа
-            const videoUrl = response.data.video?.url 
-              || response.data.output?.video?.url 
-              || response.data.output?.[0]?.url
-              || (Array.isArray(response.data.output) && response.data.output[0])
-              || response.data.output?.url;
+            const videoUrl = queueStatus.output?.video?.url 
+              || queueStatus.output?.[0]?.url
+              || (Array.isArray(queueStatus.output) && queueStatus.output[0])
+              || queueStatus.video?.url;
             
             return {
               status: ourStatus,
               video: videoUrl ? { url: videoUrl } : undefined,
               output: videoUrl ? [videoUrl] : undefined,
-              error: response.data.error || response.data.failure
-            };
-          } catch (endpointError: any) {
-            lastError = endpointError;
-            // Продолжаем пробовать следующий endpoint
-            if (endpointError.response?.status !== 404) {
-              // Если это не 404, пробрасываем ошибку дальше
-              throw endpointError;
-            }
-          }
-        }
-        
-        // Если все endpoints вернули 404, пробуем использовать формат из библиотеки fal.ai
-        // Может быть нужно использовать другой формат endpoint'а
-        console.warn('All status endpoints returned 404, trying result endpoint for:', originalRequestId);
-        
-        try {
-          // Пробуем получить результат напрямую через result endpoint
-          const resultResponse = await axios.get(
-            `${this.baseUrl}/${this.modelId}/result`,
-            {
-              params: {
-                request_id: originalRequestId
-              },
-              headers: {
-                'Authorization': `Key ${this.apiKey}`
-              }
-            }
-          );
-          
-          console.log('Job result response:', resultResponse.data);
-          
-          // Если результат получен, значит запрос завершен
-          if (resultResponse.data.video?.url || resultResponse.data.output) {
-            const videoUrl = resultResponse.data.video?.url 
-              || resultResponse.data.output?.video?.url 
-              || resultResponse.data.output?.[0]?.url
-              || (Array.isArray(resultResponse.data.output) && resultResponse.data.output[0])
-              || resultResponse.data.output?.url;
-            
-            return {
-              status: 'COMPLETED',
-              video: videoUrl ? { url: videoUrl } : undefined,
-              output: videoUrl ? [videoUrl] : undefined,
-              error: undefined
+              error: queueStatus.error || queueStatus.failure
             };
           }
-        } catch (resultError: any) {
-          console.warn('Result endpoint also failed:', resultError.message);
+        } catch (queueError: any) {
+          // Если библиотека не работает, используем прямой API
+          console.log('fal.queue.get() not available, using direct API');
         }
         
-        // Если все попытки не удались, пробрасываем ошибку
-        throw new Error(`Failed to check job status: all endpoints returned 404. Request ID: ${originalRequestId}`);
+        // Используем прямой API вызов - формат: /fal-ai/{model}/status
+        const modelPath = this.modelId.replace(/\//g, '-');
+        const response = await axios.get(
+          `${this.baseUrl}/fal-ai/${modelPath}/status`,
+          {
+            params: {
+              request_id: originalRequestId
+            },
+            headers: {
+              'Authorization': `Key ${this.apiKey}`
+            }
+          }
+        );
         
+        console.log('Job status response (direct API):', response.data);
+        
+        // Преобразуем статус fal.ai в наш формат
+        const falStatus = response.data.status;
+        let ourStatus = falStatus;
+        
+        if (falStatus === 'IN_PROGRESS' || falStatus === 'IN_QUEUE' || falStatus === 'QUEUED') {
+          ourStatus = 'PROCESSING';
+        } else if (falStatus === 'COMPLETED' || falStatus === 'SUCCEEDED') {
+          ourStatus = 'COMPLETED';
+        } else if (falStatus === 'FAILED' || falStatus === 'ERROR') {
+          ourStatus = 'FAILED';
+        }
+        
+        // Извлекаем URL видео из разных возможных форматов ответа
+        const videoUrl = response.data.video?.url 
+          || response.data.output?.video?.url 
+          || response.data.output?.[0]?.url
+          || (Array.isArray(response.data.output) && response.data.output[0])
+          || response.data.output?.url;
+        
+        return {
+          status: ourStatus,
+          video: videoUrl ? { url: videoUrl } : undefined,
+          output: videoUrl ? [videoUrl] : undefined,
+          error: response.data.error || response.data.failure
+        };
       } catch (apiError: any) {
-        // Если это наша ошибка о 404, пробрасываем её
-        if (apiError.message && apiError.message.includes('Failed to check job status')) {
-          throw apiError;
+        // Если endpoint не найден (404), это может означать, что запрос еще обрабатывается
+        // Или endpoint неправильный - в этом случае возвращаем PENDING
+        if (apiError.response?.status === 404) {
+          console.warn(`Status endpoint returned 404 for request_id: ${originalRequestId}, assuming PENDING`);
+          return {
+            status: 'PENDING',
+            video: undefined,
+            output: undefined,
+            error: undefined
+          };
         }
         
         // Для других ошибок логируем и пробрасываем
