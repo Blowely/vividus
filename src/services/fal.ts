@@ -200,7 +200,7 @@ export class FalService {
               'Authorization': `Key ${this.apiKey}`,
               'Content-Type': 'application/json'
             },
-            timeout: 30000 // 30 секунд - достаточно для получения request_id или быстрого результата
+            timeout: 300000 // 5 минут - достаточно для длительных операций
           }
         );
 
@@ -231,7 +231,7 @@ export class FalService {
         // В этом случае fal.ai все равно обрабатывает запрос, но ответ придет позже
         // Нужно использовать другой подход - проверить, не вернул ли fal.ai request_id в заголовках
         if (axiosError.code === 'ECONNABORTED' || axiosError.message?.includes('timeout')) {
-          console.warn('Request timed out after 30s, but fal.ai may still be processing. Checking for request_id in response...');
+          console.warn('Request timed out after 5 minutes, but fal.ai may still be processing. Checking for request_id in response...');
           
           // Проверяем, есть ли request_id в ответе (даже если был timeout)
           if (axiosError.response?.data?.request_id) {
@@ -259,7 +259,7 @@ export class FalService {
             });
             
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('fal.run() timeout')), 30000)
+              setTimeout(() => reject(new Error('fal.run() timeout')), 60000) // 60 секунд для fallback
             );
             
             const result = await Promise.race([runPromise, timeoutPromise]) as any;
