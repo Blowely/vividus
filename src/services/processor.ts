@@ -1975,7 +1975,7 @@ export class ProcessorService {
       }
 
       // Шаг 1: Объединяем фото через Nano Banana 2 (fal.ai)
-      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото через Nano Banana 2...');
+      await this.notifyUser(telegramId, '🎨 Шаг 1/2: Объединяю фото...');
       
       const image1 = referenceImages[0];
       const image2 = referenceImages[1];
