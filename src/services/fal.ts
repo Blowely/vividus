@@ -79,6 +79,13 @@ export class FalService {
       return 'Ошибка валидации изображения. Пожалуйста, отправьте другое фото.';
     }
     
+    // Сервис недоступен
+    if (errorLower.includes('service unavailable') || 
+        errorLower.includes('not available') ||
+        errorLower.includes('unavailable')) {
+      return 'Сервис временно недоступен. Пожалуйста, попробуйте позже.';
+    }
+    
     return errorMessage;
   }
 
@@ -655,12 +662,24 @@ export class FalService {
       }
     } catch (error: any) {
       console.error('Error combining images:', error);
-      console.error('Error details:', error.response?.data || error.message);
+      console.error('Error details:', error.response?.data || error.body || error.message);
       
       // Извлекаем сообщение об ошибке из разных форматов ответа fal.ai
       let errorMessage: string = 'Failed to combine images';
       
-      if (error.response?.data) {
+      // Проверяем error.body (для fal.ai клиента)
+      if (error.body) {
+        if (typeof error.body.detail === 'string') {
+          errorMessage = error.body.detail;
+        } else if (error.body.detail?.msg) {
+          errorMessage = error.body.detail.msg;
+        } else if (error.body.error) {
+          errorMessage = error.body.error;
+        }
+      }
+      
+      // Проверяем error.response?.data (для axios)
+      if (errorMessage === 'Failed to combine images' && error.response?.data) {
         // Если detail - массив (как в случае file_download_error)
         if (Array.isArray(error.response.data.detail)) {
           const firstError = error.response.data.detail[0];
@@ -694,7 +713,7 @@ export class FalService {
       const translatedError = this.translateFalError(errorMessage);
       
       const translatedErrorObj = new Error(translatedError);
-      (translatedErrorObj as any).originalError = error.response?.data || errorMessage;
+      (translatedErrorObj as any).originalError = error.body || error.response?.data || errorMessage;
       throw translatedErrorObj;
     }
   }
