@@ -544,14 +544,6 @@ export class TelegramService {
       // Проверяем, находимся ли мы в режиме объединить и оживить
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
       if (combinePhotos !== undefined) {
-        // Проверяем права админа
-        if (!this.isAdmin(ctx.from!.id)) {
-          // Очищаем состояние, если пользователь не админ
-          this.combineAndAnimatePhotos.delete(user.telegram_id);
-          this.combineAndAnimateState.delete(user.telegram_id);
-          return;
-        }
-        
         // Используем mediaGroupId для группировки фото из одного альбома
         // Создаем ключ для хранения фото из этой медиа-группы
         const mediaGroupKey = `combine_${user.telegram_id}_${mediaGroupId}`;
@@ -904,14 +896,6 @@ export class TelegramService {
       // Проверяем, ожидает ли пользователь промпт для анимации в режиме combine_and_animate
       const combineState = this.combineAndAnimateState.get(user.telegram_id);
       if (combineState && combineState.waitingForAnimationPrompt) {
-        // Проверяем права админа
-        if (!this.isAdmin(ctx.from!.id)) {
-          this.combineAndAnimatePhotos.delete(user.telegram_id);
-          this.combineAndAnimateState.delete(user.telegram_id);
-          await this.sendMessage(ctx, '❌ У вас нет доступа к этой функции.');
-          return;
-        }
-        
         const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
         
         if (photos.length < 2) {
