@@ -435,15 +435,6 @@ export class TelegramService {
       // Проверяем, находимся ли мы в режиме объединить и оживить
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
       if (combinePhotos !== undefined) {
-        // Проверяем права админа
-        if (!this.isAdmin(ctx.from!.id)) {
-          // Очищаем состояние, если пользователь не админ
-          this.combineAndAnimatePhotos.delete(user.telegram_id);
-          this.combineAndAnimateState.delete(user.telegram_id);
-          await this.sendMessage(ctx, '❌ У вас нет доступа к этой функции.');
-          return;
-        }
-        
         // Добавляем фото в список (ровно 2 фото)
         if (combinePhotos.length < 2) {
           combinePhotos.push(fileId);
