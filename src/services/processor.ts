@@ -2016,7 +2016,7 @@ export class ProcessorService {
         'Two people together in a modern photorealistic scene, natural lighting, high quality photograph';
       
       // Вызываем Flux API для объединения с retry логикой при ошибке скачивания файла
-      let combinedImageUrl: string;
+      let combinedImageUrl: string | undefined;
       let combineRetryCount = 0;
       const maxCombineRetries = 2;
       
