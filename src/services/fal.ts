@@ -657,11 +657,44 @@ export class FalService {
       console.error('Error combining images:', error);
       console.error('Error details:', error.response?.data || error.message);
       
-      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to combine images';
+      // Извлекаем сообщение об ошибке из разных форматов ответа fal.ai
+      let errorMessage: string = 'Failed to combine images';
+      
+      if (error.response?.data) {
+        // Если detail - массив (как в случае file_download_error)
+        if (Array.isArray(error.response.data.detail)) {
+          const firstError = error.response.data.detail[0];
+          if (firstError?.msg) {
+            errorMessage = firstError.msg;
+          } else if (typeof firstError === 'string') {
+            errorMessage = firstError;
+          }
+        } 
+        // Если detail - строка
+        else if (typeof error.response.data.detail === 'string') {
+          errorMessage = error.response.data.detail;
+        }
+        // Если есть error
+        else if (error.response.data.error) {
+          errorMessage = error.response.data.error;
+        }
+        // Если detail - объект с msg
+        else if (error.response.data.detail?.msg) {
+          errorMessage = error.response.data.detail.msg;
+        }
+      }
+      
+      // Если ничего не нашли, используем message
+      if (errorMessage === 'Failed to combine images' && error.message) {
+        errorMessage = error.message;
+      }
+      
+      console.error('Extracted error message:', errorMessage);
+      
       const translatedError = this.translateFalError(errorMessage);
       
       const translatedErrorObj = new Error(translatedError);
-      (translatedErrorObj as any).originalError = errorMessage;
+      (translatedErrorObj as any).originalError = error.response?.data || errorMessage;
       throw translatedErrorObj;
     }
   }

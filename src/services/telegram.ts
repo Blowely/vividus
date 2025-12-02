@@ -104,10 +104,8 @@ export class TelegramService {
     // Первая строка - кнопка новой нейросети для всех пользователей
     keyboard.push([Markup.button.text('🎬 Оживить фото')]);
     
-    // Добавляем кнопку "Объединить и оживить" для админов под кнопкой "Оживить фото"
-    if (this.isAdmin(userId)) {
-      keyboard.push([Markup.button.text('🔀 Объединить и оживить')]);
-    }
+    // Добавляем кнопку "Объединить и оживить" для всех пользователей
+    keyboard.push([Markup.button.text('🧩 Объединить и оживить')]);
     
     keyboard.push([Markup.button.text('✨ Купить оживления'), Markup.button.text('❓ Поддержка')]);
 
@@ -863,17 +861,17 @@ export class TelegramService {
         
         // Пакеты генераций (оригинальные цены)
         const packages = [
-          { count: 1, originalPrice: 169 },
-          { count: 3, originalPrice: 507 },
-          { count: 5, originalPrice: 845 },
-          { count: 10, originalPrice: 1690 }
+          { count: 1, originalPrice: 188 },
+          { count: 3, originalPrice: 526 },
+          { count: 5, originalPrice: 864 },
+          { count: 10, originalPrice: 1708 }
         ];
         
-        // Коэффициент скидки: 89/169 ≈ 0.5266 (скидка ~47.34%)
-        const discountCoefficient = 89 / 169;
+        // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
+        const discountCoefficient = 99 / 188;
         
         const keyboard = packages.map(pkg => {
-          // Используем цену со скидкой как финальную цену (оригинальная * 89/169)
+          // Используем цену со скидкой как финальную цену (оригинальная * 99/188)
           const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
           const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [
@@ -958,19 +956,13 @@ export class TelegramService {
         return;
       }
       
-      // Объединить и оживить - только для админов
-      if (text === '🔀 Объединить и оживить') {
-        // Проверяем права админа
-        if (!this.isAdmin(ctx.from!.id)) {
-          await this.sendMessage(ctx, '❌ У вас нет доступа к этой функции.');
-          return;
-        }
-        
+      // Объединить и оживить - доступно для всех
+      if (text === '🧩 Объединить и оживить') {
         // Инициализируем режим объединить и оживить
         this.combineAndAnimatePhotos.set(user.telegram_id, []);
         this.combineAndAnimateState.set(user.telegram_id, {});
         
-        const instructions = `🔀 ОБЪЕДИНИТЬ И ОЖИВИТЬ
+        const instructions = `🧩 ОБЪЕДИНИТЬ И ОЖИВИТЬ
 
 ВАЖНО:
 Функция совмещает 2 фотографии и рисует сцену с нуля, чтобы создать современный общий кадр или видео.
@@ -1144,14 +1136,14 @@ export class TelegramService {
         
         // Пакеты генераций (финальные цены)
         const packages = [
-          { count: 1, originalPrice: 169 },
-          { count: 3, originalPrice: 507 },
-          { count: 5, originalPrice: 845 },
-          { count: 10, originalPrice: 1690 }
+          { count: 1, originalPrice: 188 },
+          { count: 3, originalPrice: 526 },
+          { count: 5, originalPrice: 864 },
+          { count: 10, originalPrice: 1708 }
         ];
         
-        // Коэффициент скидки: 89/169 ≈ 0.5266 (скидка ~47.34%)
-        const discountCoefficient = 89 / 169;
+        // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
+        const discountCoefficient = 99 / 188;
         
         const keyboard = packages.map(pkg => {
           const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
@@ -2083,17 +2075,17 @@ export class TelegramService {
       const user = await this.userService.getOrCreateUser(ctx.from!);
       const currentGenerations = await this.userService.getUserGenerations(ctx.from!.id);
       
-      // Пакеты генераций со скидкой ~47.34% (финальная цена за 1 генерацию: 89 руб)
+      // Пакеты генераций со скидкой ~47.34% (финальная цена за 1 генерацию: 99 руб)
       // Текущие цены - это оригинальные, вычисляем цены со скидкой
       const packages = [
-        { count: 1, originalPrice: 169 },
-        { count: 3, originalPrice: 507 },
-        { count: 5, originalPrice: 845 },
-        { count: 10, originalPrice: 1690 }
+        { count: 1, originalPrice: 188 },
+        { count: 3, originalPrice: 526 },
+        { count: 5, originalPrice: 864 },
+        { count: 10, originalPrice: 1708 }
       ];
       
-      // Коэффициент скидки: 89/169 ≈ 0.5266 (скидка ~47.34%)
-      const discountCoefficient = 89 / 169;
+      // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
+      const discountCoefficient = 99 / 188;
       
       // Формируем список пакетов с зачеркиванием и скидкой в тексте сообщения
       let packageListText = '';
@@ -2465,10 +2457,10 @@ ${packageListText}
       // Пакеты генераций (те же цены, но в звездах)
       // Конвертация: 1 рубль ≈ 1 звезда
       const packages = [
-        { count: 1, price: 89 },
-        { count: 3, price: 267 },
-        { count: 5, price: 445 },
-        { count: 10, price: 890 }
+        { count: 1, price: 99 },
+        { count: 3, price: 277 },
+        { count: 5, price: 455 },
+        { count: 10, price: 900 }
       ];
       
       const message = `⭐ Оплата звёздами Telegram
@@ -2839,17 +2831,17 @@ ${packageListText}
         
         // Пакеты генераций (оригинальные цены)
         const packages = [
-          { count: 1, originalPrice: 169 },
-          { count: 3, originalPrice: 507 },
-          { count: 5, originalPrice: 845 },
-          { count: 10, originalPrice: 1690 }
+          { count: 1, originalPrice: 188 },
+          { count: 3, originalPrice: 526 },
+          { count: 5, originalPrice: 864 },
+          { count: 10, originalPrice: 1708 }
         ];
         
-        // Коэффициент скидки: 89/169 ≈ 0.5266 (скидка ~47.34%)
-        const discountCoefficient = 89 / 169;
+        // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
+        const discountCoefficient = 99 / 188;
         
         const keyboard = packages.map(pkg => {
-          // Используем цену со скидкой как финальную цену (оригинальная * 89/169)
+          // Используем цену со скидкой как финальную цену (оригинальная * 99/188)
           const discountedPrice = Math.round(pkg.originalPrice * discountCoefficient);
           const buttonText = `${discountedPrice}₽ → ${pkg.count} ${this.getGenerationWord(pkg.count)}`;
           return [

@@ -45,7 +45,7 @@ bot.start(async (ctx) => {
 
   const keyboard = Markup.keyboard([
     [Markup.button.text('🎬 Оживить фото v2')],
-    [Markup.button.text('🔀 Объединить и оживить')],
+    [Markup.button.text('🧩 Объединить и оживить')],
     [Markup.button.text('📨 Рассылка')]
   ]).resize();
 
@@ -155,7 +155,7 @@ bot.on('text', async (ctx) => {
   }
   
   // Обработка кнопки "Объединить и оживить"
-  if (text === '🔀 Объединить и оживить') {
+  if (text === '🧩 Объединить и оживить') {
     await handleCombineAndAnimate(ctx);
     return;
   }
@@ -534,7 +534,7 @@ async function handleCombineAndAnimate(ctx: Context) {
   combineAndAnimatePhotos.set(ctx.from!.id, []);
   combineAndAnimateState.set(ctx.from!.id, {});
   
-  const instructions = `🔀 ОБЪЕДИНИТЬ И ОЖИВИТЬ
+  const instructions = `🧩 ОБЪЕДИНИТЬ И ОЖИВИТЬ
 
 ВАЖНО:
 Функция совмещает 2 фотографии и рисует сцену с нуля, чтобы создать современный общий кадр или видео.

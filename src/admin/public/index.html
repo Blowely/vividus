@@ -1410,7 +1410,7 @@
             const GENERATION_COST = 20; // Себестоимость 1 генерации
             const ACQUIRING_FEE = 0.0376; // Комиссия эквайринга 3.76%
             const TAX_RATE = 0.06; // Налог на ИП 6%
-            const GENERATION_PRICE = 89; // Цена одной генерации
+            const GENERATION_PRICE = 99; // Цена одной генерации
             
             // Выручка от генераций
             const revenueFromGenerations = generations * GENERATION_PRICE;
@@ -1443,7 +1443,7 @@
                 <div class="tooltip-content">
                     <div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">💰 Расчет чистой прибыли</div>
                     <div style="line-height: 1.6;">
-                        <div>Генерации: ${generations} × 89 ₽ = ${calc.revenue.toFixed(2)} ₽</div>
+                        <div>Генерации: ${generations} × 99 ₽ = ${calc.revenue.toFixed(2)} ₽</div>
                         <div style="color: #ff6b6b;">- Себестоимость: ${generations} × 20 ₽ = ${calc.cost.toFixed(2)} ₽</div>
                         <div style="color: #ff6b6b;">- Комиссия эквайринга (3.76%): ${calc.acquiringFee.toFixed(2)} ₽</div>
                         <div style="color: #ff6b6b;">- Налог на ИП (6%): ${calc.tax.toFixed(2)} ₽</div>

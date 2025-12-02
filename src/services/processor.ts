@@ -2015,10 +2015,48 @@ export class ProcessorService {
       const combinePrompt = order.combine_prompt || 
         'Two people together in a modern photorealistic scene, natural lighting, high quality photograph';
       
-      // Вызываем Flux API для объединения
-      const combinedImageUrl = await this.falService.combineImages(image1, image2, combinePrompt);
+      // Вызываем Flux API для объединения с retry логикой при ошибке скачивания файла
+      let combinedImageUrl: string;
+      let combineRetryCount = 0;
+      const maxCombineRetries = 2;
       
-      console.log(`Face swap completed: ${combinedImageUrl}`);
+      while (combineRetryCount <= maxCombineRetries) {
+        try {
+          if (combineRetryCount > 0) {
+            console.log(`🔄 Повторная попытка объединения фото (${combineRetryCount}/${maxCombineRetries}) для заказа ${orderId}`);
+            await this.notifyUser(telegramId, `🔄 Повторная попытка объединения фото (${combineRetryCount}/${maxCombineRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Ждем 3 секунды перед повтором
+          }
+          
+          combinedImageUrl = await this.falService.combineImages(image1, image2, combinePrompt);
+          console.log(`Face swap completed: ${combinedImageUrl}`);
+          break; // Успешно завершено, выходим из цикла
+        } catch (error: any) {
+          console.error(`Error combining images (attempt ${combineRetryCount + 1}/${maxCombineRetries + 1}):`, error);
+          
+          // Проверяем, является ли это ошибкой скачивания файла (НЕ ошибкой доступности)
+          const isDownloadError = !error.isFileAccessError && error.message && (
+            error.message.includes('Не удалось загрузить изображение') ||
+            error.message.includes('Failed to download') ||
+            error.message.includes('file_download_error') ||
+            error.message.includes('download the file')
+          );
+          
+          // Если это ошибка скачивания (но не доступности) и есть попытки, пробуем еще раз
+          if (isDownloadError && combineRetryCount < maxCombineRetries) {
+            combineRetryCount++;
+            continue;
+          }
+          
+          // Для других ошибок или если попытки закончились - пробрасываем ошибку дальше
+          throw error;
+        }
+      }
+      
+      // Проверяем, что объединение прошло успешно
+      if (!combinedImageUrl) {
+        throw new Error('Не удалось объединить фото после всех попыток');
+      }
       
       // Скачиваем объединенное изображение и загружаем в S3
       const combinedImageS3Url = await this.s3Service.downloadAndUploadToS3(
