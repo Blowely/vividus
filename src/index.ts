@@ -133,11 +133,12 @@ process.on('SIGTERM', async () => {
 process.on('unhandledRejection', (reason, promise) => {
   if (reason && typeof reason === 'object' && 'message' in reason) {
     const error = reason as any;
+    const errorCode = (error as NodeJS.ErrnoException).code;
     if (error.message && (
       error.message.includes('Connection terminated') ||
       error.message.includes('Connection terminated unexpectedly') ||
-      error.code === 'ECONNRESET' ||
-      error.code === 'EPIPE'
+      errorCode === 'ECONNRESET' ||
+      errorCode === 'EPIPE'
     )) {
       console.error('⚠️ Unhandled PostgreSQL connection error (will retry on next query):', error.message);
       // Не завершаем процесс, пул обработает это автоматически
@@ -150,11 +151,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Обработка необработанных исключений
 process.on('uncaughtException', (error) => {
+  const errorCode = (error as NodeJS.ErrnoException).code;
   if (error.message && (
     error.message.includes('Connection terminated') ||
     error.message.includes('Connection terminated unexpectedly') ||
-    error.code === 'ECONNRESET' ||
-    error.code === 'EPIPE'
+    errorCode === 'ECONNRESET' ||
+    errorCode === 'EPIPE'
   )) {
     console.error('⚠️ Uncaught PostgreSQL connection error (will retry on next query):', error.message);
     // Не завершаем процесс, пул обработает это автоматически
