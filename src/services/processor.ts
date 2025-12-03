@@ -2061,8 +2061,22 @@ export class ProcessorService {
                                  error?.message?.includes('timed out') ||
                                  error?.name === 'TimeoutError';
           
-          // Для ошибок таймаута не делаем retry, так как это не поможет
+          // Для ошибок таймаута от fal.subscribe (90 секунд)
+          // Операция может продолжиться в фоне и завершиться успешно
+          // Если это некритичная ошибка таймаута, ждем еще немного перед повторной попыткой
           if (isTimeoutError) {
+            if (error?.isNonCritical) {
+              console.log(`⚠️ Некритичная ошибка таймаута (операция может продолжаться в фоне). Ждем 60 секунд перед проверкой...`);
+              await new Promise(resolve => setTimeout(resolve, 60000)); // Ждем 60 секунд
+              
+              // После ожидания пробуем еще раз (если есть попытки)
+              if (combineRetryCount < maxCombineRetries) {
+                combineRetryCount++;
+                console.log(`🔄 Повторная попытка после таймаута (${combineRetryCount}/${maxCombineRetries})...`);
+                continue;
+              }
+            }
+            
             console.error(`Timeout error combining images (attempt ${combineRetryCount + 1}/${maxCombineRetries + 1}):`, error);
             throw error;
           }

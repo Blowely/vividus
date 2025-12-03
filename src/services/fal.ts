@@ -640,9 +640,14 @@ export class FalService {
       
       // Используем Nano Banana Pro Edit для объединения двух изображений
       // Этот endpoint специально предназначен для работы с несколькими референсными изображениями
-      // Увеличиваем таймаут до 5 минут (300 секунд) для долгих операций
-      const result = await Promise.race([
-        fal.subscribe('fal-ai/nano-banana-pro/edit', {
+      // fal.subscribe имеет внутренний таймаут 90 секунд (p-timeout)
+      // Если операция занимает больше 90 секунд, выбрасывается TimeoutError, но операция продолжается в фоне
+      // Оборачиваем в try-catch для обработки таймаута, но не прерываем выполнение
+      let result: any;
+      let requestId: string | undefined;
+      
+      try {
+        result = await fal.subscribe('fal-ai/nano-banana-pro/edit', {
           input: {
             prompt: prompt,
             image_urls: [imageUrl1, imageUrl2] // Массив из двух изображений
@@ -654,12 +659,83 @@ export class FalService {
                 console.log('Nano Banana Pro Edit log:', msg);
               });
             }
+            // Сохраняем requestId из update, если он есть
+            if (update.request_id && !requestId) {
+              requestId = update.request_id;
+              console.log(`📝 Сохранен requestId из onQueueUpdate: ${requestId}`);
+            }
           }
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('TimeoutError: Promise timed out after 300000 milliseconds')), 300000) // 5 минут
-        )
-      ]) as any;
+        });
+        
+        // Сохраняем requestId если есть
+        if (result.requestId) {
+          requestId = result.requestId;
+        }
+      } catch (subscribeError: any) {
+        // Проверяем, является ли это ошибкой таймаута
+        const isTimeoutError = subscribeError.message?.includes('TimeoutError') || 
+                              subscribeError.message?.includes('timed out') || 
+                              subscribeError.name === 'TimeoutError' ||
+                              (subscribeError.message?.includes('Promise timed out') && subscribeError.message?.includes('90000'));
+        
+        if (isTimeoutError) {
+          console.log('⚠️ Получена ошибка таймаута от fal.subscribe (90 секунд), но операция может продолжаться в фоне.');
+          
+          // Проверяем, есть ли requestId в ошибке, в subscribeError, или мы сохранили его ранее
+          const errorRequestId = requestId || subscribeError.requestId || subscribeError.response?.data?.request_id;
+          
+          if (errorRequestId) {
+            console.log(`   Найден requestId в ошибке: ${errorRequestId}, пробуем получить результат через fal.queue...`);
+            
+            // Пробуем получить результат через fal.queue
+            try {
+              const queueStatus = await (fal as any).queue?.get?.(errorRequestId);
+              
+              if (queueStatus && (queueStatus.status === 'COMPLETED' || queueStatus.status === 'SUCCEEDED')) {
+                console.log('✅ Операция завершилась успешно после таймаута! Получаем результат...');
+                
+                // Получаем URL результата
+                const imageUrl = queueStatus.output?.images?.[0]?.url 
+                  || queueStatus.output?.image?.url
+                  || queueStatus.output?.[0]?.url
+                  || (Array.isArray(queueStatus.output) && queueStatus.output[0]?.url);
+                
+                if (imageUrl) {
+                  console.log('✅ Результат получен после таймаута:', imageUrl);
+                  return imageUrl;
+                }
+              } else if (queueStatus && (queueStatus.status === 'IN_PROGRESS' || queueStatus.status === 'IN_QUEUE')) {
+                console.log('   Операция все еще выполняется, ждем еще 60 секунд...');
+                await new Promise(resolve => setTimeout(resolve, 60000));
+                
+                // Пробуем еще раз
+                const retryQueueStatus = await (fal as any).queue?.get?.(errorRequestId);
+                if (retryQueueStatus && (retryQueueStatus.status === 'COMPLETED' || retryQueueStatus.status === 'SUCCEEDED')) {
+                  const imageUrl = retryQueueStatus.output?.images?.[0]?.url 
+                    || retryQueueStatus.output?.image?.url
+                    || retryQueueStatus.output?.[0]?.url;
+                  
+                  if (imageUrl) {
+                    console.log('✅ Результат получен после ожидания:', imageUrl);
+                    return imageUrl;
+                  }
+                }
+              }
+            } catch (queueError) {
+              console.log('   Не удалось получить результат через fal.queue:', queueError);
+            }
+          }
+          
+          // Если не удалось получить результат, пробрасываем ошибку с пометкой
+          const timeoutError = new Error('Объединение фото заняло больше 90 секунд. Операция может продолжаться в фоне.');
+          (timeoutError as any).isTimeoutError = true;
+          (timeoutError as any).isNonCritical = true;
+          throw timeoutError;
+        }
+        
+        // Для других ошибок пробрасываем дальше
+        throw subscribeError;
+      }
 
       console.log('Nano Banana Pro Edit response:', result.data);
       console.log('Request ID:', result.requestId);
@@ -677,10 +753,26 @@ export class FalService {
       console.error('Error combining images:', error);
       console.error('Error details:', error.response?.data || error.body || error.message);
       
-      // Обработка ошибки таймаута
-      if (error.message?.includes('TimeoutError') || error.message?.includes('timed out') || error.name === 'TimeoutError') {
-        const timeoutError = new Error('Объединение фото заняло слишком много времени. Пожалуйста, попробуйте позже или используйте другие фото.');
+      // Обработка ошибки таймаута от fal.subscribe
+      // fal.subscribe имеет внутренний таймаут 90 секунд (p-timeout)
+      // Если операция занимает больше 90 секунд, выбрасывается TimeoutError
+      // Но операция может продолжиться в фоне и завершиться успешно
+      // В этом случае ошибка таймаута - это просто предупреждение, не критическая ошибка
+      const isTimeoutError = error.message?.includes('TimeoutError') || 
+                            error.message?.includes('timed out') || 
+                            error.name === 'TimeoutError' ||
+                            (error.message?.includes('Promise timed out') && error.message?.includes('90000'));
+      
+      if (isTimeoutError) {
+        console.log('⚠️ Получена ошибка таймаута от fal.subscribe (90 секунд), но операция может продолжаться в фоне.');
+        console.log('   Это нормально для долгих операций объединения фото.');
+        console.log('   Если операция завершится успешно, результат будет обработан автоматически.');
+        
+        // Пробрасываем ошибку таймаута, но с пометкой что это не критично
+        // В processor.ts эта ошибка будет обработана и пользователь получит понятное сообщение
+        const timeoutError = new Error('Объединение фото заняло больше 90 секунд. Операция может продолжаться в фоне. Если она завершится успешно, вы получите результат.');
         (timeoutError as any).isTimeoutError = true;
+        (timeoutError as any).isNonCritical = true; // Помечаем как некритичную ошибку
         throw timeoutError;
       }
       
