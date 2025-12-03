@@ -926,7 +926,7 @@ export class TelegramService {
         combineState.waitingForAnimationPrompt = false;
         this.combineAndAnimateState.set(user.telegram_id, combineState);
         
-        await this.sendMessage(ctx, 'Объединяю фото и готовлю видео, это займет до 5 минут...');
+        // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
         await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
         return;
       }
@@ -2857,11 +2857,11 @@ ${packageListText}
         this.combineAndAnimatePhotos.delete(user.telegram_id);
         this.combineAndAnimateState.delete(user.telegram_id);
         
-        // Объединенное сообщение о промпте, создании заказа и начале генерации
+        // Сообщение о создании заказа и начале обработки
         const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip' || !originalAnimationPrompt) 
           ? 'люди машут руками, улыбаются друг другу, легкие движения и эффект дыхания' 
           : originalAnimationPrompt;
-        await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт: "${displayPrompt}"\n\n✅ Заказ создан\n🎬 Начинаю оживление фото...\n\n⏳ Это займет до 5 минут.`);
+        await this.sendMessage(ctx, `🔀 Объединяю фото и готовлю видео...\n\n🎬 Промпт для анимации: "${displayPrompt}"\n\n✅ Заказ создан\n\n⏳ Обработка займет до 5 минут.`);
       
         // Запускаем обработку заказа (списание оживлений произойдет при успешном оживлении)
         const { ProcessorService } = await import('./processor');

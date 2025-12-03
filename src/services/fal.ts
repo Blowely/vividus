@@ -86,6 +86,13 @@ export class FalService {
       return 'Сервис временно недоступен. Пожалуйста, попробуйте позже.';
     }
     
+    // Ошибка таймаута
+    if (errorLower.includes('timeout') || 
+        errorLower.includes('timed out') ||
+        errorLower.includes('заняло слишком много времени')) {
+      return 'Объединение фото заняло слишком много времени. Пожалуйста, попробуйте позже или используйте другие фото.';
+    }
+    
     return errorMessage;
   }
 
@@ -633,20 +640,26 @@ export class FalService {
       
       // Используем Nano Banana Pro Edit для объединения двух изображений
       // Этот endpoint специально предназначен для работы с несколькими референсными изображениями
-      const result = await fal.subscribe('fal-ai/nano-banana-pro/edit', {
-        input: {
-          prompt: prompt,
-          image_urls: [imageUrl1, imageUrl2] // Массив из двух изображений
-        },
-        logs: true,
-        onQueueUpdate: (update) => {
-          if (update.status === 'IN_PROGRESS') {
-            update.logs?.map((log) => log.message).forEach((msg) => {
-              console.log('Nano Banana Pro Edit log:', msg);
-            });
+      // Увеличиваем таймаут до 5 минут (300 секунд) для долгих операций
+      const result = await Promise.race([
+        fal.subscribe('fal-ai/nano-banana-pro/edit', {
+          input: {
+            prompt: prompt,
+            image_urls: [imageUrl1, imageUrl2] // Массив из двух изображений
+          },
+          logs: true,
+          onQueueUpdate: (update) => {
+            if (update.status === 'IN_PROGRESS') {
+              update.logs?.map((log) => log.message).forEach((msg) => {
+                console.log('Nano Banana Pro Edit log:', msg);
+              });
+            }
           }
-        }
-      });
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TimeoutError: Promise timed out after 300000 milliseconds')), 300000) // 5 минут
+        )
+      ]) as any;
 
       console.log('Nano Banana Pro Edit response:', result.data);
       console.log('Request ID:', result.requestId);
@@ -663,6 +676,13 @@ export class FalService {
     } catch (error: any) {
       console.error('Error combining images:', error);
       console.error('Error details:', error.response?.data || error.body || error.message);
+      
+      // Обработка ошибки таймаута
+      if (error.message?.includes('TimeoutError') || error.message?.includes('timed out') || error.name === 'TimeoutError') {
+        const timeoutError = new Error('Объединение фото заняло слишком много времени. Пожалуйста, попробуйте позже или используйте другие фото.');
+        (timeoutError as any).isTimeoutError = true;
+        throw timeoutError;
+      }
       
       // Извлекаем сообщение об ошибке из разных форматов ответа fal.ai
       let errorMessage: string = 'Failed to combine images';

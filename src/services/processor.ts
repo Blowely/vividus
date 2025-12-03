@@ -2055,6 +2055,18 @@ export class ProcessorService {
             continue;
           }
           
+          // Проверяем, является ли это ошибкой таймаута
+          const isTimeoutError = error?.isTimeoutError || 
+                                 error?.message?.includes('TimeoutError') || 
+                                 error?.message?.includes('timed out') ||
+                                 error?.name === 'TimeoutError';
+          
+          // Для ошибок таймаута не делаем retry, так как это не поможет
+          if (isTimeoutError) {
+            console.error(`Timeout error combining images (attempt ${combineRetryCount + 1}/${maxCombineRetries + 1}):`, error);
+            throw error;
+          }
+          
           // Для других ошибок или если попытки закончились - пробрасываем ошибку дальше
           throw error;
         }
@@ -2074,14 +2086,14 @@ export class ProcessorService {
       // Сохраняем URL объединенного изображения в базе
       await this.orderService.updateOrderCombinedImage(orderId, combinedImageS3Url);
       
-      await this.notifyUser(telegramId, '✅ Фото объединены!\n\n🎬 Шаг 2/2: Оживляю фото...');
-      
       // Шаг 2: Оживляем объединенное фото через fal.ai (MiniMax Hailuo)
       const animationPrompt = order.animation_prompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
       
       console.log(`Animating combined image with prompt: ${animationPrompt}`);
       
-      // Отправляем прогресс-бар СРАЗУ, до вызова API (чтобы пользователь видел его сразу)
+      // Отправляем сообщение о начале шага 2 и прогресс-бар СРАЗУ, до вызова API
+      await this.notifyUser(telegramId, '✅ Фото объединены!\n\n🎬 Шаг 2/2: Оживляю фото...');
+      
       let progressMessageId: number | null = null;
       try {
         const progressBar = this.createProgressBar(0);
