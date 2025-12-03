@@ -129,5 +129,41 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Обработка необработанных ошибок, связанных с PostgreSQL
+process.on('unhandledRejection', (reason, promise) => {
+  if (reason && typeof reason === 'object' && 'message' in reason) {
+    const error = reason as any;
+    if (error.message && (
+      error.message.includes('Connection terminated') ||
+      error.message.includes('Connection terminated unexpectedly') ||
+      error.code === 'ECONNRESET' ||
+      error.code === 'EPIPE'
+    )) {
+      console.error('⚠️ Unhandled PostgreSQL connection error (will retry on next query):', error.message);
+      // Не завершаем процесс, пул обработает это автоматически
+      return;
+    }
+  }
+  // Для других ошибок логируем, но не завершаем процесс
+  console.error('⚠️ Unhandled rejection:', reason);
+});
+
+// Обработка необработанных исключений
+process.on('uncaughtException', (error) => {
+  if (error.message && (
+    error.message.includes('Connection terminated') ||
+    error.message.includes('Connection terminated unexpectedly') ||
+    error.code === 'ECONNRESET' ||
+    error.code === 'EPIPE'
+  )) {
+    console.error('⚠️ Uncaught PostgreSQL connection error (will retry on next query):', error.message);
+    // Не завершаем процесс, пул обработает это автоматически
+    return;
+  }
+  // Для критических ошибок логируем и завершаем процесс
+  console.error('❌ Uncaught exception:', error);
+  process.exit(1);
+});
+
 const app = new App();
 app.start();
