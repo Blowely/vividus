@@ -177,7 +177,9 @@ export class TelegramService {
     this.bot.command('orders', this.showUserOrders.bind(this));
     
     // Analytics command (admin only)
-    this.bot.command('stats', this.showAnalytics.bind(this));
+    this.bot.command('stats', async (ctx) => {
+      await this.showAnalytics(ctx, 0);
+    });
     
     // Photo handler
     this.bot.on('photo', this.handlePhoto.bind(this));
@@ -1061,7 +1063,7 @@ export class TelegramService {
       }
       
       if (text === '📊 Статистика' && this.isAdmin(ctx.from!.id)) {
-        await this.showAnalytics(ctx);
+        await this.showAnalytics(ctx, 0);
         return;
       }
       
@@ -1360,7 +1362,7 @@ export class TelegramService {
         await this.handleHelp(ctx);
         break;
       case 'show_stats':
-        await this.showAnalytics(ctx);
+        await this.showAnalytics(ctx, 0);
         break;
       case 'mock_payment':
         await this.handleMockPayment(ctx);
@@ -1457,7 +1459,10 @@ export class TelegramService {
         break;
       case 'back_to_stats':
         await safeAnswerCbQuery('◀️');
-        await this.showAnalytics(ctx);
+        await this.showAnalytics(ctx, 0);
+        break;
+      case 'stats_page_info':
+        await safeAnswerCbQuery('ℹ️ Информация о странице');
         break;
       default:
         if (callbackData.startsWith('buy_and_process_combine_')) {
@@ -1493,6 +1498,17 @@ export class TelegramService {
           } else {
             console.error(`Invalid buy_and_process callback format: ${callbackData}`);
             await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
+          }
+        } else if (callbackData.startsWith('stats_page_')) {
+          const pageStr = callbackData.replace('stats_page_', '');
+          if (pageStr === 'info') {
+            await safeAnswerCbQuery('ℹ️ Информация о странице');
+          } else {
+            const page = parseInt(pageStr, 10);
+            if (!isNaN(page) && page >= 0) {
+              await safeAnswerCbQuery('📄');
+              await this.showAnalytics(ctx, page);
+            }
           }
         } else if (callbackData.startsWith('campaign_stats_')) {
           const campaignName = callbackData.replace('campaign_stats_', '');
@@ -1748,8 +1764,8 @@ export class TelegramService {
       await this.analyticsService.deleteCampaign(campaignName);
       await ctx.answerCbQuery('✅ Кампания удалена');
       await this.sendMessage(ctx, `✅ Кампания "${campaignName}" удалена.\n\nОна больше не будет отображаться в статистике, но данные сохранятся в базе.`);
-      // Обновляем список аналитики
-      await this.showAnalytics(ctx);
+      // Обновляем список аналитики (возвращаемся на первую страницу)
+      await this.showAnalytics(ctx, 0);
     } catch (error) {
       console.error('Error deleting campaign:', error);
       await ctx.answerCbQuery('❌ Ошибка при удалении');
@@ -1818,7 +1834,7 @@ export class TelegramService {
     }
   }
 
-  private async showAnalytics(ctx: Context) {
+  private async showAnalytics(ctx: Context, page: number = 0) {
     if (!this.isAdmin(ctx.from!.id)) {
       await this.sendMessage(ctx, '❌ У вас нет прав для просмотра статистики');
       return;
@@ -1833,10 +1849,19 @@ export class TelegramService {
         return;
       }
 
+      const itemsPerPage = 30;
+      const totalPages = Math.ceil(analytics.length / itemsPerPage);
+      const currentPage = Math.max(0, Math.min(page, totalPages - 1));
+      const startIndex = currentPage * itemsPerPage;
+      const endIndex = Math.min(startIndex + itemsPerPage, analytics.length);
+      const pageAnalytics = analytics.slice(startIndex, endIndex);
+
       let message = `📊 Статистика по кампаниям\n\n📅 Статистика на ${this.getCurrentDateTime()}:\n\n`;
+      message += `📄 Страница ${currentPage + 1} из ${totalPages} (показано ${pageAnalytics.length} из ${analytics.length})\n\n`;
+      
       const inlineKeyboard: any[] = [];
       
-      for (const stat of analytics) {
+      for (const stat of pageAnalytics) {
         // Экранируем специальные символы Markdown в названии кампании
         const campaignName = stat.campaign_name
           .replace(/\*/g, '\\*')
@@ -1869,11 +1894,31 @@ export class TelegramService {
         message += `🎬 Успешных оживлений: ${stat.completed_orders}${formatTodayChange(today.completed_orders)}\n`;
         message += `📈 Конверсия: ${stat.conversion_rate}%\n\n`;
         
-        // Добавляем кнопки для детальной статистики и удаления
+        // Добавляем кнопки для удаления и детальной статистики (поменяны местами)
         inlineKeyboard.push([
-          Markup.button.callback(`📊 Детали: ${stat.campaign_name}`, `campaign_stats_${stat.campaign_name}`),
-          Markup.button.callback(`🗑️ Удалить`, `delete_campaign_${stat.campaign_name}`)
+          Markup.button.callback(`🗑️ Удалить`, `delete_campaign_${stat.campaign_name}`),
+          Markup.button.callback(`📊 Детали: ${stat.campaign_name}`, `campaign_stats_${stat.campaign_name}`)
         ]);
+      }
+      
+      // Добавляем кнопки пагинации
+      if (totalPages > 1) {
+        const paginationButtons: any[] = [];
+        
+        // Кнопка "Назад"
+        if (currentPage > 0) {
+          paginationButtons.push(Markup.button.callback('◀️ Назад', `stats_page_${currentPage - 1}`));
+        }
+        
+        // Информация о странице
+        paginationButtons.push(Markup.button.callback(`${currentPage + 1}/${totalPages}`, 'stats_page_info'));
+        
+        // Кнопка "Вперед"
+        if (currentPage < totalPages - 1) {
+          paginationButtons.push(Markup.button.callback('Вперед ▶️', `stats_page_${currentPage + 1}`));
+        }
+        
+        inlineKeyboard.push(paginationButtons);
       }
       
       // Добавляем кнопку для просмотра удаленных кампаний
