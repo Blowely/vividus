@@ -944,36 +944,39 @@ export class TelegramService {
       const checkAnimateV2State = this.animateV2State.get(checkUserId);
       const isAnimateV2Active = checkAnimateV2State && (checkAnimateV2State.waitingForPhoto || checkAnimateV2State.waitingForPrompt);
       
-      // Проверяем, не является ли введенный текст текстом кнопки
-      if (this.getButtonTexts().includes(text)) {
-        await this.sendMessage(ctx, '❌ Это текст кнопки. Пожалуйста, введите описание анимации словами.\n\nНапример: "люди улыбаются и машут руками"');
-        return;
-      }
-      
       // Проверяем, ожидает ли пользователь промпт для анимации в режиме combine_and_animate
       // ТОЛЬКО если режим "Оживить фото" НЕ активен
       if (!isAnimateV2Active) {
         const combineState = this.combineAndAnimateState.get(user.telegram_id);
         if (combineState && combineState.waitingForAnimationPrompt) {
-          const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
-          
-          if (photos.length < 2) {
-            await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
+          // Проверяем, не является ли введенный текст текстом кнопки
+          if (this.getButtonTexts().includes(text)) {
+            // Если это текст кнопки, очищаем контекст и запускаем флоу кнопки
             this.combineAndAnimatePhotos.delete(user.telegram_id);
             this.combineAndAnimateState.delete(user.telegram_id);
+            // Продолжаем обработку - кнопки обработаются ниже в коде
+          } else {
+            // Это нормальный промпт
+            const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
+            
+            if (photos.length < 2) {
+              await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
+              this.combineAndAnimatePhotos.delete(user.telegram_id);
+              this.combineAndAnimateState.delete(user.telegram_id);
+              return;
+            }
+            
+            // Берем только первые 2 фото
+            const twoPhotos = photos.slice(0, 2);
+            
+            combineState.animationPrompt = text;
+            combineState.waitingForAnimationPrompt = false;
+            this.combineAndAnimateState.set(user.telegram_id, combineState);
+            
+            // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
+            await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
             return;
           }
-          
-          // Берем только первые 2 фото
-          const twoPhotos = photos.slice(0, 2);
-          
-          combineState.animationPrompt = text;
-          combineState.waitingForAnimationPrompt = false;
-          this.combineAndAnimateState.set(user.telegram_id, combineState);
-          
-          // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
-          await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
-          return;
         }
       } else {
         // Если активен режим "Оживить фото", очищаем застрявшее состояние combine_and_animate
@@ -1086,48 +1089,59 @@ export class TelegramService {
         return;
       }
       
-      // Проверяем, не является ли введенный текст текстом кнопки
-      if (this.getButtonTexts().includes(text)) {
-        await this.sendMessage(ctx, '❌ Это текст кнопки. Пожалуйста, введите описание анимации словами.\n\nНапример: "люди улыбаются и машут руками"');
-        return;
-      }
-      
       // Проверяем, ожидает ли пользователь ввода промпта для "Оживить v2"
       const userId = ctx.from!.id;
       const animateV2State = this.animateV2State.get(userId);
       if (animateV2State && animateV2State.waitingForPrompt && animateV2State.photoFileId) {
-        console.log(`✍️ Получен промпт для Оживить v2 от пользователя ${userId}: "${text}"`);
-        await this.processAnimateV2Prompt(ctx, user, animateV2State.photoFileId, text);
-        return;
+        // Проверяем, не является ли введенный текст текстом кнопки
+        if (this.getButtonTexts().includes(text)) {
+          // Если это текст кнопки, очищаем контекст и запускаем флоу кнопки
+          this.animateV2State.delete(userId);
+          // Продолжаем обработку - кнопки обработаются ниже в коде
+        } else {
+          // Это нормальный промпт
+          console.log(`✍️ Получен промпт для Оживить v2 от пользователя ${userId}: "${text}"`);
+          await this.processAnimateV2Prompt(ctx, user, animateV2State.photoFileId, text);
+          return;
+        }
       }
       
       // Check if user has pending photo
       const fileId = this.pendingPrompts.get(user.telegram_id);
-      if (!fileId) {
-        // User doesn't have pending photo, treat as regular message
-        await this.sendMessage(ctx, '📸 Отправьте фото для создания анимации!');
-        return;
-      }
-      
-      // Проверяем, является ли это промптом для объединения (старый режим merge)
-      // ВАЖНО: Проверяем не только prompt, но и наличие первого фото в pendingMergeFirstPhoto
-      const promptData = this.pendingPromptsData.get(user.telegram_id);
-      const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
-      if (promptData && promptData.prompt.startsWith('merge:') && firstPhotoId && firstPhotoId !== 'MERGE_MODE_WAITING') {
-        // Это промпт для объединяющего заказа (старый режим merge)
-        await this.processMergePrompt(ctx, user, text);
-      } else {
-        // Обычный промпт - очищаем застрявшее состояние merge если есть
-        if (firstPhotoId || (promptData && promptData.prompt.startsWith('merge:'))) {
-          console.log(`⚠️ Очищаю застрявшее состояние merge при обработке обычного промпта для пользователя ${user.telegram_id}`);
+      if (fileId) {
+        // Проверяем, не является ли введенный текст текстом кнопки
+        if (this.getButtonTexts().includes(text)) {
+          // Если это текст кнопки, очищаем контекст и запускаем флоу кнопки
+          this.pendingPrompts.delete(user.telegram_id);
+          this.pendingPromptsData.delete(user.telegram_id);
           this.pendingMergeFirstPhoto.delete(user.telegram_id);
-          if (promptData && promptData.prompt.startsWith('merge:')) {
-            this.pendingPromptsData.delete(user.telegram_id);
+          // Продолжаем обработку - кнопки обработаются ниже в коде
+        } else {
+          // Проверяем, является ли это промптом для объединения (старый режим merge)
+          // ВАЖНО: Проверяем не только prompt, но и наличие первого фото в pendingMergeFirstPhoto
+          const promptData = this.pendingPromptsData.get(user.telegram_id);
+          const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
+          if (promptData && promptData.prompt.startsWith('merge:') && firstPhotoId && firstPhotoId !== 'MERGE_MODE_WAITING') {
+            // Это промпт для объединяющего заказа (старый режим merge)
+            await this.processMergePrompt(ctx, user, text);
+            return;
+          } else {
+            // Обычный промпт - очищаем застрявшее состояние merge если есть
+            if (firstPhotoId || (promptData && promptData.prompt.startsWith('merge:'))) {
+              console.log(`⚠️ Очищаю застрявшее состояние merge при обработке обычного промпта для пользователя ${user.telegram_id}`);
+              this.pendingMergeFirstPhoto.delete(user.telegram_id);
+              if (promptData && promptData.prompt.startsWith('merge:')) {
+                this.pendingPromptsData.delete(user.telegram_id);
+              }
+            }
+            // Обычный промпт
+            await this.processPrompt(ctx, user, text);
+            return;
           }
         }
-        // Обычный промпт
-        await this.processPrompt(ctx, user, text);
       }
+      
+      // Если нет pending фото и не ожидается промпт, но пользователь ввел текст кнопки - это нормально, кнопки обработаются ниже
       
     } catch (error) {
       console.error('Error handling text:', error);
