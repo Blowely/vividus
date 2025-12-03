@@ -1308,6 +1308,23 @@ export class TelegramService {
   private async handleCallbackQuery(ctx: Context) {
     const callbackData = (ctx.callbackQuery as any)['data'];
     
+    // Вспомогательная функция для безопасного ответа на callback query
+    const safeAnswerCbQuery = async (text?: string) => {
+      try {
+        await ctx.answerCbQuery(text);
+      } catch (error: any) {
+        // Игнорируем ошибку "query is too old" - это нормально, если обработка заняла много времени
+        if (error?.response?.description?.includes('query is too old') || 
+            error?.response?.description?.includes('response timeout expired') ||
+            error?.response?.description?.includes('query ID is invalid')) {
+          console.log(`⚠️ Callback query expired (это нормально для долгих операций): ${callbackData}`);
+        } else {
+          // Для других ошибок логируем
+          console.error('Error answering callback query:', error);
+        }
+      }
+    };
+    
     switch (callbackData) {
       case 'my_orders':
         await this.showUserOrders(ctx);
@@ -1409,10 +1426,10 @@ export class TelegramService {
         await this.handleSettings(ctx);
         break;
       case 'buy_generations_stars':
-        await ctx.answerCbQuery('Оплата звёздами пока не доступна');
+        await safeAnswerCbQuery('Оплата звёздами пока не доступна');
         break;
       case 'back_to_stats':
-        await ctx.answerCbQuery('◀️');
+        await safeAnswerCbQuery('◀️');
         await this.showAnalytics(ctx);
         break;
       default:
@@ -1427,11 +1444,11 @@ export class TelegramService {
               await this.handlePurchaseGenerationsAndProcessCombine(ctx, count, price);
             } else {
               console.error(`Invalid buy_and_process_combine callback: ${callbackData}`);
-              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+              await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
             }
           } else {
             console.error(`Invalid buy_and_process_combine callback format: ${callbackData}`);
-            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
           }
         } else if (callbackData.startsWith('buy_and_process_')) {
           // Формат: buy_and_process_{count}_{price}
@@ -1444,11 +1461,11 @@ export class TelegramService {
               await this.handlePurchaseGenerationsAndProcess(ctx, count, price);
             } else {
               console.error(`Invalid buy_and_process callback: ${callbackData}`);
-              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+              await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
             }
           } else {
             console.error(`Invalid buy_and_process callback format: ${callbackData}`);
-            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
           }
         } else if (callbackData.startsWith('campaign_stats_')) {
           const campaignName = callbackData.replace('campaign_stats_', '');
@@ -1465,7 +1482,7 @@ export class TelegramService {
           const orderId = callbackData.replace('pay_', '');
           await this.handlePayOrder(ctx, orderId);
         } else if (callbackData.startsWith('buy_generations_stars_')) {
-          await ctx.answerCbQuery('Оплата звёздами пока не доступна');
+          await safeAnswerCbQuery('Оплата звёздами пока не доступна');
         } else if (callbackData.startsWith('buy_generations_')) {
           // Формат: buy_generations_{count}_{price}
           const parts = callbackData.replace('buy_generations_', '').split('_');
@@ -1476,17 +1493,18 @@ export class TelegramService {
               await this.handlePurchaseGenerations(ctx, count, price);
             } else {
               console.error(`Invalid buy_generations callback: ${callbackData}`);
-              await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+              await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
             }
           } else {
             console.error(`Invalid buy_generations callback format: ${callbackData}`);
-            await ctx.answerCbQuery('❌ Ошибка: неверный формат данных');
+            await safeAnswerCbQuery('❌ Ошибка: неверный формат данных');
           }
         }
         break;
     }
     
-    await ctx.answerCbQuery();
+    // Пытаемся ответить на callback query, но не критично если не получится
+    await safeAnswerCbQuery();
   }
 
   private async sendPaymentRequest(ctx: Context, order: any, customPrompt?: string) {
