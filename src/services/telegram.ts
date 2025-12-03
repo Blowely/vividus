@@ -372,6 +372,14 @@ export class TelegramService {
       if (isAnimateV2Active) {
         console.log(`✅ Режим Оживить v2 активен для пользователя ${userId}`);
         
+        // ВАЖНО: Очищаем застрявшее состояние combine_and_animate, если оно есть
+        const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
+        if (combinePhotos !== undefined) {
+          console.log(`🧹 Очищаю застрявшее состояние combine_and_animate для пользователя ${user.telegram_id} - активен режим "Оживить фото"`);
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+        }
+        
         // Проверяем наличие caption (текста, прикрепленного к фото)
         const caption = (ctx.message as any)['caption'];
         
@@ -435,10 +443,9 @@ export class TelegramService {
       }
       
       // Проверяем, находимся ли мы в режиме объединить и оживить
-      // ВАЖНО: Проверяем только если пользователь действительно в этом режиме
-      // Если активен режим "Оживить фото", игнорируем combine_and_animate
+      // Только если НЕ активен режим "Оживить фото"
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
-      if (combinePhotos !== undefined && !isAnimateV2Active) {
+      if (combinePhotos !== undefined) {
         // Добавляем фото в список (ровно 2 фото)
         if (combinePhotos.length < 2) {
           combinePhotos.push(fileId);
@@ -456,13 +463,6 @@ export class TelegramService {
           await this.sendMessage(ctx, 'ℹ️ Уже получено 2 фото. Если случайно отправили больше — бот возьмёт первые два.');
           return;
         }
-      }
-      
-      // Если был активен режим combine_and_animate, но пользователь переключился на другую функцию, очищаем состояние
-      if (combinePhotos !== undefined && isAnimateV2Active) {
-        console.log(`🧹 Очищаю застрявшее состояние combine_and_animate для пользователя ${user.telegram_id} - активен режим "Оживить фото"`);
-        this.combineAndAnimatePhotos.delete(user.telegram_id);
-        this.combineAndAnimateState.delete(user.telegram_id);
       }
       
       // Проверяем, находимся ли мы в режиме объединения (старый режим merge)
@@ -557,9 +557,23 @@ export class TelegramService {
       const animateV2State = this.animateV2State.get(userId);
       const isAnimateV2Active = animateV2State && animateV2State.waitingForPhoto;
       
+      // ВАЖНО: Если активен режим "Оживить фото", полностью игнорируем combine_and_animate
+      if (isAnimateV2Active) {
+        // Если есть застрявшее состояние combine_and_animate, очищаем его
+        const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
+        if (combinePhotos !== undefined) {
+          console.log(`🧹 Очищаю застрявшее состояние combine_and_animate для пользователя ${user.telegram_id} в медиа-группе - активен режим "Оживить фото"`);
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+        }
+        // Не обрабатываем медиа-группу как combine_and_animate, возвращаемся
+        return;
+      }
+      
       // Проверяем, находимся ли мы в режиме объединить и оживить
+      // Только если НЕ активен режим "Оживить фото"
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
-      if (combinePhotos !== undefined && !isAnimateV2Active) {
+      if (combinePhotos !== undefined) {
         // Используем mediaGroupId для группировки фото из одного альбома
         // Создаем ключ для хранения фото из этой медиа-группы
         const mediaGroupKey = `combine_${user.telegram_id}_${mediaGroupId}`;
@@ -909,28 +923,45 @@ export class TelegramService {
         return;
       }
       
+      // ВАЖНО: Сначала проверяем, активен ли режим "Оживить фото"
+      // Если активен, НЕ обрабатываем combine_and_animate
+      const checkUserId = ctx.from!.id;
+      const checkAnimateV2State = this.animateV2State.get(checkUserId);
+      const isAnimateV2Active = checkAnimateV2State && (checkAnimateV2State.waitingForPhoto || checkAnimateV2State.waitingForPrompt);
+      
       // Проверяем, ожидает ли пользователь промпт для анимации в режиме combine_and_animate
-      const combineState = this.combineAndAnimateState.get(user.telegram_id);
-      if (combineState && combineState.waitingForAnimationPrompt) {
-        const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
-        
-        if (photos.length < 2) {
-          await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
-          this.combineAndAnimatePhotos.delete(user.telegram_id);
-          this.combineAndAnimateState.delete(user.telegram_id);
+      // ТОЛЬКО если режим "Оживить фото" НЕ активен
+      if (!isAnimateV2Active) {
+        const combineState = this.combineAndAnimateState.get(user.telegram_id);
+        if (combineState && combineState.waitingForAnimationPrompt) {
+          const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
+          
+          if (photos.length < 2) {
+            await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
+            this.combineAndAnimatePhotos.delete(user.telegram_id);
+            this.combineAndAnimateState.delete(user.telegram_id);
+            return;
+          }
+          
+          // Берем только первые 2 фото
+          const twoPhotos = photos.slice(0, 2);
+          
+          combineState.animationPrompt = text;
+          combineState.waitingForAnimationPrompt = false;
+          this.combineAndAnimateState.set(user.telegram_id, combineState);
+          
+          // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
+          await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
           return;
         }
-        
-        // Берем только первые 2 фото
-        const twoPhotos = photos.slice(0, 2);
-        
-        combineState.animationPrompt = text;
-        combineState.waitingForAnimationPrompt = false;
-        this.combineAndAnimateState.set(user.telegram_id, combineState);
-        
-        // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
-        await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
-        return;
+      } else {
+        // Если активен режим "Оживить фото", очищаем застрявшее состояние combine_and_animate
+        const combineState = this.combineAndAnimateState.get(user.telegram_id);
+        if (combineState && combineState.waitingForAnimationPrompt) {
+          console.log(`🧹 Очищаю застрявшее состояние combine_and_animate (waitingForAnimationPrompt) для пользователя ${user.telegram_id} - активен режим "Оживить фото"`);
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+        }
       }
       
       // Обрабатываем команды от reply кнопок
