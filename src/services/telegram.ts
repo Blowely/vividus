@@ -365,7 +365,9 @@ export class TelegramService {
       console.log(`   Все ключи в animateV2State Map:`, Array.from(this.animateV2State.keys()));
       const animateV2State = this.animateV2State.get(userId);
       console.log(`   animateV2State для ${userId}:`, JSON.stringify(animateV2State));
-      if (animateV2State && animateV2State.waitingForPhoto) {
+      const isAnimateV2Active = animateV2State && animateV2State.waitingForPhoto;
+      
+      if (isAnimateV2Active) {
         console.log(`✅ Режим Оживить v2 активен для пользователя ${userId}`);
         
         // Проверяем наличие caption (текста, прикрепленного к фото)
@@ -431,8 +433,10 @@ export class TelegramService {
       }
       
       // Проверяем, находимся ли мы в режиме объединить и оживить
+      // ВАЖНО: Проверяем только если пользователь действительно в этом режиме
+      // Если активен режим "Оживить фото", игнорируем combine_and_animate
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
-      if (combinePhotos !== undefined) {
+      if (combinePhotos !== undefined && !isAnimateV2Active) {
         // Добавляем фото в список (ровно 2 фото)
         if (combinePhotos.length < 2) {
           combinePhotos.push(fileId);
@@ -450,6 +454,13 @@ export class TelegramService {
           await this.sendMessage(ctx, 'ℹ️ Уже получено 2 фото. Если случайно отправили больше — бот возьмёт первые два.');
           return;
         }
+      }
+      
+      // Если был активен режим combine_and_animate, но пользователь переключился на другую функцию, очищаем состояние
+      if (combinePhotos !== undefined && isAnimateV2Active) {
+        console.log(`🧹 Очищаю застрявшее состояние combine_and_animate для пользователя ${user.telegram_id} - активен режим "Оживить фото"`);
+        this.combineAndAnimatePhotos.delete(user.telegram_id);
+        this.combineAndAnimateState.delete(user.telegram_id);
       }
       
       // Проверяем, находимся ли мы в режиме объединения (старый режим merge)
@@ -539,9 +550,14 @@ export class TelegramService {
 
   private async handleMediaGroupPhoto(ctx: Context, user: any, fileId: string, mediaGroupId: string): Promise<void> {
     try {
+      // Проверяем, активен ли режим "Оживить фото" - если да, не обрабатываем как combine_and_animate
+      const userId = ctx.from!.id;
+      const animateV2State = this.animateV2State.get(userId);
+      const isAnimateV2Active = animateV2State && animateV2State.waitingForPhoto;
+      
       // Проверяем, находимся ли мы в режиме объединить и оживить
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
-      if (combinePhotos !== undefined) {
+      if (combinePhotos !== undefined && !isAnimateV2Active) {
         // Используем mediaGroupId для группировки фото из одного альбома
         // Создаем ключ для хранения фото из этой медиа-группы
         const mediaGroupKey = `combine_${user.telegram_id}_${mediaGroupId}`;
@@ -920,6 +936,15 @@ export class TelegramService {
       if (text === '🎬 Оживить фото') {
         console.log(`👤 Пользователь ${ctx.from!.id} нажал "Оживить фото"`);
         const userId = ctx.from!.id;
+        
+        // Очищаем состояние "Объединить и оживить", если оно было активно
+        const user = await this.userService.getOrCreateUser(ctx.from!);
+        if (this.combineAndAnimatePhotos.has(user.telegram_id) || this.combineAndAnimateState.has(user.telegram_id)) {
+          console.log(`🧹 Очищаю состояние combine_and_animate для пользователя ${user.telegram_id} при переключении на "Оживить фото"`);
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+        }
+        
         const state = { waitingForPhoto: true, waitingForPrompt: false };
         this.animateV2State.set(userId, state);
         console.log(`✅ Состояние animateV2State установлено для пользователя ${userId}`);
@@ -936,6 +961,17 @@ export class TelegramService {
           await this.sendMessage(ctx, '❌ Эта функция доступна только администраторам.');
           return;
         }
+        
+        // Очищаем состояние "Оживить фото", если оно было активно
+        const userId = ctx.from!.id;
+        if (this.animateV2State.has(userId)) {
+          console.log(`🧹 Очищаю состояние animateV2State для пользователя ${userId} при переключении на "Объединить и оживить"`);
+          this.animateV2State.delete(userId);
+        }
+        
+        // Очищаем pendingPrompts для обычного оживления
+        this.pendingPrompts.delete(user.telegram_id);
+        this.pendingPromptsData.delete(user.telegram_id);
         
         // Инициализируем режим объединить и оживить
         this.combineAndAnimatePhotos.set(user.telegram_id, []);
@@ -1321,6 +1357,28 @@ export class TelegramService {
         }
         break;
       case 'back_to_menu':
+        // Очищаем все активные состояния при возврате в меню
+        const userForMenu = await this.userService.getOrCreateUser(ctx.from!);
+        const userIdForMenu = ctx.from!.id;
+        
+        // Очищаем состояние combine_and_animate
+        if (this.combineAndAnimatePhotos.has(userForMenu.telegram_id) || this.combineAndAnimateState.has(userForMenu.telegram_id)) {
+          console.log(`🧹 Очищаю состояние combine_and_animate для пользователя ${userForMenu.telegram_id} при возврате в меню`);
+          this.combineAndAnimatePhotos.delete(userForMenu.telegram_id);
+          this.combineAndAnimateState.delete(userForMenu.telegram_id);
+        }
+        
+        // Очищаем состояние animateV2
+        if (this.animateV2State.has(userIdForMenu)) {
+          console.log(`🧹 Очищаю состояние animateV2State для пользователя ${userIdForMenu} при возврате в меню`);
+          this.animateV2State.delete(userIdForMenu);
+        }
+        
+        // Очищаем pendingPrompts
+        this.pendingPrompts.delete(userForMenu.telegram_id);
+        this.pendingPromptsData.delete(userForMenu.telegram_id);
+        this.pendingMergeFirstPhoto.delete(userForMenu.telegram_id);
+        
         // Удаляем inline клавиатуру и показываем главное меню с reply клавиатурой
         try {
           await ctx.reply('◀️ Возвращаюсь в главное меню...', {

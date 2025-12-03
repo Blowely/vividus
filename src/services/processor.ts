@@ -407,8 +407,10 @@ export class ProcessorService {
           }
           
           // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
+          // Для combine_and_animate оживления списываются только после успешной генерации,
+          // поэтому при ошибках их не нужно возвращать (они не были списаны)
           const hasPayment = await this.orderService.hasPayment(orderId);
-          if (!hasPayment) {
+          if (!hasPayment && order.order_type !== 'combine_and_animate') {
             await this.userService.returnGenerations(user.telegram_id, 1);
             const newBalance = await this.userService.getUserGenerations(user.telegram_id);
             await this.notifyUser(user.telegram_id, `💼 Оживление фотографии возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
@@ -1462,8 +1464,11 @@ export class ProcessorService {
         return;
       }
 
+      // Для combine_and_animate оживления списываются только после успешной генерации,
+      // поэтому при ошибках их не нужно возвращать (они не были списаны)
+      // Для обычных заказов возвращаем оживления при ошибках
       const hasPayment = await this.orderService.hasPayment(orderId);
-      if (!hasPayment) {
+      if (!hasPayment && order.order_type !== 'combine_and_animate') {
         await this.userService.returnGenerations(telegramId, 1);
         const newBalance = await this.userService.getUserGenerations(telegramId);
         await this.notifyUser(telegramId, `💼 Оживление возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
@@ -1583,9 +1588,11 @@ export class ProcessorService {
       await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, error);
 
       // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
+      // Для combine_and_animate оживления списываются только после успешной генерации,
+      // поэтому при ошибках их не нужно возвращать (они не были списаны)
       const order = await this.orderService.getOrder(orderId);
       const hasPayment = await this.orderService.hasPayment(orderId);
-      if (order && !hasPayment) {
+      if (order && !hasPayment && order.order_type !== 'combine_and_animate') {
         // Заказ был оплачен генерациями - возвращаем их
         await this.userService.returnGenerations(telegramId, 1);
         const newBalance = await this.userService.getUserGenerations(telegramId);
@@ -2185,6 +2192,7 @@ export class ProcessorService {
             }
             
             // Для других ошибок или если попытки закончились - обновляем статус заказа на failed
+            // Для combine_and_animate оживления не возвращаем, так как они списываются только после успешной генерации
             await this.orderService.updateOrderStatus(orderId, 'failed' as any);
             await this.notifyUser(telegramId, '❌ Произошла ошибка при оживлении фото. Попробуйте позже.');
             throw error;
@@ -2196,15 +2204,9 @@ export class ProcessorService {
       console.error(`Error processing combine_and_animate order ${orderId}:`, error);
       await this.orderService.updateOrderStatus(orderId, 'failed' as any);
       
+      // Для combine_and_animate оживления не возвращаем, так как они списываются только после успешной генерации
       const user = await this.userService.getUserById(order.user_id);
       if (user) {
-        const hasPayment = await this.orderService.hasPayment(orderId);
-        if (!hasPayment) {
-          await this.userService.returnGenerations(user.telegram_id, 1);
-          const newBalance = await this.userService.getUserGenerations(user.telegram_id);
-          await this.notifyUser(user.telegram_id, `💼 Генерация возвращена на ваш баланс.\n\nБаланс: ${newBalance} генераций`);
-        }
-        
         const errorMessage = error?.message || 'Произошла ошибка при обработке. Попробуйте позже.';
         await this.notifyUser(user.telegram_id, `❌ ${errorMessage}`);
       }
