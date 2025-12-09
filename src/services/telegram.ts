@@ -26,6 +26,7 @@ export class TelegramService {
   private userMessages: Map<number, { messageId: number; chatId: number }> = new Map(); // userId -> {messageId, chatId}
   private waitingForEmail: Set<number> = new Set(); // userId -> waiting for email input
   private animateV2State: Map<number, { waitingForPhoto: boolean; waitingForPrompt: boolean; photoFileId?: string }> = new Map(); // userId -> состояние для Оживить v2
+  private pendingPaymentPhotos: Map<number, { fileId: string; mode: 'animate_v2' | 'regular' }> = new Map(); // userId -> {fileId, mode} для продолжения после оплаты
 
   constructor() {
     this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
@@ -404,6 +405,29 @@ export class TelegramService {
           return;
         }
         
+        // Проверка баланса генераций
+        const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
+        if (userGenerations < 1) {
+          // Нет генераций - сохраняем фото и показываем меню покупки
+          this.pendingPaymentPhotos.set(userId, { fileId, mode: 'animate_v2' });
+          
+          // Синхронизируем с глобальным хранилищем для доступа из PaymentService
+          if (typeof (global as any).pendingPaymentPhotos === 'undefined') {
+            (global as any).pendingPaymentPhotos = new Map();
+          }
+          (global as any).pendingPaymentPhotos.set(user.telegram_id, { fileId, mode: 'animate_v2' });
+          
+          // Обновляем состояние animateV2State для последующей обработки
+          this.animateV2State.set(userId, { 
+            waitingForPhoto: false, 
+            waitingForPrompt: true, 
+            photoFileId: fileId 
+          });
+          
+          await this.showBuyGenerationsMenu(ctx, userGenerations);
+          return;
+        }
+        
         // Проверяем наличие caption (текста, прикрепленного к фото)
         const caption = (ctx.message as any)['caption'];
         
@@ -529,6 +553,25 @@ export class TelegramService {
         // Очищаем состояние и показываем ошибку
         this.pendingPrompts.delete(user.telegram_id);
         await this.sendMessage(ctx, validation.error!);
+        return;
+      }
+      
+      // Проверка баланса генераций
+      const userGenerations = await this.userService.getUserGenerations(user.telegram_id);
+      if (userGenerations < 1) {
+        // Нет генераций - сохраняем фото и показываем меню покупки
+        this.pendingPaymentPhotos.set(ctx.from!.id, { fileId, mode: 'regular' });
+        
+        // Синхронизируем с глобальным хранилищем для доступа из PaymentService
+        if (typeof (global as any).pendingPaymentPhotos === 'undefined') {
+          (global as any).pendingPaymentPhotos = new Map();
+        }
+        (global as any).pendingPaymentPhotos.set(user.telegram_id, { fileId, mode: 'regular' });
+        
+        // Сохраняем fileId для последующей обработки
+        this.pendingPrompts.set(user.telegram_id, fileId);
+        
+        await this.showBuyGenerationsMenu(ctx, userGenerations);
         return;
       }
       
@@ -852,6 +895,14 @@ export class TelegramService {
       if (!fileId) {
         await this.sendMessage(ctx, '❌ Фото не найдено. Отправьте фото заново!');
         return;
+      }
+      
+      // Очищаем сохраненное фото из глобального хранилища (если оно было)
+      if (typeof (global as any).pendingPaymentPhotos !== 'undefined') {
+        (global as any).pendingPaymentPhotos.delete(user.telegram_id);
+      }
+      if (ctx.from) {
+        this.pendingPaymentPhotos.delete(ctx.from.id);
       }
       
       // Очищаем застрявшее состояние merge, если оно есть (для обычного оживления не нужно)
@@ -1701,6 +1752,12 @@ export class TelegramService {
   private async processAnimateV2Prompt(ctx: Context, user: any, fileId: string, promptText: string): Promise<void> {
     try {
       const userId = ctx.from!.id;
+      
+      // Очищаем сохраненное фото из глобального хранилища (если оно было)
+      if (typeof (global as any).pendingPaymentPhotos !== 'undefined') {
+        (global as any).pendingPaymentPhotos.delete(user.telegram_id);
+      }
+      this.pendingPaymentPhotos.delete(userId);
       
       // Загружаем фото в S3 без обработки (для fal.ai отправляем как есть)
       const s3Url = await this.fileService.downloadTelegramFileToS3(fileId, true);
@@ -2879,17 +2936,151 @@ ${packageListText}
         const newBalance = await userService.getUserGenerations(telegramId);
         console.log(`✅ New balance: ${newBalance} generations`);
         
-        // Отправляем уведомление пользователю
-        try {
-          await this.bot.telegram.sendMessage(
-            telegramId,
-            `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото\n⭐ Оплачено: ${starsAmount} звёзд`
-          );
-        } catch (error: any) {
-          if (this.isBlockedError(error)) {
-            console.log(`Bot is blocked by user ${telegramId}, skipping notification`);
-          } else {
-            throw error;
+        // Проверяем, есть ли сохраненное фото для продолжения флоу
+        const pendingPhoto = this.pendingPaymentPhotos.get(telegramId);
+        
+        if (pendingPhoto) {
+          // Есть сохраненное фото - продолжаем флоу
+          console.log(`📸 Продолжаю флоу после оплаты для пользователя ${telegramId}, mode: ${pendingPhoto.mode}`);
+          
+          // Отправляем уведомление о пополнении
+          try {
+            await this.bot.telegram.sendMessage(
+              telegramId,
+              `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото\n⭐ Оплачено: ${starsAmount} звёзд`
+            );
+          } catch (error: any) {
+            if (this.isBlockedError(error)) {
+              console.log(`Bot is blocked by user ${telegramId}, skipping notification`);
+            } else {
+              throw error;
+            }
+          }
+          
+          // Продолжаем флоу в зависимости от режима
+          if (pendingPhoto.mode === 'animate_v2') {
+            // Режим "Оживить фото"
+            this.animateV2State.set(telegramId, { 
+              waitingForPhoto: false, 
+              waitingForPrompt: true, 
+              photoFileId: pendingPhoto.fileId 
+            });
+            
+            const promptMessage = `📸 Фото получено!
+
+✍️ Напишите, как оживить изображение:
+
+Примеры:
+• Персонажи на фото улыбаются и обнимаются 🤗
+• Человек слегка кивает и улыбается 😊
+• Девушка моргает и немного поворачивает голову 💫
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре»
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его
+
+📏 Требования к фото:
+• Минимальный размер: 300x300 пикселей
+• Формат: JPG или PNG`;
+            
+            try {
+              await this.bot.telegram.sendMessage(telegramId, promptMessage, {
+                reply_markup: {
+                  inline_keyboard: [
+                    [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt_v2')],
+                    this.getBackButton()
+                  ]
+                }
+              });
+              
+              // Отправляем reply-клавиатуру
+              setTimeout(async () => {
+                try {
+                  await this.bot.telegram.sendMessage(telegramId, '\u200B', {
+                    reply_markup: this.getMainReplyKeyboard(telegramId)
+                  });
+                } catch (e: any) {
+                  if (this.isBlockedError(e)) {
+                    console.log(`Bot is blocked by user ${telegramId}, skipping keyboard message`);
+                  }
+                }
+              }, 500);
+            } catch (error: any) {
+              if (this.isBlockedError(error)) {
+                console.log(`Bot is blocked by user ${telegramId}, skipping prompt message`);
+              } else {
+                throw error;
+              }
+            }
+          } else if (pendingPhoto.mode === 'regular') {
+            // Обычный режим оживления
+            this.pendingPrompts.set(telegramId, pendingPhoto.fileId);
+            
+            const promptMessage = `📸 Фото получено!
+
+✍️ Напишите, как оживить изображение:
+
+Примеры:
+• Персонажи на фото улыбаются и обнимаются 🤗
+• Человек слегка кивает и улыбается 😊
+• Девушка моргает и немного поворачивает голову 💫
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре»
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его
+
+📏 Требования к фото:
+• Минимальный размер: 300x300 пикселей
+• Формат: JPG или PNG`;
+            
+            try {
+              await this.bot.telegram.sendMessage(telegramId, promptMessage, {
+                reply_markup: {
+                  inline_keyboard: [
+                    [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt')],
+                    this.getBackButton()
+                  ]
+                }
+              });
+              
+              // Отправляем reply-клавиатуру
+              setTimeout(async () => {
+                try {
+                  await this.bot.telegram.sendMessage(telegramId, '\u200B', {
+                    reply_markup: this.getMainReplyKeyboard(telegramId)
+                  });
+                } catch (e: any) {
+                  if (this.isBlockedError(e)) {
+                    console.log(`Bot is blocked by user ${telegramId}, skipping keyboard message`);
+                  }
+                }
+              }, 500);
+            } catch (error: any) {
+              if (this.isBlockedError(error)) {
+                console.log(`Bot is blocked by user ${telegramId}, skipping prompt message`);
+              } else {
+                throw error;
+              }
+            }
+          }
+          
+          // Очищаем сохраненное фото
+          this.pendingPaymentPhotos.delete(telegramId);
+        } else {
+          // Обычное пополнение без сохраненного фото
+          try {
+            await this.bot.telegram.sendMessage(
+              telegramId,
+              `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото\n⭐ Оплачено: ${starsAmount} звёзд`
+            );
+          } catch (error: any) {
+            if (this.isBlockedError(error)) {
+              console.log(`Bot is blocked by user ${telegramId}, skipping notification`);
+            } else {
+              throw error;
+            }
           }
         }
         
@@ -3078,6 +3269,72 @@ ${packageListText}
     } else {
       return 'оживлений фото';
     }
+  }
+
+  // Показать меню покупки генераций
+  private async showBuyGenerationsMenu(ctx: Context, currentGenerations: number = 0): Promise<void> {
+    const packages = [
+      { count: 1, originalPrice: 129 },
+      { count: 3, originalPrice: 387 },
+      { count: 5, originalPrice: 645 },
+      { count: 10, originalPrice: 1290 }
+    ];
+    
+    const discountPercent = 47;
+    const discountCoefficient = 69 / 129;
+    
+    let packageListText = '';
+    packages.forEach(pkg => {
+      const originalPrice = pkg.originalPrice;
+      const originalPriceStr = `${originalPrice}₽`;
+      const strikethroughPrice = Array.from(originalPriceStr).map(char => char + '\u0336').join('');
+      packageListText += `${pkg.count} ${this.getGenerationWord(pkg.count)}: <b>-${discountPercent}%</b> ${strikethroughPrice}\n`;
+    });
+    
+    const message = `💼 У вас осталось оживлений фото: ${currentGenerations}
+
+${packageListText}
+Выберите пакет 👇`;
+    
+    const keyboard = packages.map(pkg => {
+      const actualPrice = Math.round((pkg.originalPrice as number) * discountCoefficient);
+      const buttonText = `${pkg.count} ${this.getGenerationWord(pkg.count)} → 💰 ${actualPrice}₽`;
+      return [
+        Markup.button.callback(
+          buttonText,
+          `buy_generations_${pkg.count}_${actualPrice}`
+        )
+      ];
+    });
+    
+    keyboard.push(this.getBackButton());
+    
+    try {
+      await ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    } catch (error: any) {
+      if (this.isBlockedError(error)) {
+        console.log(`Bot is blocked by user ${ctx.from?.id}, skipping buy generations menu`);
+        return;
+      }
+      throw error;
+    }
+    
+    setTimeout(async () => {
+      try {
+        await ctx.reply('\u200B', {
+          reply_markup: this.getMainReplyKeyboard(ctx.from!.id)
+        });
+      } catch (e: any) {
+        if (this.isBlockedError(e)) {
+          console.log(`Bot is blocked by user ${ctx.from?.id}, skipping keyboard message`);
+        }
+      }
+    }, 500);
   }
 
   // Валидация требований к фото

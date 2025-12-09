@@ -437,12 +437,92 @@ export class PaymentService {
               const newBalance = await userService.getUserGenerations(user.telegram_id);
               console.log(`✅ New balance: ${newBalance} generations`);
               
-              await this.bot.telegram.sendMessage(
-                user.telegram_id,
-                `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото`
-              );
+              // Проверяем, есть ли сохраненное фото для продолжения флоу
+              const hasPendingPhoto = typeof (global as any).pendingPaymentPhotos !== 'undefined' &&
+                                     (global as any).pendingPaymentPhotos.has(user.telegram_id);
               
-              // Проверяем, нужно ли автоматически обработать фото после покупки
+              if (hasPendingPhoto) {
+                // Есть сохраненное фото - продолжаем флоу через TelegramService
+                console.log(`📸 Есть сохраненное фото для пользователя ${user.telegram_id}, продолжаем флоу`);
+                
+                await this.bot.telegram.sendMessage(
+                  user.telegram_id,
+                  `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото`
+                );
+                
+                // Получаем данные о фото
+                const pendingPhoto = (global as any).pendingPaymentPhotos.get(user.telegram_id);
+                
+                // Показываем запрос промпта в зависимости от режима
+                if (pendingPhoto.mode === 'animate_v2') {
+                  const { Markup } = await import('telegraf');
+                  const promptMessage = `📸 Фото получено!
+
+✍️ Напишите, как оживить изображение:
+
+Примеры:
+• Персонажи на фото улыбаются и обнимаются 🤗
+• Человек слегка кивает и улыбается 😊
+• Девушка моргает и немного поворачивает голову 💫
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре»
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его
+
+📏 Требования к фото:
+• Минимальный размер: 300x300 пикселей
+• Формат: JPG или PNG`;
+                  
+                  await this.bot.telegram.sendMessage(user.telegram_id, promptMessage, {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt_v2')],
+                        [Markup.button.callback('👈 Назад', 'back_to_menu')]
+                      ]
+                    }
+                  });
+                } else {
+                  const { Markup } = await import('telegraf');
+                  const promptMessage = `📸 Фото получено!
+
+✍️ Напишите, как оживить изображение:
+
+Примеры:
+• Персонажи на фото улыбаются и обнимаются 🤗
+• Человек слегка кивает и улыбается 😊
+• Девушка моргает и немного поворачивает голову 💫
+
+📌 Важно:
+• Используйте описания «мужчина слева», «женщина справа», «ребёнок в центре»
+• Не пишите «я», «мы», «сестра» и т.п.
+• Если на фото нет человека — не указывайте его
+
+📏 Требования к фото:
+• Минимальный размер: 300x300 пикселей
+• Формат: JPG или PNG`;
+                  
+                  await this.bot.telegram.sendMessage(user.telegram_id, promptMessage, {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [Markup.button.callback('✨ Использовать базовую анимацию', 'skip_prompt')],
+                        [Markup.button.callback('👈 Назад', 'back_to_menu')]
+                      ]
+                    }
+                  });
+                }
+                
+                // Очистка произойдет в processPrompt или processAnimateV2Prompt
+                
+              } else {
+                // Обычное пополнение без сохраненного фото
+                await this.bot.telegram.sendMessage(
+                  user.telegram_id,
+                  `✅ Оживления успешно пополнены!\n\n➕ Начислено: ${generationsCount} ${this.getGenerationWord(generationsCount)}\n💼 Ваш баланс: ${newBalance} оживлений фото`
+                );
+              }
+              
+              // Старая логика автообработки (оставляем для обратной совместимости)
               // Получаем file_id и prompt из metadata (они передаются через ЮKassa)
               // или из глобального хранилища (если metadata не вернула данные)
               let fileId = metadata?.file_id;
@@ -473,12 +553,14 @@ export class PaymentService {
               console.log('🔍 Checking for auto-processing:', {
                 hasFileId: !!fileId,
                 hasPrompt: !!prompt,
+                hasPendingPhoto,
                 metadataKeys: Object.keys(metadata || {}),
                 fileIdPreview: fileId?.substring(0, 30) || 'none',
                 promptPreview: prompt?.substring(0, 30) || 'none'
               });
               
-              if (fileId && prompt) {
+              // Автообработка только если нет сохраненного фото (старый флоу)
+              if (!hasPendingPhoto && fileId && prompt) {
                 console.log('🔄 Auto-processing photo after generation purchase...');
                 console.log('   File ID:', fileId);
                 console.log('   Prompt:', prompt);
