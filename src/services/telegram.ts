@@ -371,7 +371,7 @@ export class TelegramService {
       const mediaGroupId = (ctx.message as any)['media_group_id'];
       if (mediaGroupId) {
         // Это медиа-группа - обрабатываем через handleMediaGroup логику
-        await this.handleMediaGroupPhoto(ctx, user, fileId, mediaGroupId);
+        await this.handleMediaGroupPhoto(ctx, user, fileId, mediaGroupId, photo, document);
         return;
       }
       
@@ -393,6 +393,15 @@ export class TelegramService {
           console.log(`🧹 Очищаю застрявшее состояние combine_and_animate для пользователя ${user.telegram_id} - активен режим "Оживить фото"`);
           this.combineAndAnimatePhotos.delete(user.telegram_id);
           this.combineAndAnimateState.delete(user.telegram_id);
+        }
+        
+        // Валидация фото перед обработкой
+        const validation = await this.validatePhotoRequirements(photo, document);
+        if (!validation.valid) {
+          // Очищаем состояние и показываем ошибку
+          this.animateV2State.delete(userId);
+          await this.sendMessage(ctx, validation.error!);
+          return;
         }
         
         // Проверяем наличие caption (текста, прикрепленного к фото)
@@ -461,6 +470,16 @@ export class TelegramService {
       // Только если НЕ активен режим "Оживить фото"
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
       if (combinePhotos !== undefined) {
+        // Валидация фото перед добавлением
+        const validation = await this.validatePhotoRequirements(photo, document);
+        if (!validation.valid) {
+          // Очищаем состояние и показываем ошибку
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+          await this.sendMessage(ctx, validation.error!);
+          return;
+        }
+        
         // Добавляем фото в список (ровно 2 фото)
         if (combinePhotos.length < 2) {
           combinePhotos.push(fileId);
@@ -502,6 +521,15 @@ export class TelegramService {
           this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
           await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
           return;
+      }
+      
+      // Валидация фото перед обработкой
+      const validation = await this.validatePhotoRequirements(photo, document);
+      if (!validation.valid) {
+        // Очищаем состояние и показываем ошибку
+        this.pendingPrompts.delete(user.telegram_id);
+        await this.sendMessage(ctx, validation.error!);
+        return;
       }
       
       // Проверяем наличие caption (текста, прикрепленного к фото)
@@ -565,7 +593,7 @@ export class TelegramService {
     }
   }
 
-  private async handleMediaGroupPhoto(ctx: Context, user: any, fileId: string, mediaGroupId: string): Promise<void> {
+  private async handleMediaGroupPhoto(ctx: Context, user: any, fileId: string, mediaGroupId: string, photo?: any, document?: any): Promise<void> {
     try {
       // Проверяем, активен ли режим "Оживить фото" - если да, не обрабатываем как combine_and_animate
       const userId = ctx.from!.id;
@@ -589,6 +617,15 @@ export class TelegramService {
       // Только если НЕ активен режим "Оживить фото"
       const combinePhotos = this.combineAndAnimatePhotos.get(user.telegram_id);
       if (combinePhotos !== undefined) {
+        // Валидация фото перед добавлением
+        const validation = await this.validatePhotoRequirements(photo, document);
+        if (!validation.valid) {
+          // Очищаем состояние и показываем ошибку
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+          await this.sendMessage(ctx, validation.error!);
+          return;
+        }
         // Используем mediaGroupId для группировки фото из одного альбома
         // Создаем ключ для хранения фото из этой медиа-группы
         const mediaGroupKey = `combine_${user.telegram_id}_${mediaGroupId}`;
@@ -3040,6 +3077,55 @@ ${packageListText}
       return 'оживления фото';
     } else {
       return 'оживлений фото';
+    }
+  }
+
+  // Валидация требований к фото
+  private async validatePhotoRequirements(photo: any, document: any): Promise<{ valid: boolean; error?: string }> {
+    try {
+      let width: number;
+      let height: number;
+      
+      // Получаем размеры из фото или документа
+      if (photo && Array.isArray(photo) && photo.length > 0) {
+        const largestPhoto = photo[photo.length - 1];
+        width = largestPhoto.width;
+        height = largestPhoto.height;
+      } else if (document) {
+        // Для документов получаем информацию через API
+        const file = await this.bot.telegram.getFile(document.file_id);
+        // У документов может не быть размеров, пропускаем проверку
+        if (!document.thumb || !document.thumb.width || !document.thumb.height) {
+          return { valid: true }; // Пропускаем документы без размеров
+        }
+        width = document.thumb.width;
+        height = document.thumb.height;
+      } else {
+        return { valid: false, error: '❌ Не удалось получить информацию о фото.' };
+      }
+      
+      // Проверка минимального размера (300x300)
+      if (width < 300 || height < 300) {
+        return { 
+          valid: false, 
+          error: `❌ Изображение слишком маленькое.\n\n📏 Минимальный размер: 300×300 пикселей\n📊 Ваше фото: ${width}×${height} пикселей\n\n✨ Пожалуйста, отправьте фото большего размера.` 
+        };
+      }
+      
+      // Проверка соотношения сторон (0.4 - 2.5)
+      const aspectRatio = width / height;
+      if (aspectRatio < 0.4 || aspectRatio > 2.5) {
+        return { 
+          valid: false, 
+          error: `❌ Неподдерживаемое соотношение сторон.\n\n📐 Соотношение должно быть от 0.4 до 2.5\n📊 Ваше фото: ${aspectRatio.toFixed(2)}\n\n✨ Пожалуйста, отправьте фото с другим соотношением сторон (не слишком узкое и не слишком широкое).` 
+        };
+      }
+      
+      return { valid: true };
+    } catch (error) {
+      console.error('Error validating photo requirements:', error);
+      // В случае ошибки валидации разрешаем обработку
+      return { valid: true };
     }
   }
 
