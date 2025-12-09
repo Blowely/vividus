@@ -498,10 +498,10 @@ export class TelegramService {
           this.pendingPromptsData.delete(user.telegram_id);
         }
       } else if (firstPhotoId === 'MERGE_MODE_WAITING') {
-        // Это первое фото в режиме объединения
-        this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
-        await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
-        return;
+          // Это первое фото в режиме объединения
+          this.pendingMergeFirstPhoto.set(user.telegram_id, fileId);
+          await this.sendMessage(ctx, '📸 Первое фото получено! Теперь отправьте второе фото.');
+          return;
       }
       
       // Проверяем наличие caption (текста, прикрепленного к фото)
@@ -611,7 +611,7 @@ export class TelegramService {
         
         // Обновляем основной список фото для режима combine_and_animate
         this.combineAndAnimatePhotos.set(user.telegram_id, photosToUse);
-        
+          
         // Если получили 2 фото, запрашиваем промпт (с задержкой, чтобы все фото из группы успели обработаться)
         if (photosToUse.length === 2) {
           // Проверяем, не запрашивали ли уже промпт для этой группы
@@ -622,12 +622,12 @@ export class TelegramService {
               // Проверяем еще раз, что у нас есть 2 фото
               const currentPhotos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
               if (currentPhotos.length >= 2) {
-                await this.requestAnimationPrompt(ctx);
-              }
+              await this.requestAnimationPrompt(ctx);
+          }
               // Очищаем временное хранилище для этой медиа-группы
               if ((global as any).combineMediaGroups) {
                 (global as any).combineMediaGroups.delete(mediaGroupKey);
-              }
+        }
             }, 1500);
           }
         }
@@ -947,8 +947,8 @@ export class TelegramService {
       // Проверяем, ожидает ли пользователь промпт для анимации в режиме combine_and_animate
       // ТОЛЬКО если режим "Оживить фото" НЕ активен
       if (!isAnimateV2Active) {
-        const combineState = this.combineAndAnimateState.get(user.telegram_id);
-        if (combineState && combineState.waitingForAnimationPrompt) {
+      const combineState = this.combineAndAnimateState.get(user.telegram_id);
+      if (combineState && combineState.waitingForAnimationPrompt) {
           // Проверяем, не является ли введенный текст текстом кнопки
           if (this.getButtonTexts().includes(text)) {
             // Если это текст кнопки, очищаем контекст и запускаем флоу кнопки
@@ -957,25 +957,25 @@ export class TelegramService {
             // Продолжаем обработку - кнопки обработаются ниже в коде
           } else {
             // Это нормальный промпт
-            const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
-            
-            if (photos.length < 2) {
-              await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
-              this.combineAndAnimatePhotos.delete(user.telegram_id);
-              this.combineAndAnimateState.delete(user.telegram_id);
-              return;
-            }
-            
-            // Берем только первые 2 фото
-            const twoPhotos = photos.slice(0, 2);
-            
-            combineState.animationPrompt = text;
-            combineState.waitingForAnimationPrompt = false;
-            this.combineAndAnimateState.set(user.telegram_id, combineState);
-            
+        const photos = this.combineAndAnimatePhotos.get(user.telegram_id) || [];
+        
+        if (photos.length < 2) {
+          await this.sendMessage(ctx, '❌ Нужно отправить 2 фото. Начните заново.');
+          this.combineAndAnimatePhotos.delete(user.telegram_id);
+          this.combineAndAnimateState.delete(user.telegram_id);
+          return;
+        }
+        
+        // Берем только первые 2 фото
+        const twoPhotos = photos.slice(0, 2);
+        
+        combineState.animationPrompt = text;
+        combineState.waitingForAnimationPrompt = false;
+        this.combineAndAnimateState.set(user.telegram_id, combineState);
+        
             // Сообщение будет отправлено в createCombineAndAnimateOrder после создания заказа
-            await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
-            return;
+        await this.createCombineAndAnimateOrder(ctx, user, twoPhotos, combineState);
+        return;
           }
         }
       } else {
@@ -1100,9 +1100,9 @@ export class TelegramService {
           // Продолжаем обработку - кнопки обработаются ниже в коде
         } else {
           // Это нормальный промпт
-          console.log(`✍️ Получен промпт для Оживить v2 от пользователя ${userId}: "${text}"`);
-          await this.processAnimateV2Prompt(ctx, user, animateV2State.photoFileId, text);
-          return;
+        console.log(`✍️ Получен промпт для Оживить v2 от пользователя ${userId}: "${text}"`);
+        await this.processAnimateV2Prompt(ctx, user, animateV2State.photoFileId, text);
+        return;
         }
       }
       
@@ -1119,13 +1119,13 @@ export class TelegramService {
         } else {
           // Проверяем, является ли это промптом для объединения (старый режим merge)
           // ВАЖНО: Проверяем не только prompt, но и наличие первого фото в pendingMergeFirstPhoto
-          const promptData = this.pendingPromptsData.get(user.telegram_id);
+      const promptData = this.pendingPromptsData.get(user.telegram_id);
           const firstPhotoId = this.pendingMergeFirstPhoto.get(user.telegram_id);
           if (promptData && promptData.prompt.startsWith('merge:') && firstPhotoId && firstPhotoId !== 'MERGE_MODE_WAITING') {
             // Это промпт для объединяющего заказа (старый режим merge)
-            await this.processMergePrompt(ctx, user, text);
+        await this.processMergePrompt(ctx, user, text);
             return;
-          } else {
+      } else {
             // Обычный промпт - очищаем застрявшее состояние merge если есть
             if (firstPhotoId || (promptData && promptData.prompt.startsWith('merge:'))) {
               console.log(`⚠️ Очищаю застрявшее состояние merge при обработке обычного промпта для пользователя ${user.telegram_id}`);
@@ -1134,8 +1134,8 @@ export class TelegramService {
                 this.pendingPromptsData.delete(user.telegram_id);
               }
             }
-            // Обычный промпт
-            await this.processPrompt(ctx, user, text);
+        // Обычный промпт
+        await this.processPrompt(ctx, user, text);
             return;
           }
         }
@@ -2955,19 +2955,19 @@ ${packageListText}
         // Создаем заказ со статусом processing (без оплаты)
         // Финальная проверка баланса будет выполнена в processOrder перед началом обработки
         const { OrderStatus } = await import('../types');
-        const order = await this.orderService.createCombineAndAnimateOrder(
-          user.id,
-          photoUrls,
-          combinePrompt,
+      const order = await this.orderService.createCombineAndAnimateOrder(
+        user.id,
+        photoUrls,
+        combinePrompt,
           animationPrompt,
           OrderStatus.PROCESSING, // Статус processing вместо payment_required
           originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
-        );
-        
-        // Очищаем состояние
-        this.combineAndAnimatePhotos.delete(user.telegram_id);
-        this.combineAndAnimateState.delete(user.telegram_id);
-        
+      );
+      
+      // Очищаем состояние
+      this.combineAndAnimatePhotos.delete(user.telegram_id);
+      this.combineAndAnimateState.delete(user.telegram_id);
+      
         // Сообщение о создании заказа и начале обработки
         const displayPrompt = (originalAnimationPrompt === 'пропустить' || originalAnimationPrompt === 'skip' || !originalAnimationPrompt) 
           ? 'люди машут руками, улыбаются друг другу, легкие движения и эффект дыхания' 
@@ -3048,7 +3048,6 @@ ${packageListText}
       'pending': '⏳ Ожидает',
       'payment_required': '💳 Требуется оплата',
       'processing': '🔄 Обрабатывается',
-      'throttled': '⏸ В очереди',
       'completed': '✅ Готово',
       'failed': '❌ Ошибка',
       'cancelled': '❌ Отменено'

@@ -71,23 +71,6 @@ export class ProcessorService {
         }
       }
 
-      // Проверяем количество активных заказов в обработке
-      const activeOrders = await this.orderService.getOrdersByStatus('processing' as any);
-      const activeOrdersCount = activeOrders.length;
-
-      if (activeOrdersCount >= this.MAX_CONCURRENT_ORDERS) {
-        // Очередь полная - ставим заказ в очередь
-        console.log(`⏸ Очередь полная (${activeOrdersCount}/${this.MAX_CONCURRENT_ORDERS}), ставим заказ ${orderId} в очередь`);
-        await this.orderService.updateOrderStatus(orderId, 'throttled' as any);
-        
-        // Уведомляем пользователя о постановке в очередь
-        await this.notifyUser(
-          user.telegram_id,
-          `⏸ Ваш заказ поставлен в очередь.\n\n📊 Сейчас обрабатывается: ${activeOrdersCount} заказов\n\n⏳ Мы начнем обработку вашего заказа, как только освободится место. Вы получите уведомление.`
-        );
-        return;
-      }
-
       // Update order status to processing
       await this.orderService.updateOrderStatus(orderId, 'processing' as any);
 
@@ -406,15 +389,8 @@ export class ProcessorService {
             return;
           }
           
-          // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
-          // Для combine_and_animate оживления списываются только после успешной генерации,
+          // Генерации списываются только после успешной генерации,
           // поэтому при ошибках их не нужно возвращать (они не были списаны)
-          const hasPayment = await this.orderService.hasPayment(orderId);
-          if (!hasPayment && order.order_type !== 'combine_and_animate') {
-            await this.userService.returnGenerations(user.telegram_id, 1);
-            const newBalance = await this.userService.getUserGenerations(user.telegram_id);
-            await this.notifyUser(user.telegram_id, `💼 Оживление фотографии возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
-          }
           
           // Используем переведённое сообщение об ошибке, если оно есть
           const errorMessage = error?.message || 'Произошла ошибка при обработке. Попробуйте позже.';
@@ -1464,15 +1440,8 @@ export class ProcessorService {
         return;
       }
 
-      // Для combine_and_animate оживления списываются только после успешной генерации,
+      // Генерации списываются только после успешной генерации,
       // поэтому при ошибках их не нужно возвращать (они не были списаны)
-      // Для обычных заказов возвращаем оживления при ошибках
-      const hasPayment = await this.orderService.hasPayment(orderId);
-      if (!hasPayment && order.order_type !== 'combine_and_animate') {
-        await this.userService.returnGenerations(telegramId, 1);
-        const newBalance = await this.userService.getUserGenerations(telegramId);
-        await this.notifyUser(telegramId, `💼 Оживление возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
-      }
 
       // Проверяем ошибки на наличие модерации и других специфичных ошибок
       let errorMessage = '❌ Не удалось создать видео. Попробуйте другое изображение.';
@@ -1482,27 +1451,27 @@ export class ProcessorService {
         const stringErrors = errors.filter(error => typeof error === 'string' && error.trim().length > 0);
         
         if (stringErrors.length > 0) {
-          // Ищем ошибку модерации среди всех ошибок
+        // Ищем ошибку модерации среди всех ошибок
           const moderationError = stringErrors.find(error => {
-            const errorLower = error.toLowerCase();
-            return errorLower.includes('content moderation') || 
-                   errorLower.includes('moderation') || 
-                   errorLower.includes('not passed moderation') ||
-                   errorLower.includes('public figure') ||
+          const errorLower = error.toLowerCase();
+          return errorLower.includes('content moderation') || 
+                 errorLower.includes('moderation') || 
+                 errorLower.includes('not passed moderation') ||
+                 errorLower.includes('public figure') ||
                    errorLower.includes('did not pass') ||
                    errorLower.includes('flagged by') ||
                    errorLower.includes('content checker') ||
                    (errorLower.includes('could not be processed') && errorLower.includes('content'));
-          });
-          
-          if (moderationError) {
-            // Переводим ошибку модерации (всегда используем fal.ai)
-            errorMessage = `❌ ${this.translateFalError(moderationError)}`;
-          } else {
-            // Используем первую доступную переведенную ошибку
+        });
+        
+        if (moderationError) {
+          // Переводим ошибку модерации (всегда используем fal.ai)
+          errorMessage = `❌ ${this.translateFalError(moderationError)}`;
+        } else {
+          // Используем первую доступную переведенную ошибку
             const translatedError = this.translateFalError(stringErrors[0]);
             if (translatedError !== stringErrors[0]) {
-              errorMessage = `❌ ${translatedError}`;
+            errorMessage = `❌ ${translatedError}`;
             }
           }
         }
@@ -1587,17 +1556,9 @@ export class ProcessorService {
       // Update job status
       await this.falService.updateJobStatus(generationId, 'failed' as any, undefined, error);
 
-      // Проверяем, был ли заказ оплачен генерациями (отсутствие платежа означает оплату генерациями)
-      // Для combine_and_animate оживления списываются только после успешной генерации,
+      // Генерации списываются только после успешной генерации,
       // поэтому при ошибках их не нужно возвращать (они не были списаны)
       const order = await this.orderService.getOrder(orderId);
-      const hasPayment = await this.orderService.hasPayment(orderId);
-      if (order && !hasPayment && order.order_type !== 'combine_and_animate') {
-        // Заказ был оплачен генерациями - возвращаем их
-        await this.userService.returnGenerations(telegramId, 1);
-        const newBalance = await this.userService.getUserGenerations(telegramId);
-        await this.notifyUser(telegramId, `💼 Оживление возвращено на ваш баланс.\n\nБаланс: ${newBalance} оживлений фото`);
-      }
 
       // Translate error message for user
       const translatedError = this.translateFalError(error);
@@ -1949,45 +1910,6 @@ export class ProcessorService {
     }
   }
 
-  async processThrottledOrders(): Promise<void> {
-    try {
-      // Проверяем количество активных заказов
-      const activeOrders = await this.orderService.getOrdersByStatus('processing' as any);
-      const activeOrdersCount = activeOrders.length;
-
-      // Если есть свободное место, обрабатываем заказы из очереди
-      if (activeOrdersCount < this.MAX_CONCURRENT_ORDERS) {
-        const availableSlots = this.MAX_CONCURRENT_ORDERS - activeOrdersCount;
-        
-        // Получаем заказы из очереди, отсортированные по дате создания (FIFO)
-        const throttledOrders = await this.orderService.getOrdersByStatus('throttled' as any);
-        const ordersToProcess = throttledOrders.slice(0, availableSlots);
-
-        console.log(`🔄 Обрабатываю ${ordersToProcess.length} заказов из очереди (свободно мест: ${availableSlots})`);
-
-        for (const order of ordersToProcess) {
-          const user = await this.userService.getUserById(order.user_id);
-          if (user) {
-            // Уведомляем пользователя, что обработка началась
-            await this.notifyUser(
-              user.telegram_id,
-              `✅ Ваш заказ начал обрабатываться!\n\n🎬 Генерация видео началась.`
-            );
-          }
-          
-          // Запускаем обработку заказа
-          // Используем setTimeout чтобы не блокировать основной поток
-          setTimeout(() => {
-            this.processOrder(order.id).catch(error => {
-              console.error(`Error processing throttled order ${order.id}:`, error);
-            });
-          }, 1000);
-        }
-      }
-    } catch (error) {
-      console.error('Error processing throttled orders:', error);
-    }
-  }
 
   private async processCombineAndAnimateOrder(orderId: string, order: any, telegramId: number): Promise<void> {
     try {
@@ -2036,7 +1958,7 @@ export class ProcessorService {
           }
           
           combinedImageUrl = await this.falService.combineImages(image1, image2, combinePrompt);
-          console.log(`Face swap completed: ${combinedImageUrl}`);
+      console.log(`Face swap completed: ${combinedImageUrl}`);
           break; // Успешно завершено, выходим из цикла
         } catch (error: any) {
           console.error(`Error combining images (attempt ${combineRetryCount + 1}/${maxCombineRetries + 1}):`, error);
@@ -2187,13 +2109,13 @@ export class ProcessorService {
         while (retryCount <= maxRetries) {
           try {
             // Создаем видео из объединенного фото через fal.ai
-            const systemRequestId = await this.falService.createVideoFromImage(
-              combinedImageS3Url,
-              orderId,
-              animationPrompt,
-              '6' // 6 секунд - дешевле
-            );
-            
+      const systemRequestId = await this.falService.createVideoFromImage(
+        combinedImageS3Url,
+        orderId,
+        animationPrompt,
+        '6' // 6 секунд - дешевле
+      );
+      
             console.log(`   ✅ Fal.ai запрос завершен: ${systemRequestId}`);
             
             // Обновляем временный джоб на реальный в БД
@@ -2209,10 +2131,10 @@ export class ProcessorService {
             }
             
             // Обновляем order result
-            await this.orderService.updateOrderResult(orderId, systemRequestId);
-            
-            console.log(`Video generation started with systemRequestId: ${systemRequestId}`);
-            
+      await this.orderService.updateOrderResult(orderId, systemRequestId);
+      
+      console.log(`Video generation started with systemRequestId: ${systemRequestId}`);
+      
             // Успешно завершено, выходим из цикла
             break;
           } catch (error: any) {

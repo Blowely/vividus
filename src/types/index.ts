@@ -34,7 +34,6 @@ export enum OrderStatus {
   PENDING = 'pending',
   PAYMENT_REQUIRED = 'payment_required',
   PROCESSING = 'processing',
-  THROTTLED = 'throttled',
   COMPLETED = 'completed',
   FAILED = 'failed',
   CANCELLED = 'cancelled'

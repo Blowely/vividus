@@ -201,45 +201,45 @@ export class FalService {
         // Используем прямой вызов через axios с коротким timeout
         // Если операция длительная, fal.ai вернет request_id быстро
         // Если операция быстрая, получим результат синхронно
-        const response = await axios.post(
-          `${this.baseUrl}/${this.modelId}`,
-          {
-            prompt: prompt,
-            image_url: imageUrl,
-            duration: duration,
-            prompt_optimizer: true
-          },
-          {
-            headers: {
-              'Authorization': `Key ${this.apiKey}`,
-              'Content-Type': 'application/json'
+      const response = await axios.post(
+        `${this.baseUrl}/${this.modelId}`,
+        {
+          prompt: prompt,
+          image_url: imageUrl,
+          duration: duration,
+          prompt_optimizer: true
+        },
+        {
+          headers: {
+            'Authorization': `Key ${this.apiKey}`,
+            'Content-Type': 'application/json'
             },
             timeout: 300000 // 5 минут - достаточно для длительных операций
-          }
-        );
-
-        console.log('fal.ai response:', response.data);
-        
-        let requestId: string;
-        let systemRequestId: string;
-        
-        if (response.data.request_id) {
-          // Асинхронный запрос - сохраняем request_id для polling
-          requestId = response.data.request_id;
-          systemRequestId = `fal_${requestId}`;
-          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-          await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
-          return systemRequestId;
-        } else if (response.data.video && response.data.video.url) {
-          // Синхронный ответ - сразу готово
-          const videoUrl = response.data.video.url;
-          systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
-          await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
-          return systemRequestId;
-        } else {
-          throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
         }
+      );
+
+      console.log('fal.ai response:', response.data);
+      
+      let requestId: string;
+      let systemRequestId: string;
+      
+      if (response.data.request_id) {
+          // Асинхронный запрос - сохраняем request_id для polling
+        requestId = response.data.request_id;
+        systemRequestId = `fal_${requestId}`;
+        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+        await this.updateJobStatus(systemRequestId, DidJobStatus.PENDING, undefined, requestId);
+          return systemRequestId;
+      } else if (response.data.video && response.data.video.url) {
+        // Синхронный ответ - сразу готово
+        const videoUrl = response.data.video.url;
+        systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
+        await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
+        return systemRequestId;
+      } else {
+        throw new Error('Unexpected response format from fal.ai: ' + JSON.stringify(response.data));
+      }
       } catch (axiosError: any) {
         // Если произошел timeout, это может означать, что операция длительная
         // В этом случае fal.ai все равно обрабатывает запрос, но ответ придет позже
@@ -288,7 +288,7 @@ export class FalService {
               const systemRequestId = `fal_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
               await this.saveJob(orderId, systemRequestId, 'hailuo-2.3-fast');
               await this.updateJobStatus(systemRequestId, DidJobStatus.COMPLETED, videoUrl);
-              return systemRequestId;
+      return systemRequestId;
             } else {
               throw new Error('Unexpected response format from fal.ai run: ' + JSON.stringify(result));
             }
@@ -427,32 +427,32 @@ export class FalService {
         
         // Используем прямой API вызов - формат: /fal-ai/{model}/status
         const modelPath = this.modelId.replace(/\//g, '-');
-        const response = await axios.get(
+      const response = await axios.get(
           `${this.baseUrl}/fal-ai/${modelPath}/status`,
-          {
-            params: {
-              request_id: originalRequestId
-            },
-            headers: {
-              'Authorization': `Key ${this.apiKey}`
-            }
+        {
+          params: {
+            request_id: originalRequestId
+          },
+          headers: {
+            'Authorization': `Key ${this.apiKey}`
           }
-        );
-        
-        console.log('Job status response (direct API):', response.data);
-        
-        // Преобразуем статус fal.ai в наш формат
-        const falStatus = response.data.status;
-        let ourStatus = falStatus;
-        
-        if (falStatus === 'IN_PROGRESS' || falStatus === 'IN_QUEUE' || falStatus === 'QUEUED') {
-          ourStatus = 'PROCESSING';
-        } else if (falStatus === 'COMPLETED' || falStatus === 'SUCCEEDED') {
-          ourStatus = 'COMPLETED';
-        } else if (falStatus === 'FAILED' || falStatus === 'ERROR') {
-          ourStatus = 'FAILED';
         }
-        
+      );
+      
+        console.log('Job status response (direct API):', response.data);
+      
+      // Преобразуем статус fal.ai в наш формат
+      const falStatus = response.data.status;
+      let ourStatus = falStatus;
+      
+        if (falStatus === 'IN_PROGRESS' || falStatus === 'IN_QUEUE' || falStatus === 'QUEUED') {
+        ourStatus = 'PROCESSING';
+        } else if (falStatus === 'COMPLETED' || falStatus === 'SUCCEEDED') {
+        ourStatus = 'COMPLETED';
+        } else if (falStatus === 'FAILED' || falStatus === 'ERROR') {
+        ourStatus = 'FAILED';
+      }
+      
         // Извлекаем URL видео из разных возможных форматов ответа
         const videoUrl = response.data.video?.url 
           || response.data.output?.video?.url 
@@ -460,8 +460,8 @@ export class FalService {
           || (Array.isArray(response.data.output) && response.data.output[0])
           || response.data.output?.url;
         
-        return {
-          status: ourStatus,
+      return {
+        status: ourStatus,
           video: videoUrl ? { url: videoUrl } : undefined,
           output: videoUrl ? [videoUrl] : undefined,
           error: response.data.error || response.data.failure
@@ -649,7 +649,7 @@ export class FalService {
       try {
         result = await fal.subscribe('fal-ai/nano-banana-pro/edit', {
           input: {
-            prompt: prompt,
+          prompt: prompt,
             image_urls: [imageUrl1, imageUrl2] // Массив из двух изображений
           },
           logs: true,

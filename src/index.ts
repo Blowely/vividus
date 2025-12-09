@@ -80,14 +80,6 @@ class App {
       }
     }, 30000);
 
-    // Process throttled orders from queue every 10 seconds
-    setInterval(async () => {
-      try {
-        await this.processorService.processThrottledOrders();
-      } catch (error) {
-        console.error('Error processing throttled orders:', error);
-      }
-    }, 10000);
 
     // Clean up old files every hour
     setInterval(async () => {
