@@ -2378,8 +2378,9 @@ export class TelegramService {
       
       // Пакеты генераций со скидкой ~47.34% (финальная цена за 1 генерацию: 99 руб)
       // Текущие цены - это оригинальные, вычисляем цены со скидкой
+      const isAdmin = this.isAdmin(ctx.from!.id);
       const packages = [
-        { count: 1, originalPrice: 1, isTest: true }, // Тестовая опция
+        ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
         { count: 1, originalPrice: 188 },
         { count: 3, originalPrice: 526 },
         { count: 5, originalPrice: 864 },
@@ -2718,6 +2719,13 @@ ${packageListText}
   private async handlePurchaseGenerations(ctx: Context, generationsCount: number, price: number) {
     try {
       await ctx.answerCbQuery();
+      
+      // Проверка: тестовая оплата (1 рубль) доступна только админам
+      if (price === 1 && !this.isAdmin(ctx.from!.id)) {
+        console.log(`⚠️ Non-admin user ${ctx.from!.id} attempted to use test payment (1 RUB)`);
+        await this.sendMessage(ctx, '❌ Тестовая оплата доступна только администраторам.');
+        return;
+      }
       
       console.log(`📦 Creating generation purchase: ${generationsCount} generations for ${price} RUB, user: ${ctx.from!.id}`);
       
