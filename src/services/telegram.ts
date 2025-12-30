@@ -3425,17 +3425,55 @@ ${packageListText}
 
   public async start() {
     try {
-      // Set bot commands menu
-      await this.bot.telegram.setMyCommands([
-        { command: 'start', description: '🚀 Начать работу с ботом' },
-        { command: 'help', description: '❓ Помощь и инструкции' },
-        { command: 'orders', description: '📋 Мои заказы' }
-      ]);
+      // Проверка доступности Telegram API
+      console.log('🔍 Checking Telegram API availability...');
+      try {
+        const me = await Promise.race([
+          this.bot.telegram.getMe(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('getMe timeout after 10s')), 10000)
+          )
+        ]) as any;
+        console.log('✅ Telegram API is accessible, bot username:', me.username);
+      } catch (apiError: any) {
+        console.warn('⚠️ Cannot connect to Telegram API:', apiError.message);
+        console.warn('⚠️ This might be a network/firewall issue, but continuing...');
+        // Продолжаем попытку запуска, возможно это временная проблема
+      }
+
+      // Set bot commands menu (опционально, не блокируем запуск при ошибке)
+      try {
+        await Promise.race([
+          this.bot.telegram.setMyCommands([
+            { command: 'start', description: '🚀 Начать работу с ботом' },
+            { command: 'help', description: '❓ Помощь и инструкции' },
+            { command: 'orders', description: '📋 Мои заказы' }
+          ]),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('setMyCommands timeout after 10s')), 10000)
+          )
+        ]);
+        console.log('✅ Bot commands menu set successfully');
+      } catch (cmdError: any) {
+        console.warn('⚠️ Failed to set bot commands (non-critical, continuing):', cmdError.message);
+        // Продолжаем запуск даже если не удалось установить команды
+      }
       
+      // Запускаем бота (по умолчанию используется polling режим)
+      console.log('🔄 Launching Telegram bot (polling mode)...');
       await this.bot.launch();
-      console.log('Telegram bot started');
-    } catch (error) {
-      console.error('Failed to start bot:', error);
+      console.log('✅ Telegram bot started and ready to receive messages');
+    } catch (error: any) {
+      console.error('❌ Failed to start bot:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        type: error.type,
+        stack: error.stack?.split('\n').slice(0, 5).join('\n')
+      });
+      // Пробрасываем ошибку, чтобы приложение знало о проблеме
+      throw error;
     }
   }
 
