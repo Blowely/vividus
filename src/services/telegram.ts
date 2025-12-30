@@ -3471,27 +3471,59 @@ ${packageListText}
         ]);
         console.log('✅ Telegram bot started and ready to receive messages');
       } catch (launchError: any) {
-        // Если запуск не удался, но это проблема сети - продолжаем
-        if (launchError.message?.includes('timeout') || launchError.code === 'ETIMEDOUT') {
-          console.warn('⚠️ Bot launch timeout (network issue), but bot handlers are registered');
-          console.warn('⚠️ Bot will try to connect when network is available');
+        // Если запуск не удался из-за проблем с сетью - продолжаем работу
+        const isNetworkError = 
+          launchError.code === 'ETIMEDOUT' ||
+          launchError.errno === 'ETIMEDOUT' ||
+          launchError.type === 'system' ||
+          launchError.message?.includes('timeout') ||
+          launchError.message?.includes('ETIMEDOUT') ||
+          launchError.message?.includes('ECONNREFUSED') ||
+          launchError.message?.includes('api.telegram.org');
+        
+        if (isNetworkError) {
+          console.warn('⚠️ Bot launch failed due to network issue (ETIMEDOUT)');
+          console.warn('⚠️ Bot handlers are registered, but bot cannot connect to Telegram API');
+          console.warn('⚠️ Bot will retry connection automatically when network is available');
+          console.warn('⚠️ Application will continue running, but bot will not receive messages until connection is restored');
           // Не пробрасываем ошибку, чтобы приложение продолжало работать
-          // Бот попытается подключиться при следующем запросе
+          // Бот попытается подключиться автоматически при следующем запросе
+          return; // Выходим из метода без ошибки
         } else {
+          // Для других ошибок пробрасываем дальше
           throw launchError;
         }
       }
     } catch (error: any) {
-      console.error('❌ Failed to start bot:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        errno: error.errno,
-        type: error.type,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n')
-      });
-      // Пробрасываем ошибку, чтобы приложение знало о проблеме
-      throw error;
+      // Проверяем, является ли это сетевой ошибкой
+      const isNetworkError = 
+        error.code === 'ETIMEDOUT' ||
+        error.errno === 'ETIMEDOUT' ||
+        error.type === 'system' ||
+        error.message?.includes('timeout') ||
+        error.message?.includes('ETIMEDOUT') ||
+        error.message?.includes('ECONNREFUSED') ||
+        error.message?.includes('api.telegram.org');
+      
+      if (isNetworkError) {
+        console.warn('⚠️ Bot start failed due to network issue (ETIMEDOUT)');
+        console.warn('⚠️ Bot handlers are registered, but bot cannot connect to Telegram API');
+        console.warn('⚠️ Application will continue running, but bot will not receive messages until connection is restored');
+        console.warn('⚠️ Please check network connectivity and firewall settings');
+        // Не пробрасываем ошибку, чтобы приложение продолжало работать
+        return; // Выходим без ошибки
+      } else {
+        console.error('❌ Failed to start bot:', error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          errno: error.errno,
+          type: error.type,
+          stack: error.stack?.split('\n').slice(0, 5).join('\n')
+        });
+        // Пробрасываем ошибку только для критических проблем
+        throw error;
+      }
     }
   }
 
