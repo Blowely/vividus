@@ -1772,8 +1772,22 @@ export class TelegramService {
   }
 
   private isAdmin(userId: number): boolean {
-    const adminIds = process.env.ADMIN_TELEGRAM_IDS?.split(',').map(id => parseInt(id)) || [];
-    return adminIds.includes(userId);
+    const adminIdsStr = process.env.ADMIN_TELEGRAM_IDS || '';
+    const adminIds = adminIdsStr
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0)
+      .map(id => parseInt(id, 10))
+      .filter(id => !isNaN(id));
+    
+    const isAdminUser = adminIds.includes(userId);
+    
+    // Логирование для отладки (только при первом вызове или если не админ)
+    if (!isAdminUser && adminIds.length > 0) {
+      console.log(`[isAdmin] User ${userId} is not in admin list. Admin IDs: ${adminIds.join(', ')}`);
+    }
+    
+    return isAdminUser;
   }
 
   private async processAnimateV2Prompt(ctx: Context, user: any, fileId: string, promptText: string): Promise<void> {
@@ -3314,7 +3328,15 @@ ${packageListText}
 
   // Показать меню покупки генераций
   private async showBuyGenerationsMenu(ctx: Context, currentGenerations: number = 0): Promise<void> {
-    const isAdmin = this.isAdmin(ctx.from!.id);
+    const userId = ctx.from!.id;
+    const isAdmin = this.isAdmin(userId);
+    
+    // Логирование для отладки
+    if (isAdmin) {
+      console.log(`[Admin menu] User ${userId} is admin, showing test payment option`);
+    } else {
+      console.log(`[User menu] User ${userId} is not admin, hiding test payment option`);
+    }
     
     const packages = [
       ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
