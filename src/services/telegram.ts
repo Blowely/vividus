@@ -1195,6 +1195,11 @@ export class TelegramService {
       }
       
       if (text === '🧪 Тестовая оплата') {
+        // Тестовая оплата доступна только админам
+        if (!this.isAdmin(ctx.from!.id)) {
+          await this.sendMessage(ctx, '❌ Тестовая оплата доступна только администраторам.');
+          return;
+        }
         await this.handleTestPayment(ctx);
         return;
       }
@@ -2586,6 +2591,13 @@ ${packageListText}
     try {
       await ctx.answerCbQuery();
       
+      // Проверка: тестовая оплата (1 рубль) доступна только админам
+      if (price === 1 && !this.isAdmin(ctx.from!.id)) {
+        console.log(`⚠️ Non-admin user ${ctx.from!.id} attempted to use test payment (1 RUB) in process flow`);
+        await this.sendMessage(ctx, '❌ Тестовая оплата доступна только администраторам.');
+        return;
+      }
+      
       const user = await this.userService.getOrCreateUser(ctx.from!);
       
       // Получаем сохраненное фото и промпт
@@ -2649,6 +2661,13 @@ ${packageListText}
   private async handlePurchaseGenerationsAndProcessCombine(ctx: Context, generationsCount: number, price: number) {
     try {
       await ctx.answerCbQuery();
+      
+      // Проверка: тестовая оплата (1 рубль) доступна только админам
+      if (price === 1 && !this.isAdmin(ctx.from!.id)) {
+        console.log(`⚠️ Non-admin user ${ctx.from!.id} attempted to use test payment (1 RUB) in combine flow`);
+        await this.sendMessage(ctx, '❌ Тестовая оплата доступна только администраторам.');
+        return;
+      }
       
       const user = await this.userService.getOrCreateUser(ctx.from!);
       
@@ -3283,7 +3302,9 @@ ${packageListText}
 Выберите способ оплаты:`;
         
         // Пакеты генераций (оригинальные цены)
+        const isAdmin = this.isAdmin(ctx.from!.id);
         const packages = [
+          ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
           { count: 1, originalPrice: 188 },
           { count: 3, originalPrice: 526 },
           { count: 5, originalPrice: 864 },
