@@ -559,8 +559,113 @@ export class PaymentService {
                 promptPreview: prompt?.substring(0, 30) || 'none'
               });
               
-              // Автообработка только если нет сохраненного фото (старый флоу)
-              if (!hasPendingPhoto && fileId && prompt) {
+              // Сначала проверяем combine_and_animate (не требует fileId/prompt)
+              let combineAndAnimateProcessed = false;
+              if (typeof (global as any).pendingCombineAndAnimatePurchases !== 'undefined') {
+                const combineData = (global as any).pendingCombineAndAnimatePurchases.get(paymentId);
+                if (combineData && combineData.telegramId === user.telegram_id) {
+                  console.log('🔄 Auto-processing combine and animate after generation purchase...');
+                  console.log('   Photos count:', combineData.photos?.length);
+                  console.log('   Animation prompt:', combineData.state?.animationPrompt);
+                  
+                  try {
+                    const { FileService } = await import('./file');
+                    const fileService = new FileService();
+                    
+                    // Загружаем все фото в S3
+                    const photoUrls: string[] = [];
+                    for (const fileId of combineData.photos) {
+                      const s3Url = await fileService.downloadTelegramFileToS3(fileId, true);
+                      photoUrls.push(s3Url);
+                    }
+                    
+                    // Формируем промпты
+                    const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
+                    
+                    let animationPrompt = combineData.state?.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
+                    
+                    // Переводим русский промпт на английский
+                    const translations: { [key: string]: string } = {
+                      'машет рукой': 'waving hand',
+                      'улыбается': 'smiling',
+                      'моргает': 'blinking',
+                      'дышит': 'breathing',
+                      'кивает': 'nodding',
+                      'качает головой': 'shaking head',
+                      'подмигивает': 'winking',
+                      'смеется': 'laughing',
+                      'плачет': 'crying',
+                      'злится': 'angry expression',
+                      'удивляется': 'surprised expression',
+                      'грустный': 'sad expression',
+                      'счастливый': 'happy expression',
+                      'танцует': 'dancing',
+                      'бегает': 'running',
+                      'идет': 'walking',
+                      'прыгает': 'jumping',
+                      'сидит': 'sitting',
+                      'стоит': 'standing',
+                      'лежит': 'lying down',
+                      'говорит': 'speaking',
+                      'поет': 'singing',
+                      'читает': 'reading',
+                      'пишет': 'writing',
+                      'рисует': 'drawing',
+                      'играет': 'playing',
+                      'работает': 'working',
+                      'спит': 'sleeping',
+                      'ест': 'eating',
+                      'пьет': 'drinking',
+                      'бежит': 'running'
+                    };
+                    
+                    let processedPrompt = animationPrompt.toLowerCase().trim();
+                    if (processedPrompt !== 'пропустить' && processedPrompt !== 'skip') {
+                      let translatedPrompt = translations[processedPrompt] || processedPrompt;
+                      translatedPrompt = translatedPrompt.replace(/^animate this image with\s*/i, '');
+                      animationPrompt = `animate this image with ${translatedPrompt}`;
+                    } else {
+                      animationPrompt = 'everyone in the photo is waving hand, subtle movements and breathing effect';
+                    }
+                    
+                    // Создаем заказ
+                    const { OrderService } = await import('./order');
+                    const { OrderStatus } = await import('../types');
+                    const orderService = new OrderService();
+                    // Сохраняем оригинальный промпт до перевода
+                    const originalAnimationPrompt = combineData.state?.animationPrompt || animationPrompt;
+                    const order = await orderService.createCombineAndAnimateOrder(
+                      userId,
+                      photoUrls,
+                      combinePrompt,
+                      animationPrompt,
+                      OrderStatus.PROCESSING,
+                      originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
+                    );
+                    
+                    // Запускаем обработку
+                    const { ProcessorService } = await import('./processor');
+                    const processorService = new ProcessorService();
+                    await processorService.processOrder(order.id);
+                    
+                    await this.bot.telegram.sendMessage(
+                      user.telegram_id,
+                      `🔀 Объединяю фото и готовлю видео...\n\n🎬 Начинаю обработку...\n\n⏳ Это займет до 5 минут.`
+                    );
+                    
+                    // Удаляем из глобального хранилища после успешной обработки
+                    (global as any).pendingCombineAndAnimatePurchases.delete(paymentId);
+                    console.log('✅ Removed combine_and_animate payment from global storage after successful processing');
+                    combineAndAnimateProcessed = true;
+                  } catch (error) {
+                    console.error('Error auto-processing combine and animate after payment:', error);
+                    // Не блокируем основной процесс при ошибке
+                  }
+                }
+              }
+              
+              // Автообработка обычного фото только если нет сохраненного фото и нет combine_and_animate (старый флоу)
+              if (!combineAndAnimateProcessed && !hasPendingPhoto && fileId && prompt) {
                 console.log('🔄 Auto-processing photo after generation purchase...');
                 console.log('   File ID:', fileId);
                 console.log('   Prompt:', prompt);
@@ -648,109 +753,6 @@ export class PaymentService {
                     if (typeof (global as any).pendingGenerationPurchases !== 'undefined') {
                       (global as any).pendingGenerationPurchases.delete(paymentId);
                       console.log('✅ Removed payment from global storage after successful processing');
-                    }
-                    
-                    // Проверяем, нужно ли автоматически обработать объединение и оживление
-                    if (typeof (global as any).pendingCombineAndAnimatePurchases !== 'undefined') {
-                      const combineData = (global as any).pendingCombineAndAnimatePurchases.get(paymentId);
-                      if (combineData && combineData.telegramId === user.telegram_id) {
-                        console.log('🔄 Auto-processing combine and animate after generation purchase...');
-                        console.log('   Photos count:', combineData.photos?.length);
-                        console.log('   Animation prompt:', combineData.state?.animationPrompt);
-                        
-                        try {
-                          const { FileService } = await import('./file');
-                          const fileService = new FileService();
-                          
-                          // Загружаем все фото в S3
-                          const photoUrls: string[] = [];
-                          for (const fileId of combineData.photos) {
-                            const s3Url = await fileService.downloadTelegramFileToS3(fileId, true);
-                            photoUrls.push(s3Url);
-                          }
-                          
-                          // Формируем промпты
-                          const combinePrompt = 'combine two reference images into one modern scene, drawing a new scene from scratch to create a cohesive common frame, merge the people from both images naturally into one composition';
-                          
-                          let animationPrompt = combineData.state?.animationPrompt || 'everyone in the photo is waving hand, subtle movements and breathing effect';
-                          
-                          // Переводим русский промпт на английский
-                          const translations: { [key: string]: string } = {
-                            'машет рукой': 'waving hand',
-                            'улыбается': 'smiling',
-                            'моргает': 'blinking',
-                            'дышит': 'breathing',
-                            'кивает': 'nodding',
-                            'качает головой': 'shaking head',
-                            'подмигивает': 'winking',
-                            'смеется': 'laughing',
-                            'плачет': 'crying',
-                            'злится': 'angry expression',
-                            'удивляется': 'surprised expression',
-                            'грустный': 'sad expression',
-                            'счастливый': 'happy expression',
-                            'танцует': 'dancing',
-                            'бегает': 'running',
-                            'идет': 'walking',
-                            'прыгает': 'jumping',
-                            'сидит': 'sitting',
-                            'стоит': 'standing',
-                            'лежит': 'lying down',
-                            'говорит': 'speaking',
-                            'поет': 'singing',
-                            'читает': 'reading',
-                            'пишет': 'writing',
-                            'рисует': 'drawing',
-                            'играет': 'playing',
-                            'работает': 'working',
-                            'спит': 'sleeping',
-                            'ест': 'eating',
-                            'пьет': 'drinking',
-                            'бежит': 'running'
-                          };
-                          
-                          let processedPrompt = animationPrompt.toLowerCase().trim();
-                          if (processedPrompt !== 'пропустить' && processedPrompt !== 'skip') {
-                            let translatedPrompt = translations[processedPrompt] || processedPrompt;
-                            translatedPrompt = translatedPrompt.replace(/^animate this image with\s*/i, '');
-                            animationPrompt = `animate this image with ${translatedPrompt}`;
-                          } else {
-                            animationPrompt = 'everyone in the photo is waving hand, subtle movements and breathing effect';
-                          }
-                          
-                          // Создаем заказ
-                          const { OrderService } = await import('./order');
-                          const { OrderStatus } = await import('../types');
-                          const orderService = new OrderService();
-                          // Сохраняем оригинальный промпт до перевода
-                          const originalAnimationPrompt = combineData.state?.animationPrompt || animationPrompt;
-                          const order = await orderService.createCombineAndAnimateOrder(
-                            userId,
-                            photoUrls,
-                            combinePrompt,
-                            animationPrompt,
-                            OrderStatus.PROCESSING,
-                            originalAnimationPrompt // Передаем оригинальный промпт для сохранения в custom_prompt
-                          );
-                          
-                          // Запускаем обработку
-                          const { ProcessorService } = await import('./processor');
-                          const processorService = new ProcessorService();
-                          await processorService.processOrder(order.id);
-                          
-                          await this.bot.telegram.sendMessage(
-                            user.telegram_id,
-                            `🔀 Объединяю фото и готовлю видео...\n\n🎬 Начинаю обработку...\n\n⏳ Это займет до 5 минут.`
-                          );
-                          
-                          // Удаляем из глобального хранилища после успешной обработки
-                          (global as any).pendingCombineAndAnimatePurchases.delete(paymentId);
-                          console.log('✅ Removed combine_and_animate payment from global storage after successful processing');
-                        } catch (error) {
-                          console.error('Error auto-processing combine and animate after payment:', error);
-                          // Не блокируем основной процесс при ошибке
-                        }
-                      }
                     }
                     
                     // Также удаляем из TelegramService pendingPromptsData
