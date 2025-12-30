@@ -3472,14 +3472,20 @@ ${packageListText}
         console.log('✅ Telegram bot started and ready to receive messages');
       } catch (launchError: any) {
         // Если запуск не удался из-за проблем с сетью - продолжаем работу
+        // errno может быть как строкой, так и числом (например, -104 для ETIMEDOUT)
         const isNetworkError = 
           launchError.code === 'ETIMEDOUT' ||
           launchError.errno === 'ETIMEDOUT' ||
+          launchError.errno === -104 || // ETIMEDOUT как число
           launchError.type === 'system' ||
-          launchError.message?.includes('timeout') ||
-          launchError.message?.includes('ETIMEDOUT') ||
-          launchError.message?.includes('ECONNREFUSED') ||
-          launchError.message?.includes('api.telegram.org');
+          (typeof launchError.message === 'string' && (
+            launchError.message.includes('timeout') ||
+            launchError.message.includes('ETIMEDOUT') ||
+            launchError.message.includes('ECONNREFUSED') ||
+            launchError.message.includes('ECONNRESET') ||
+            launchError.message.includes('api.telegram.org') ||
+            launchError.message.includes('connect ETIMEDOUT')
+          ));
         
         if (isNetworkError) {
           console.warn('⚠️ Bot launch failed due to network issue (ETIMEDOUT)');
@@ -3496,14 +3502,20 @@ ${packageListText}
       }
     } catch (error: any) {
       // Проверяем, является ли это сетевой ошибкой
+      // errno может быть как строкой, так и числом (например, -104 для ETIMEDOUT)
       const isNetworkError = 
         error.code === 'ETIMEDOUT' ||
         error.errno === 'ETIMEDOUT' ||
+        error.errno === -104 || // ETIMEDOUT как число
         error.type === 'system' ||
-        error.message?.includes('timeout') ||
-        error.message?.includes('ETIMEDOUT') ||
-        error.message?.includes('ECONNREFUSED') ||
-        error.message?.includes('api.telegram.org');
+        (typeof error.message === 'string' && (
+          error.message.includes('timeout') ||
+          error.message.includes('ETIMEDOUT') ||
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('ECONNRESET') ||
+          error.message.includes('api.telegram.org') ||
+          error.message.includes('connect ETIMEDOUT')
+        ));
       
       if (isNetworkError) {
         console.warn('⚠️ Bot start failed due to network issue (ETIMEDOUT)');
