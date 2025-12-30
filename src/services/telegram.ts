@@ -29,7 +29,34 @@ export class TelegramService {
   private pendingPaymentPhotos: Map<number, { fileId: string; mode: 'animate_v2' | 'regular' }> = new Map(); // userId -> {fileId, mode} для продолжения после оплаты
 
   constructor() {
-    this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
+    // Настройка прокси для Telegram API (если указан)
+    const telegrafOptions: any = {};
+    
+    if (process.env.TELEGRAM_PROXY) {
+      try {
+        // Поддержка SOCKS5 прокси
+        if (process.env.TELEGRAM_PROXY.startsWith('socks5://')) {
+          const { SocksProxyAgent } = require('socks-proxy-agent');
+          telegrafOptions.telegram = {
+            agent: new SocksProxyAgent(process.env.TELEGRAM_PROXY)
+          };
+          console.log('✅ Using SOCKS5 proxy for Telegram API:', process.env.TELEGRAM_PROXY.replace(/\/\/.*@/, '//***@'));
+        }
+        // Поддержка HTTP/HTTPS прокси
+        else if (process.env.TELEGRAM_PROXY.startsWith('http://') || process.env.TELEGRAM_PROXY.startsWith('https://')) {
+          const { HttpsProxyAgent } = require('https-proxy-agent');
+          telegrafOptions.telegram = {
+            agent: new HttpsProxyAgent(process.env.TELEGRAM_PROXY)
+          };
+          console.log('✅ Using HTTP proxy for Telegram API:', process.env.TELEGRAM_PROXY.replace(/\/\/.*@/, '//***@'));
+        }
+      } catch (error: any) {
+        console.warn('⚠️ Failed to setup proxy, continuing without proxy:', error.message);
+        console.warn('⚠️ Install required packages: npm install socks-proxy-agent https-proxy-agent');
+      }
+    }
+    
+    this.bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!, telegrafOptions);
     this.userService = new UserService();
     this.orderService = new OrderService();
     this.paymentService = new PaymentService();
