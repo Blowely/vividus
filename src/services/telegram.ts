@@ -3314,8 +3314,10 @@ ${packageListText}
 
   // Показать меню покупки генераций
   private async showBuyGenerationsMenu(ctx: Context, currentGenerations: number = 0): Promise<void> {
+    const isAdmin = this.isAdmin(ctx.from!.id);
+    
     const packages = [
-      { count: 1, originalPrice: 1, isTest: true }, // Тестовая опция
+      ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
       { count: 1, originalPrice: 129 },
       { count: 3, originalPrice: 387 },
       { count: 5, originalPrice: 645 },
