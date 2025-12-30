@@ -3461,8 +3461,26 @@ ${packageListText}
       
       // Запускаем бота (по умолчанию используется polling режим)
       console.log('🔄 Launching Telegram bot (polling mode)...');
-      await this.bot.launch();
-      console.log('✅ Telegram bot started and ready to receive messages');
+      try {
+        // Пытаемся запустить бота с таймаутом
+        await Promise.race([
+          this.bot.launch(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('bot.launch() timeout after 30s')), 30000)
+          )
+        ]);
+        console.log('✅ Telegram bot started and ready to receive messages');
+      } catch (launchError: any) {
+        // Если запуск не удался, но это проблема сети - продолжаем
+        if (launchError.message?.includes('timeout') || launchError.code === 'ETIMEDOUT') {
+          console.warn('⚠️ Bot launch timeout (network issue), but bot handlers are registered');
+          console.warn('⚠️ Bot will try to connect when network is available');
+          // Не пробрасываем ошибку, чтобы приложение продолжало работать
+          // Бот попытается подключиться при следующем запросе
+        } else {
+          throw launchError;
+        }
+      }
     } catch (error: any) {
       console.error('❌ Failed to start bot:', error);
       console.error('Error details:', {
