@@ -1005,9 +1005,9 @@ export class TelegramService {
         // Пакеты генераций (оригинальные цены)
         const packages = [
           { count: 1, originalPrice: 188 },
-          { count: 3, originalPrice: 526 },
-          { count: 5, originalPrice: 864 },
-          { count: 10, originalPrice: 1708 }
+          { count: 3, originalPrice: 564 },
+          { count: 5, originalPrice: 940 },
+          { count: 10, originalPrice: 1880 }
         ];
         
         // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
@@ -1340,9 +1340,9 @@ export class TelegramService {
         // Пакеты генераций (финальные цены)
         const packages = [
           { count: 1, originalPrice: 188 },
-          { count: 3, originalPrice: 526 },
-          { count: 5, originalPrice: 864 },
-          { count: 10, originalPrice: 1708 }
+          { count: 3, originalPrice: 564 },
+          { count: 5, originalPrice: 940 },
+          { count: 10, originalPrice: 1880 }
         ];
         
         // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
@@ -2387,12 +2387,13 @@ export class TelegramService {
       const packages = [
         ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
         { count: 1, originalPrice: 188 },
-        { count: 3, originalPrice: 526 },
-        { count: 5, originalPrice: 864 },
-        { count: 10, originalPrice: 1708 }
+        { count: 3, originalPrice: 564 },
+        { count: 5, originalPrice: 940 },
+        { count: 10, originalPrice: 1880 }
       ];
       
       // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
+      // Финальные цены: 99₽, 297₽, 495₽, 990₽
       const discountCoefficient = 99 / 188;
       
       // Формируем список пакетов с зачеркиванием и скидкой в тексте сообщения
@@ -2420,7 +2421,7 @@ ${packageListText}
 Выберите пакет 👇`;
       
       const keyboard = packages.map(pkg => {
-        // Используем цену со скидкой как финальную цену (оригинальная * 69/129)
+        // Используем цену со скидкой как финальную цену (оригинальная * 99/188)
         // В кнопках форматирование недоступно, но можно визуально выделить цену
         const actualPrice = (pkg as any).isTest 
           ? pkg.originalPrice 
@@ -3304,11 +3305,11 @@ ${packageListText}
         // Пакеты генераций (оригинальные цены)
         const isAdmin = this.isAdmin(ctx.from!.id);
         const packages = [
-          ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
+        ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
           { count: 1, originalPrice: 188 },
-          { count: 3, originalPrice: 526 },
-          { count: 5, originalPrice: 864 },
-          { count: 10, originalPrice: 1708 }
+        { count: 3, originalPrice: 564 },
+        { count: 5, originalPrice: 940 },
+        { count: 10, originalPrice: 1880 }
         ];
         
         // Коэффициент скидки: 99/188 ≈ 0.5266 (скидка ~47.34%)
@@ -3369,14 +3370,14 @@ ${packageListText}
     
     const packages = [
       ...(isAdmin ? [{ count: 1, originalPrice: 1, isTest: true }] : []), // Тестовая опция только для админов
-      { count: 1, originalPrice: 129 },
-      { count: 3, originalPrice: 387 },
-      { count: 5, originalPrice: 645 },
-      { count: 10, originalPrice: 1290 }
+      { count: 1, originalPrice: 188 },
+      { count: 3, originalPrice: 564 },
+      { count: 5, originalPrice: 940 },
+      { count: 10, originalPrice: 1880 }
     ];
     
     const discountPercent = 47;
-    const discountCoefficient = 69 / 129;
+    const discountCoefficient = 99 / 188; // Финальная цена: 99₽ за 1 оживление
     
     let packageListText = '';
     packages.forEach(pkg => {
@@ -3525,9 +3526,9 @@ ${packageListText}
       try {
         await Promise.race([
           this.bot.telegram.setMyCommands([
-            { command: 'start', description: '🚀 Начать работу с ботом' },
-            { command: 'help', description: '❓ Помощь и инструкции' },
-            { command: 'orders', description: '📋 Мои заказы' }
+        { command: 'start', description: '🚀 Начать работу с ботом' },
+        { command: 'help', description: '❓ Помощь и инструкции' },
+        { command: 'orders', description: '📋 Мои заказы' }
           ]),
           new Promise((_, reject) => 
             setTimeout(() => reject(new Error('setMyCommands timeout after 10s')), 10000)
