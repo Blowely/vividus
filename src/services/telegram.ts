@@ -295,6 +295,11 @@ export class TelegramService {
     const isAdminUser = this.isAdmin(ctx.from!.id);
     console.log(`User ${ctx.from?.id} (${ctx.from?.username || 'no username'}) is admin: ${isAdminUser}`);
     
+    // Активируем режим "Оживить фото" по умолчанию
+    const userId = ctx.from!.id;
+    this.animateV2State.set(userId, { waitingForPhoto: true, waitingForPrompt: false });
+    console.log(`✅ Режим "Оживить фото" активирован по умолчанию для пользователя ${userId}`);
+    
     await this.showMainMenu(ctx);
   }
 
